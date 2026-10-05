@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Concierge from './Concierge.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
@@ -38,6 +39,7 @@ const QUEUE = {
 };
 
 beforeEach(() => {
+  signInTestReader();
   vi.clearAllMocks();
   (fetchConciergeQueue as any).mockResolvedValue(QUEUE);
   (watchWork as any).mockResolvedValue({ work_id: 'work-1', pending: false, notified: true });
@@ -45,6 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTestSession();
   vi.restoreAllMocks();
 });
 

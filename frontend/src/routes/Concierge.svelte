@@ -28,8 +28,10 @@
     type ConciergeReason,
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   /**
@@ -200,8 +202,12 @@
     }
   }
 
+  // §54's queue is the reader's own, and the door is `RequireSession`. A signed-out
+  // visitor used to get "That did not work / authentication required" from a page
+  // that never asked them to do anything; the selector below is worse still, since
+  // it invites someone to choose a mood and a budget for a queue they cannot have.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 </script>
 
@@ -214,6 +220,7 @@
     </p>
   </header>
 
+  <SignInGate purpose="get a reading queue built from what you enjoy" skeletonLines={5}>
   <div class="selector">
     <fieldset class="mood">
       <legend>What kind of sitting?</legend>
@@ -365,6 +372,7 @@
     </ul>
 
   {/if}
+  </SignInGate>
 </section>
 
 <style>

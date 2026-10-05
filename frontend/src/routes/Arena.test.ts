@@ -2,6 +2,8 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Arena from './Arena.svelte';
+import { signOutTestReader } from '../lib/testing/session';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
@@ -68,6 +70,7 @@ const WEIGHTS = {
 };
 
 beforeEach(() => {
+  signInTestReader();
   vi.clearAllMocks();
   (fetchArenaNext as any).mockResolvedValue({
     round: ROUND,
@@ -85,6 +88,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTestSession();
   vi.restoreAllMocks();
 });
 
@@ -179,5 +183,38 @@ describe('Taste Calibration Arena', () => {
     await screen.getByText('Skip arena for now').click();
     await waitFor(() => expect(dismissArena).toHaveBeenCalled());
     expect(screen.getByText(/Arena dismissed/)).toBeInTheDocument();
+  });
+
+  // The defect: `GET /api/v1/arena/next` answered 500 to every new account
+  // (`Internal("not enough works for arena round")`), so the page opened with a red
+  // "That did not work" — on a blank archive AND on a fully seeded one. It is now a
+  // 200 with `round: null` and the server's own sentence.
+
+  it('explains an empty round in the server\'s words, without an error panel', async () => {
+    (fetchArenaNext as any).mockResolvedValue({
+      round: null,
+      explained_empty:
+        'Not enough comparable works yet — an arena round needs four published works that share a fandom.',
+      dimensions: [],
+    });
+
+    render(Arena);
+
+    const note = await screen.findByTestId('arena-no-round');
+    expect(note.textContent).toContain('share a fandom');
+    expect(screen.queryByText('That did not work')).toBeNull();
+    // No cards, because there is no round — the page says so rather than
+    // rendering an empty grid that looks like a broken one.
+    expect(screen.queryByText('Alpha')).toBeNull();
+  });
+
+  it('offers a sign-in note to a signed-out visitor', async () => {
+    signOutTestReader();
+
+    render(Arena);
+
+    await waitFor(() => expect(screen.getByTestId('signin-note')).toBeInTheDocument());
+    expect(screen.queryByText('That did not work')).toBeNull();
+    expect(fetchArenaNext).not.toHaveBeenCalled();
   });
 });

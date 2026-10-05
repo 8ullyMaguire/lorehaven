@@ -5220,3 +5220,110 @@ fn registered_routes_are_tabled() {
         panic!("Route table disagreements:\n{}", failures.join("\n"));
     }
 }
+
+/// The REVERSE direction: every router builder a route module declares must be
+/// merged into the API router in `server.rs`.
+///
+/// `registered_routes_are_tabled` walks the other way — table ↔ code — and a
+/// table row is satisfied by the module that declares the route, never by
+/// `server.rs`. So a module whose `router()` was never merged keeps every one of
+/// its table rows green, its unit tests green, and answers 404 for every door it
+/// declares. That is exactly what `author_media` did: `1439bac` (M47) *replaced*
+/// `routes::author_media::router()` with `routes::mirror_admin::router()` instead
+/// of adding a second `.merge(...)`, and the five `/author/media-*` and
+/// `/author/targeted-bounties` endpoints have answered 404 since — while the
+/// inventory test passed on every commit in between.
+///
+/// The check is a grep-equivalent over the two files, so it needs no new
+/// dependency and no parsing of `server.rs`. It is deliberately blunt: any
+/// `pub fn <name>*router(` in `src/routes/*.rs` must appear as
+/// `routes::<module>::<name>` somewhere in `src/server.rs`.
+///
+/// Blunt is right here because the alternative failure is silence. A router that
+/// is merged by a *helper* rather than spelled inline would be reported here as
+/// unmerged, and the fix is to spell it — which is what every router in this tree
+/// already does, so the check has no false negatives to accommodate.
+#[test]
+fn every_declared_router_is_merged_into_server_rs() {
+    let routes_dir = Path::new("src/routes");
+    let server = fs::read_to_string("src/server.rs").expect("cannot read src/server.rs");
+    let mut failures: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+
+    let entries = fs::read_dir(routes_dir).expect("cannot read routes directory");
+    for entry in entries {
+        let entry = entry.expect("read_dir entry");
+        let path = entry.path();
+        if !path.is_file() || !path.extension().is_some_and(|e| e == "rs") {
+            continue;
+        }
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        if file_name == "lib.rs" || file_name == "mod.rs" {
+            continue;
+        }
+        let module = path.file_stem().unwrap().to_string_lossy().to_string();
+        let src = fs::read_to_string(&path).expect("read route module");
+
+        // `pub fn NAME(` on a line that also mentions `Router<` — a router
+        // builder, as opposed to a helper that happens to be named `routerize`.
+        // The return type is read from the whole signature rather than the
+        // declaration line, because rustfmt wraps
+        // `pub fn router() -> axum::Router<AppState> {` differently from
+        // `pub fn router() -> Router<AppState> {` only in length, but a builder
+        // whose return type wrapped onto the next line is still a builder.
+        let mut declared: Vec<String> = Vec::new();
+        let lines: Vec<&str> = src.lines().collect();
+        for (n, line) in lines.iter().enumerate() {
+            let t = line.trim();
+            let Some(rest) = t.strip_prefix("pub fn ") else {
+                continue;
+            };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if name.is_empty() || !name.contains("router") {
+                continue;
+            }
+            // The signature runs to the `{` that opens the body, or to the end of
+            // the declaration line if the body is on the same line.
+            let mut sig = String::new();
+            for m in n..(n + 4).min(lines.len()) {
+                sig.push_str(lines[m]);
+                sig.push('\n');
+                if lines[m].contains('{') || lines[m].contains(';') {
+                    break;
+                }
+            }
+            if !sig.contains("Router<") {
+                continue;
+            }
+            // A builder named `router` in a module that ALSO has a private
+            // `fn routes()` is registered under whichever name `server.rs`
+            // calls — so check every declared name, not only the first.
+            if !declared.contains(&name) {
+                declared.push(name);
+            }
+        }
+
+        for name in &declared {
+            checked += 1;
+            let needle = format!("routes::{module}::{name}");
+            if !server.contains(&needle) {
+                failures.push(format!(
+                    "{file_name} declares `{name}()` but `{needle}` is never merged in \
+                     src/server.rs — every route in it answers 404"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        checked >= 40,
+        "only {checked} router builders were examined, so this test is measuring nothing \
+         (it found far fewer than src/routes/ declares)"
+    );
+    if !failures.is_empty() {
+        panic!("Unmerged routers:\n{}", failures.join("\n"));
+    }
+}

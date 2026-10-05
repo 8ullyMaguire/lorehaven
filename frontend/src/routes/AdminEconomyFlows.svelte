@@ -27,7 +27,9 @@
     type EconomyFlows,
     type FlowMechanism,
   } from '../lib/api';
+  import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let flows = $state<EconomyFlows | null>(null);
@@ -58,8 +60,14 @@
     }
   }
 
+  // This route is linked from NOWHERE in the shell (0 `href` matches in
+  // frontend/src) — `App.svelte:501-505` deliberately refuses to link the operator
+  // queue. So only a typed URL reaches it, and a typed URL is exactly the case
+  // where the answer matters: 404 for a non-operator (the existence is the
+  // disclosure), and a sign-in note rather than a failure for a signed-out
+  // visitor. Same rule as the other eight doors in the 2026-10-05 sweep.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 
   const declared = $derived(
@@ -93,6 +101,7 @@
        announced to a screen reader as though its title had been lost. -->
   <h1 id="flows-heading">Faucets and sinks</h1>
 
+  <SignInGate purpose="see this instance's faucet and sink totals" skeletonLines={4}>
   {#if loading}
     <Skeleton lines={4} label="Loading the economy" />
   {:else if notFound}
@@ -200,6 +209,7 @@
       </table>
     {/if}
   {/if}
+  </SignInGate>
 </section>
 
 <style>

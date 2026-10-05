@@ -404,6 +404,11 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
+            routes::author_media::router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(classified(
             routes::media_health::router(),
             RouteClass::Default,
             &state,

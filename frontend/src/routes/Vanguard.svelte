@@ -9,8 +9,10 @@
     type Pin,
     type VanguardStatus,
   } from '../lib/api';
-      import Button from '../lib/components/Button.svelte';
+  import { session } from '../lib/session.svelte.ts';
+  import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let status = $state<VanguardStatus | null>(null);
@@ -23,31 +25,70 @@
   } | null>(null);
   let loading = $state(true);
   let error = $state<unknown>(null);
+  /**
+   * Set when the operator-only roster refused us.
+   *
+   * Its own flag rather than a string, because the distinction it records is not
+   * "did it fail" — a 403 there is the expected answer for a normal reader, and
+   * rendering it as an error is the defect this page had.
+   */
+  let vanguardsRefused = $state(false);
   let pinning = $state<string | null>(null);
   let showPinForm = $state(false);
   let pinReason = $state('');
   let pinMessage = $state('');
   let selectedWorkId = $state('');
 
+  /**
+   * Why this is `Promise.allSettled` and not `Promise.all`.
+   *
+   * Four independent panels shared one `Promise.all` and one `error` slot. One of
+   * the four — `listVanguards()` → `GET /api/v1/vanguards` — is
+   * `require_operator`, so it answers **403 to every account that is not the
+   * operator**, and the whole page rendered "That did not work / access denied"
+   * while the reader's own status, pins and streak were thrown away with it. The
+   * "Current vanguards" section is a public roster the operator maintains; it is
+   * simply not available to a normal reader, and its absence is not a failure of
+   * anything on this page.
+   *
+   * `allSettled` keeps the four outcomes separate: each panel lands or does not,
+   * and only a panel that actually failed sets an error. `vanguardsRefused` is
+   * checked first so a 403 there is recognised as the roster being operator-only
+   * rather than as a fault.
+   */
   async function load() {
     loading = true;
     error = null;
-    try {
-      const [statusResult, vanguardsResult, pinsResult, streakResult] = await Promise.all([
-        fetchVanguardStatus(),
-        fetchVanguards(),
-        fetchPinsForWork('all'),
-        fetchMyStreak(),
-      ]);
-      status = statusResult;
-      vanguards = vanguardsResult.vanguards ?? [];
-      pins = pinsResult.pins ?? [];
-      streak = streakResult;
-    } catch (failure) {
-      error = failure;
-    } finally {
-      loading = false;
+    vanguardsRefused = false;
+    const [statusResult, vanguardsResult, pinsResult, streakResult] = await Promise.allSettled([
+      fetchVanguardStatus(),
+      fetchVanguards(),
+      fetchPinsForWork('all'),
+      fetchMyStreak(),
+    ]);
+
+    if (statusResult.status === 'fulfilled') status = statusResult.value;
+    if (pinsResult.status === 'fulfilled') pins = pinsResult.value.pins ?? [];
+    if (streakResult.status === 'fulfilled') streak = streakResult.value;
+
+    if (vanguardsResult.status === 'fulfilled') {
+      vanguards = vanguardsResult.value.vanguards ?? [];
+    } else {
+      // Operator-only. The section renders as absent, which is the truth.
+      vanguardsRefused = isForbidden(vanguardsResult.reason);
+      if (!vanguardsRefused) error = vanguardsResult.reason;
     }
+
+    // The reader's own three panels: a failure in any of them IS this page's
+    // failure, and it is reported rather than silently dropped.
+    for (const outcome of [statusResult, pinsResult, streakResult]) {
+      if (outcome.status === 'rejected') {
+        error = outcome.reason;
+        break;
+      }
+    }
+
+    loading = false;
   }
 
   async function handlePin() {
@@ -82,8 +123,26 @@
     }
   }
 
+  /**
+   * A 403 or 404 from a door that exists but is not for this reader.
+   *
+   * Both codes mean "not for you" on this page: `listVanguards` answers 403 (it
+   * is a trust-gated list), and a 404 is what a renamed door would answer. Neither
+   * is something the reader did wrong or can fix, which is what separates it from
+   * an error worth the red panel.
+   */
+  function isForbidden(failure: unknown): boolean {
+    if (typeof failure !== 'object' || failure === null || !('status' in failure)) {
+      return false;
+    }
+    const status = (failure as { status?: number }).status;
+    return status === 403 || status === 404;
+  }
+
+  // Signed out, the roster, the pins and the streak are all this reader's own or
+  // operator-only, so the page is a sign-in note rather than a 401 panel.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 </script>
 
@@ -96,6 +155,7 @@
     </p>
   </header>
 
+  <SignInGate purpose="see your vanguard status, pins and streak" skeletonLines={6}>
   {#if error}
     <ErrorSummary {error} onretry={load} />
   {/if}
@@ -178,6 +238,11 @@
       </div>
     {/if}
 
+    <!--
+      Absent for a reader who is not the operator, with no apology for it: the
+      roster is curated by the operator and this account is not shown it. The
+      page above has already said whether the reader is a Vanguard.
+    -->
     {#if vanguards.length > 0}
       <div class="vanguard-list">
         <h2>Current vanguards</h2>
@@ -189,6 +254,7 @@
       </div>
     {/if}
   {/if}
+  </SignInGate>
 </section>
 
 <style>

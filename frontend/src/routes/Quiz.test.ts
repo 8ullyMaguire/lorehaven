@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Quiz from './Quiz.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
@@ -23,6 +24,7 @@ const WORKS = {
 };
 
 beforeEach(() => {
+  signInTestReader();
   vi.clearAllMocks();
   (fetchQuizWorks as any).mockResolvedValue(WORKS);
   (saveQuizAnswers as any).mockResolvedValue({ status: 'ok', vector_dimensions: 128 });
@@ -30,6 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTestSession();
   vi.restoreAllMocks();
 });
 
