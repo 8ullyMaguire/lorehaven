@@ -1,8 +1,34 @@
-# What is left — the 100 ideas, measured 2026-10-04
+# What is left — the 100 ideas, re-probed 2026-10-05
 
-**This file supersedes the build list in `docs/plans/100-ideas-scope.md` §3.** That
-section lists seven items as "building now", and four of the seven are wrong about
-what exists. Read the probe table below before scheduling anything from that plan.
+**THE CANONICAL INVENTORY IS `docs/requirements.csv`** — 703 rows, one per requirement, with
+a status and an evidence field. It is the thing ADR 0023 names as the feature inventory and
+this file is commentary on it. Anything below that disagrees with the CSV is wrong.
+
+**This file supersedes `docs/plans/100-ideas-scope.md` §3** and **supersedes
+`docs/plans/REMAINING-2026-10-03.md`** and `docs/plans/WHAT-IS-LEFT.md`, which already
+superseded each other in a chain. Three files were claiming to be the live plan; that was
+itself the defect, and it is why this one existed in a stale state for three commits after
+its last edit.
+
+## The probe rule, which is the whole lesson of this file
+
+**A status document rots faster than the code it describes, because nobody re-derives it.**
+Five times on this project the tracker said something was unbuilt while it was shipped and
+mounted: Concierge (11 component tests, no route), item 9 (the backend existed, the frontend
+called nothing), item 11 (three routes, zero frontend references), and items 1 and 4. Two of
+those were *this file's* fault, and both times the reason was the same:
+
+> `grep -rl <term> frontend/src` answers "does this string exist", which is not the same
+> question as "is this mounted".
+
+The probe that answers the second question looks for the **consumer** of the data, not the
+producer: grep the component inside a route file, not the type inside `api.ts`. And a row whose
+`evidence` cites plan documents is the tell — a plan file cannot prove a thing renders. Every
+evidence field I have written since cites **file paths in `frontend/src`**.
+
+Item 1 is the case that makes the rule precise. It has **no page route and never should** —
+it is a banner on the homepage. A route-shaped check reports it as broken; it is correct. So
+"no route" is only a defect for a surface meant to be a destination.
 
 Every row was measured against the tree with `grep -rl` over
 `frontend/src crates/app/src crates/db/src`, and every "store only" claim was then
@@ -13,16 +39,40 @@ about a term; the *wired/unwired* column is the finding.
 
 | state | count | what it means |
 |---|---|---|
-| shipped and wired | 3 | items 14, 27, 33 — `d81444c` |
-| shipped, **no UI** | 1 | **item 11 (DNF)** — 3 routes, store, 8 acceptance tests, zero frontend references |
-| built, **never rendered** | 3 | items 1, 4, 9 — data exists, nothing displays it |
-| specified, not built | 0 | — |
-| just shipped | 1 | item 7 (Surprise Me) — store, route, UI; 2 bugs only the Playwright journey found |
+| **shipped AND wired** | **8** | items 1, 4, 7, 9, 11, 14, 27, 33 |
 | built by an earlier pass | 2 | items 8, 22 — the probe was wrong, not the code |
-| open, Tier 1 remainder | 5 | items 31, 41, 43, 75, 22-preset |
-| next in queue | — | the Tier 1 remainder |
+| **open, Tier 1 remainder** | **5** | items 31, 41, 43, 75, 22-preset |
+| next in queue | — | item 31 |
 | deliberately refused | 3 | item 2 (archive scrape), the streak trio — argued in `100-ideas-scope.md` §1 |
 | not yet assessed | ~72 | see "what I did not touch" at the foot |
+
+**The "no UI" and "never rendered" rows are gone because those items are now rendered.**
+Every row above was re-probed against the tree on 2026-10-05 rather than carried forward —
+this table had been stale for three commits and was claiming items 1, 4, 9 and 11 were
+unfinished when all four were shipped and mounted. That is the third time on this project that
+a status document outlived the thing it described:
+
+| item | where it actually renders | commit |
+|---|---|---|
+| 1 Continue Reading | `ContinueReadingBanner` mounted in `Home.svelte`; no page route needed, it is an enhancement to the homepage rather than a destination of its own | `7537035`, `f124a67` |
+| 4 reading time | `word_count` on every card | `2868b25`, `f124a67` |
+| 9 Why this? | `WhyRecommended` mounted in `Discover.svelte`, reading `slot_id` off every feed item | `1f5ce1a`, `5759616` |
+| 11 DNF | `DnfPanel` mounted; API routes under `routes/dnf.rs` | `2901bc0` |
+| 7 Surprise Me | `SurpriseMe.svelte` at `/surprise-me`, in the Read menu | `5759616` |
+
+**The lesson, because it has now cost three commits.** "Implemented" and "reachable" came
+apart on items 7, 9 and 11 — Concierge was the fourth. A probe with `grep -rl` answers
+"does the string exist" and cannot answer "is it mounted". The check that answers the second
+question is to look for the *consumer* of the data, not the producer: `grep` the component
+inside a route file, not the type inside `api.ts`. Item 1 is the case that makes this precise —
+it has no page route and never should, because it is a banner on the homepage, so "no route"
+is the correct answer and a route-shaped check would report it as broken.
+
+`5759616` also landed item 9's missing `api.ts` half: `1f5ce1a` committed
+`WhyRecommended.svelte` but not the `fetchSlotExplanation` it imports, so the frontend build
+was failing at HEAD with *"fetchSlotExplanation is not exported"*. A commit that leaves the
+tree unbuildable is worse than one that leaves a feature half-done, because the next thing that
+touches the frontend trips over it.
 
 ## 1. The four corrections to `100-ideas-scope.md` §3
 
@@ -308,6 +358,18 @@ A journey that depends on its position in the file is worse than no journey. Wha
 what is actually the frontend's claim: the two empty states are worded differently, the served
 card links to the work it names, the nav entry exists, and a failure is visible rather than
 converted into a quiet empty state.
+
+**A PostgreSQL run aborted on 6 failures that were not failures.** All six were in
+`milestone_39`, all six had the same cause — `could not resize shared memory segment
+"/PostgreSQL.…": No space left on device` while applying migration 0026 — and all six passed
+on a re-run. `/dev/shm` had 15G free by the time I looked, because the exhaustion was
+transient: two threads replaying the full migration catalogue at once allocate parallel-query
+shared memory faster than the kernel releases it.
+
+So the suite **needs `--test-threads=1` on PostgreSQL, not 2**, and needs `--no-fail-fast` or
+one shm hiccup hides the other 100 suites behind an abort. Both were already known for SQLite;
+the same arithmetic applies to PG and the `--test-threads=2` advice in this file is wrong for
+a full-workspace run.
 
 ### Earlier — item 7, Surprise Me
 

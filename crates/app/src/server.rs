@@ -552,6 +552,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // M45-51. Reader-scoped: both routes read the session and take no path
+        // parameter, so there is no operator variant to mount (see the module docs).
+        .merge(classified(
+            routes::erasure::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The operator's trigger for the settlement pass. The pass itself is
         // also a scheduled job, and both call the same function, so the button
         // and the overnight run are provably the same thing.
