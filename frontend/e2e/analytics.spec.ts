@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { signOutThroughHeader } from './support/session';
 
 /**
  * The analytics page, in a real browser against the real binary.
@@ -88,10 +89,15 @@ async function csrfToken(page: Page): Promise<string> {
   });
 }
 
+/**
+ * Sign out through the header's account menu.
+ *
+ * Delegates to the shared helper rather than repeating the open-menu-click sequence,
+ * which is what 22 call sites across this suite used to do inline against a button
+ * that no longer sits in the row. See `e2e/support/session.ts` for why.
+ */
 async function signOut(page: Page): Promise<void> {
-  await page.goto('/account');
-  await page.click('button:text-is("Sign out")');
-  await expect(page.locator('a:text-is("Register")')).toBeVisible();
+  await signOutThroughHeader(page);
 }
 
 /** The four §9.6 fields, read as text so the assertion is about the render. */

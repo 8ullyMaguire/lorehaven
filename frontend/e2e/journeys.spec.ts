@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { expectSignedIn, signOutThroughHeader } from './support/session';
 
 /**
  * The common user journeys, end to end, in a real browser against the real
@@ -47,13 +48,18 @@ async function signIn(page: Page, who: typeof author): Promise<void> {
   await page.fill('#sign-in-email', who.email);
   await page.fill('#sign-in-password', who.password);
   await page.click('button[type=submit]');
-  await expect(page.locator('button:text-is("Sign out")')).toBeVisible();
+  await expectSignedIn(page);
 }
 
+/**
+ * Sign out through the header's account menu.
+ *
+ * Delegates to the shared helper rather than repeating the open-menu-click sequence,
+ * which is what 22 call sites across this suite used to do inline against a button
+ * that no longer sits in the row. See `e2e/support/session.ts` for why.
+ */
 async function signOut(page: Page): Promise<void> {
-  await page.goto('/account');
-  await page.click('button:text-is("Sign out")');
-  await expect(page.locator('a:text-is("Register")')).toBeVisible();
+  await signOutThroughHeader(page);
 }
 
 test('author publishes and prices, buyer buys and reads, the author is notified, discovery and search work', async ({

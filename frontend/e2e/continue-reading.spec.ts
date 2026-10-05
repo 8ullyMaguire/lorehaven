@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { expectSignedIn, signOutThroughHeader } from './support/session';
 
 /**
  * Item 1 of the 100-idea audit: "Continue Reading", end to end.
@@ -55,7 +56,7 @@ async function signUp(page: Page, base: string): Promise<void> {
   await page.fill('#sign-in-email', `${handle.toLowerCase()}@continue.test`);
   await page.fill('#sign-in-password', PASSPHRASE);
   await page.click('button[type=submit]');
-  await expect(page.locator('button:text-is("Sign out")')).toBeVisible();
+  await expectSignedIn(page);
 }
 
 /** Publish a one-chapter work so there is a page to read. Returns its id. */
@@ -126,9 +127,7 @@ test('a signed-out visitor is offered no banner and makes no request', async ({ 
   const workId = await publish(page, 'Continue Signed Out Work');
   await writeProgress(page, workId, 300, 'journey-device-a');
 
-  await page.goto('/account');
-  await page.click('button:text-is("Sign out")');
-  await expect(page.locator('a:text-is("Register")')).toBeVisible();
+  await signOutThroughHeader(page);
 
   // Counted absence: the request is watched, so a component that fetched and then hid
   // itself is caught separately from one that never fetched.

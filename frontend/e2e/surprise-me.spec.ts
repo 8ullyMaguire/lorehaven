@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { expectSignedIn } from './support/session';
 
 /**
  * Item 7 of the 100-idea audit: "Surprise Me", end to end.
@@ -58,7 +59,7 @@ async function signUp(page: Page, base: string): Promise<void> {
   await page.fill('#sign-in-email', `${handle.toLowerCase()}@surprise.test`);
   await page.fill('#sign-in-password', PASSPHRASE);
   await page.click('button[type=submit]');
-  await expect(page.locator('button:text-is("Sign out")')).toBeVisible();
+  await expectSignedIn(page);
 }
 
 /** Publish a one-chapter work so there is something for Surprise Me to serve. */
