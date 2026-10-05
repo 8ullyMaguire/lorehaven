@@ -41,10 +41,41 @@ about a term; the *wired/unwired* column is the finding.
 |---|---|---|
 | **shipped AND wired** | **8** | items 1, 4, 7, 9, 11, 14, 27, 33 |
 | built by an earlier pass | 2 | items 8, 22 — the probe was wrong, not the code |
+| **shipped from `requirements.csv`** | **1** | M45-51 subject access + erasure (`9f9995f`) |
 | **open, Tier 1 remainder** | **5** | items 31, 41, 43, 75, 22-preset |
 | next in queue | — | item 31 |
 | deliberately refused | 3 | item 2 (archive scrape), the streak trio — argued in `100-ideas-scope.md` §1 |
 | not yet assessed | ~72 | see "what I did not touch" at the foot |
+
+## The 27 `planned` rows in `requirements.csv`, and how they were sorted
+
+The CSV is the canonical inventory (703 rows: 120 `implemented-verified-e2e`, 312
+`implemented-fully-tested`, 239 `implemented-locally-tested`, 4 `unsupported`, 1
+`evaluated-and-rejected`, **27 `planned`**). Grouping the 27 by what they need:
+
+| group | count | ids |
+|---|---|---|
+| new query/store | 24 | M45-25, 26, 27, 29, 30, 32, 33, 34, 36, 37, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 52, 54, 55 |
+| migrations | 1 | M45-28 |
+| external dependencies | 2 | M45-39 (ActivityPub), M45-53 (scraping providers) |
+| **done since** | **−1** | M45-51 shipped as `9f9995f` |
+
+**No `planned` row has render work left in it.** Item 9 was the last one where data existed
+and nothing displayed it. Every remaining row is a feature, which is why this queue is going
+slowly and honestly rather than quickly.
+
+**None of the 27 has a section in `docs/spec.md`** — checked, 0 hits for each id. So every one
+of them needs spec + plan written *before* code, per the standing rule. M45-51 was picked
+first because its correctness stake per unit of work was the highest: both halves are the class
+where a silent bug is a real harm, and the measurement showed the erasure half was already 99%
+present as schema.
+
+**M45-53 (import visibility default) should be next.** It is flagged "biggest reputational and
+copyright risk" in its own notes, and it is a *visibility default* — the exact class of bug this
+project has now shipped four times (`is_public` dropped from a query, invisible on one engine;
+`profile_empty` unable to survive an empty result; a nav link present but unreachable; a
+`slot_id` written by the server and read by nobody). M45-39 was rejected for now because it
+needs ActivityPub and mutual backup before any code, which is the shape that goes wrong quietly.
 
 **The "no UI" and "never rendered" rows are gone because those items are now rendered.**
 Every row above was re-probed against the tree on 2026-10-05 rather than carried forward —
