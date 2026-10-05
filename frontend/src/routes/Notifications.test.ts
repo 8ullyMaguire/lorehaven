@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Notifications from './Notifications.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
@@ -35,6 +36,7 @@ const NOTIFICATIONS = {
 };
 
 beforeEach(() => {
+  signInTestReader();
   vi.clearAllMocks();
   (fetchNotifications as any).mockResolvedValue(NOTIFICATIONS);
   (markAllNotificationsRead as any).mockResolvedValue({});
@@ -42,6 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTestSession();
   vi.restoreAllMocks();
 });
 

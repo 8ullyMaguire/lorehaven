@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import BlindDate from './BlindDate.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
@@ -25,6 +26,14 @@ const mocked = vi.mocked(fetchBlindDate);
  * committing and the mechanism is gone. Nothing here would catch that except a test that
  * looks for the metadata and requires it not to be there.
  */
+
+beforeEach(() => {
+  signInTestReader();
+});
+
+afterEach(() => {
+  resetTestSession();
+});
 
 describe('BlindDate', () => {
   beforeEach(() => {

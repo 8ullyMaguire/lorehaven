@@ -19,7 +19,9 @@
    */
   import { fetchBlindDate } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
+  import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let workId = $state<string | null>(null);
@@ -53,8 +55,11 @@
     }
   }
 
+  // Only once the session is KNOWN signed in. `SignInGate` renders the note for a
+  // signed-out visitor, so a fetch issued before that would 401 and put a red
+  // "That did not work" on a page that never asked anybody to do anything.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 </script>
 
@@ -65,6 +70,7 @@
   </p>
 </header>
 
+<SignInGate purpose="get today's blind pick">
 {#if error}
   <ErrorSummary {error} onretry={load} />
 {/if}
@@ -91,6 +97,7 @@
   {/if}
   <p class="meta">Picked {date}. One a day, and the same one tomorrow.</p>
 {/if}
+</SignInGate>
 
 <style>
   .reveal {

@@ -23,21 +23,38 @@ pub fn router() -> axum::Router<AppState> {
         .route("/admin/media-health/providers", get(provider_reliability))
 }
 
-async fn require_operator(
-    state: &AppState,
-    user: &crate::auth::SessionUser,
-) -> Result<(), ApiError> {
-    let level = lorehaven_db::governance::trust_for(state.db(), &user.account_id.to_string())
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if level >= 5 {
-        Ok(())
-    } else {
-        // Signed in but not a curator: 403, not 401. The session middleware has
-        // already authenticated the caller, so answering "authentication
-        // required" would send a logged-in reader back to the login page.
-        Err(ApiError(AppError::AccessDenied))
+/// Refuse a caller who is not this instance's operator, without confirming that the
+/// view exists.
+///
+/// **404, not 403.** The same rule `flows::require_operator`,
+/// `admin_discovery::require_operator` and `decision_service::require_operator`
+/// already follow, written down in `docs/plans/REMAINING-2026-10-03.md` (north-star
+/// / flows): for an operator surface the *existence* is the disclosure, so 403
+/// answers "yes, and you may not" — which tells anyone probing `/admin/media-health`
+/// that this instance runs a link-rot dashboard. 404 says nothing.
+///
+/// This module was the outlier, and the observable consequence was that
+/// `/admin/media-health` answered **403 six times** to a non-operator and rendered
+/// "That did not work / access denied" on a page they are not allowed to be on. The
+/// page half is fixed in `AdminMediaHealth.svelte`; this is the other half.
+///
+/// Note the check is against `config().administration.operator_account_id` and
+/// **not** a trust-level lookup. The two modules above made the same choice for the
+/// same reason: "is a trust level of 5 the operator" is a different question from
+/// "is this account the operator", and the previous trust-level version here also
+/// turned every database hiccup into a 403, which reads as a permissions problem
+/// rather than the storage problem it is.
+fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiResult<()> {
+    if state.config().administration.operator_account_id == Some(user.account_id) {
+        return Ok(());
     }
+    tracing::debug!(
+        operator_configured = state.config().administration.operator_account_id.is_some(),
+        "the media-health dashboard was reached by an account that is not the operator"
+    );
+    Err(ApiError(AppError::NotFound {
+        resource: "media health",
+    }))
 }
 
 /// Overall health overview for the admin dashboard (§32.7.11).
@@ -46,7 +63,7 @@ async fn media_health_overview(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    require_operator(&state, &user).await?;
+    require_operator(&state, &user)?;
 
     let total = lorehaven_db::media_resilience::count_total_references(state.db())
         .await
@@ -95,7 +112,7 @@ async fn link_rot_report(
     RequireSession(user): RequireSession,
     Query(query): Query<LinkRotQuery>,
 ) -> ApiResult<Json<Value>> {
-    require_operator(&state, &user).await?;
+    require_operator(&state, &user)?;
 
     let since = query
         .since
@@ -126,7 +143,7 @@ async fn curator_leaderboard(
     RequireSession(user): RequireSession,
     Query(query): Query<LeaderboardQuery>,
 ) -> ApiResult<Json<Value>> {
-    require_operator(&state, &user).await?;
+    require_operator(&state, &user)?;
 
     let limit = query.limit.unwrap_or(10).clamp(1, 100);
 
@@ -144,7 +161,7 @@ async fn bounty_status(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    require_operator(&state, &user).await?;
+    require_operator(&state, &user)?;
 
     let (active_count, total_amount) =
         lorehaven_db::media_resilience::standing_bounty_status(state.db())
@@ -162,7 +179,7 @@ async fn storage_status(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    require_operator(&state, &user).await?;
+    require_operator(&state, &user)?;
 
     let (mirror_count, total_bytes) =
         lorehaven_db::media_resilience::local_mirror_storage(state.db())
@@ -185,7 +202,7 @@ async fn provider_reliability(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    require_operator(&state, &user).await?;
+    require_operator(&state, &user)?;
 
     let providers = lorehaven_db::media_resilience::provider_reliability(state.db())
         .await

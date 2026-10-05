@@ -13,8 +13,10 @@
     type NotificationItem,
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let items = $state<NotificationItem[]>([]);
@@ -73,8 +75,10 @@
     }
   }
 
+  // The notification list is the reader's own, so a signed-out visitor gets the
+  // sign-in note rather than a 401 rendered as a failure.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 </script>
 
@@ -86,6 +90,7 @@
     {/if}
   </header>
 
+  <SignInGate purpose="see notifications for your account" skeletonLines={6}>
   {#if error}
     <ErrorSummary {error} onretry={load} />
   {/if}
@@ -127,6 +132,7 @@
       {/each}
     </ul>
   {/if}
+  </SignInGate>
 </section>
 
 <style>

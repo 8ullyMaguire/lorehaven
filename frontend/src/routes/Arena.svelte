@@ -17,11 +17,14 @@
     type DimensionWeightSummary,
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let round = $state<ArenaRound | null>(null);
+  let noRoundReason = $state<string | null>(null);
   let dimensions = $state<DimensionSummary[]>([]);
   let weights = $state<DimensionWeightSummary[]>([]);
   let error = $state<unknown>(null);
@@ -47,6 +50,10 @@
     try {
       const res = await fetchArenaNext();
       round = res.round;
+      // The server names WHY there is no round, and that sentence is the page.
+      // Falling back to a generic "not enough works" would throw away the only
+      // thing that distinguishes an empty archive from a small one.
+      noRoundReason = res.round ? null : (res.explained_empty ?? null);
       dimensions = res.dimensions;
       // Also fetch weights summary.
       try {
@@ -116,8 +123,11 @@
     }
   }
 
+  // The arena is this reader's own calibration surface (`RequireSession`), and the
+  // endpoint used to answer 500 to every new account — see the `round: null` branch
+  // in `load()`. Signed out, it is a sign-in note.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 
   function wordCountLabel(wc: number): string {
@@ -136,6 +146,7 @@
     </p>
   </header>
 
+  <SignInGate purpose="compare four works and calibrate your taste" skeletonLines={6}>
   {#if error}
     <ErrorSummary {error} />
   {/if}
@@ -252,10 +263,16 @@
     </div>
   {:else}
     <div class="arena-empty">
-      <p>Not enough works in the archive for an arena round yet.</p>
-      <a href="/discover" onclick={(event) => handleLinkClick(event, "/discover")}>Back to Discover</a>
+      <!-- The server's own sentence, not a generic one. It distinguishes an
+           archive with nothing published from one whose works do not yet share
+           a fandom in fours, and the reader can act on the difference. -->
+      <p data-testid="arena-no-round">
+        {noRoundReason ?? 'Not enough works in the archive for an arena round yet.'}
+      </p>
+      <a href="/discover" onclick={(event) => handleLinkClick(event, '/discover')}>Back to Discover</a>
     </div>
   {/if}
+  </SignInGate>
 </section>
 
 <style>

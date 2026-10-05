@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AdminEconomyFlows from './AdminEconomyFlows.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 import { fetchEconomyFlows } from '../lib/api';
 
 vi.mock('../lib/api', () => ({
@@ -36,7 +37,12 @@ function window_() {
 }
 
 afterEach(() => {
+  resetTestSession();
   vi.clearAllMocks();
+});
+
+beforeEach(() => {
+  signInTestReader();
 });
 
 describe('AdminEconomyFlows', () => {

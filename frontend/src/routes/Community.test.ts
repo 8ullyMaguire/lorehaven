@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Community from './Community.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
@@ -25,6 +26,7 @@ const GROUPS = [
 ];
 
 beforeEach(() => {
+  signInTestReader();
   vi.clearAllMocks();
   (fetchForums as any).mockResolvedValue(FORUMS);
   (fetchGroups as any).mockResolvedValue(GROUPS);
@@ -33,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTestSession();
   vi.restoreAllMocks();
 });
 

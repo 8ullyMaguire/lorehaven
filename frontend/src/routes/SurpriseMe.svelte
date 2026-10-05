@@ -25,7 +25,9 @@
    */
   import { fetchSurpriseMe, type SurpriseMeResponse } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
+  import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let result = $state<SurpriseMeResponse | null>(null);
@@ -59,8 +61,11 @@
     }
   }
 
+  // Only once the session is KNOWN signed in: this endpoint is `RequireSession`,
+  // and a signed-out visitor used to get "That did not work / authentication required"
+  // on a page that never asked them to do anything.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 </script>
 
@@ -77,6 +82,7 @@
   branch — telling the reader "everything here shares a tag with your profile" underneath a 404.
   A specific confident wrong claim printed under an error is worse than no message at all.
 -->
+<SignInGate purpose="see a work picked outside your profile">
 {#if error}
   <ErrorSummary {error} onretry={load} />
 {:else if loading}
@@ -125,6 +131,7 @@
     what it is avoiding.
   </p>
 {/if}
+</SignInGate>
 
 <style>
   .card {

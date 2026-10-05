@@ -8,6 +8,22 @@
    *
    * Tabs switch between the four surfaces; each tab loads its data independently
    * so an empty forums list does not hold up the groups list.
+   *
+   * ## The whole page is behind a session, and that is a decision, not an oversight
+   *
+   * `/community` was the one page in the defect list that a stranger has any
+   * business wanting, so the obvious question was whether the FORUMS should be
+   * readable by a visitor. `get_forums` is `RequireSession`
+   * (`community.rs:268-271`), so today the answer is no — and the answer stays no.
+   *
+   * Making forums public is a product call about a product §17 does not describe
+   * (its door is a session door), it would need a per-forum visibility flag that
+   * does not exist, and it would put every reader's display name and post history
+   * behind a door that was never specified to be open. The cheaper, reversible half
+   * of the answer is what this page now does: say plainly that the forums are for
+   * members, so a visitor is not shown a red failure for a page that never did
+   * anything wrong. Widening the door is left as a deliberate future change rather
+   * than smuggled in as a bug fix.
    */
   import {
     fetchBlocks,
@@ -22,6 +38,7 @@
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   type Tab = 'forums' | 'groups' | 'messages' | 'blocks';
@@ -76,7 +93,12 @@
     }
   }
 
+  // Gated on the session, not on the tab. All four lists are the reader's own
+  // membership's, and the two tabs that were already disabled for a signed-out
+  // visitor (Messages, Blocks) prove the page was half-guard-aware already — the
+  // first two were not, and they were the two a visitor lands on.
   $effect(() => {
+    if (!session.isSignedIn) return;
     loading = true;
     error = null;
     if (activeTab === 'forums') loadForums().finally(() => loading = false);
@@ -92,6 +114,7 @@
     <p class="lede">Forums, groups, and direct messages between readers.</p>
   </header>
 
+  <SignInGate purpose="see the forums, groups and messages here" skeletonLines={5}>
   <div class="tabs" role="tablist">
     <button
       role="tab"
@@ -209,6 +232,7 @@
       </ul>
     {/if}
   {/if}
+  </SignInGate>
 </section>
 
 <style>

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { skipQuiz, saveQuizAnswers, fetchQuizWorks, type DiscoveryItem } from '../lib/api';
-    import Button from '../lib/components/Button.svelte';
+  import { session } from '../lib/session.svelte.ts';
+  import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let works = $state<DiscoveryItem[]>([]);
@@ -65,8 +67,11 @@
     window.location.href = '/discover';
   }
 
+  // The quiz writes the reader's taste profile, so it is a signed-in surface. The
+  // gate also removes the boot race: `session.refresh()` is still in flight on a
+  // cold load, and a fetch issued then is a 401 this page must not make.
   $effect(() => {
-    void load();
+    if (session.isSignedIn) void load();
   });
 </script>
 
@@ -80,6 +85,7 @@
     </p>
   </header>
 
+  <SignInGate purpose="build your taste profile">
   {#if error}
     <ErrorSummary {error} onretry={load} />
   {/if}
@@ -133,6 +139,7 @@
       </button>
     </footer>
   {/if}
+  </SignInGate>
 </section>
 
 <style>

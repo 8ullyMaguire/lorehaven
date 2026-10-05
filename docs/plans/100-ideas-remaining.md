@@ -10,6 +10,12 @@ superseded each other in a chain. Three files were claiming to be the live plan;
 itself the defect, and it is why this one existed in a stale state for three commits after
 its last edit.
 
+**UI and routing defects found by driving a live instance (2026-10-05) are not in this
+file** — they live in `docs/plans/REMAINING-2026-10-05.md`, which owns that list and
+defers every feature question back to this file and to `docs/requirements.csv`. The two
+defects it named in this file (a stale row and a numbering gap in §2) are now fixed, and
+§2 below says so where the fix is visible.
+
 ## The probe rule, which is the whole lesson of this file
 
 **A status document rots faster than the code it describes, because nobody re-derives it.**
@@ -176,9 +182,22 @@ already found seven instances of.
 | 1 | ~~**11 — DNF UI**~~ | DONE — `2901bc0` |
 | 2 | ~~**1 — Continue Reading**~~ | DONE — store, route, banner, 8 E2E journeys |
 | 3 | ~~**4 — word count + minutes**~~ | DONE — store `2868b25`, rendering `f124a67` |
-| 5 | ~~**9 — reason tags**~~ | DONE — the backend already existed; this was pure UI |
-| 6 | **7 — Surprise Me** | genuinely new query, but small and it serves the diversity budget |
-| 7 | 31, 41, 43, 75, 22-preset | the Tier 1 remainder; all render work over existing columns |
+| 4 | ~~**9 — reason tags**~~ | DONE — the backend already existed; this was pure UI |
+| 5 | ~~**7 — Surprise Me**~~ | DONE — `5759616`; the detail is in §2a below |
+| 6 | 31, 41, 43, 75, 22-preset | the Tier 1 remainder; all render work over existing columns |
+
+**Two fixes to this table, both from `REMAINING-2026-10-05.md` §7.**
+
+Row "7 — Surprise Me" was still listed as open while §1's own table said "shipped
+AND wired" and §2a carried three commits of notes about it. The tree agrees with §1:
+`SurpriseMe.svelte:50` calls `fetchSurpriseMe()`, `/surprise-me` is in `router.ts`, and
+`frontend/e2e/surprise-me.spec.ts` exists. Struck, because a plan that lists a shipped
+item as next is the exact failure this file's own §1 is about.
+
+And the numbering jumped 3 → 5, because row 4 was removed when it closed and nothing
+renumbered behind it. Harmless, but a reader assumes a gap is a lost row — which is
+precisely the wrong assumption to plant in a document whose subject is documents that
+lie. Renumbered. **This is the only row that is actually open.**
 
 Items 1, 4 and 9 are one `reader_surface`-style module: no migrations, no new state,
 one store file, one route set, three components. They should ship as **one** change,

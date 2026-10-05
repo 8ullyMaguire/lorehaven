@@ -3441,7 +3441,17 @@ export interface DimensionSummary {
 }
 
 export interface ArenaNextResponse {
-  round: ArenaRound;
+  /**
+   * `null` when there is no round for this reader right now.
+   *
+   * An ordinary state, not a failure: a reader who has rated nothing, on an
+   * instance whose works do not yet share a fandom in fours, has no comparison to
+   * be offered. The server used to answer 500 here, which opened `/arena` with a
+   * red "That did not work" for every new account.
+   */
+  round: ArenaRound | null;
+  /** Why there is no round. Absent whenever `round` is present. */
+  explained_empty?: string | null;
   dimensions: DimensionSummary[];
 }
 

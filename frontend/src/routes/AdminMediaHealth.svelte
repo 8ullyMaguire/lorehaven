@@ -4,8 +4,14 @@
    *
    * Six read-only metric panels for the operator: overall health, link rot,
    * curator leaderboard, bounty status, storage, and provider reliability.
-   * The server decides who may see this — a non-operator gets 401 and the
-   * page renders that honestly.
+   *
+   * The server decides who may see this, and it now says so the way every other
+   * operator surface in the tree does: **404**, because for an operator view the
+   * existence is the disclosure (`flows`, `admin_discovery`, `decision_service`).
+   * This page used to read only 401, so a signed-in non-operator got six 403s and
+   * a red "That did not work / access denied" — six failures for a page they were
+   * never going to be allowed to see. It reads 403 and 404 alike now, and the gate
+   * is checked before any of the six is called.
    */
   import {
     fetchMediaHealthOverview,
@@ -21,9 +27,9 @@
     type StorageStatus,
     type ProviderReliability,
   } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import SignInGate from '../lib/components/SignInGate.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let overview = $state<MediaHealthOverview | null>(null);
@@ -35,15 +41,22 @@
 
   let loading = $state(true);
   let error = $state<unknown>(null);
+  /**
+   * Set when the server refused: 401 (nobody signed in) or 404 (signed in, not the
+   * operator — this instance's deliberate answer rather than a 403).
+   *
+   * One flag for both, because the page's response to either is the same honest
+   * sentence about who may see this, and keeping them apart would invite a
+   * third branch that renders a 404 as an error.
+   */
   let forbidden = $state(false);
 
-  function isAuthFailure(failure: unknown): boolean {
-    return (
-      typeof failure === 'object' &&
-      failure !== null &&
-      'status' in failure &&
-      (failure as { status?: number }).status === 401
-    );
+  function isRefusal(failure: unknown): boolean {
+    if (typeof failure !== 'object' || failure === null || !('status' in failure)) {
+      return false;
+    }
+    const status = (failure as { status?: number }).status;
+    return status === 401 || status === 403 || status === 404;
   }
 
   async function load() {
@@ -66,7 +79,7 @@
       storage = st;
       providers = pr.providers;
     } catch (failure) {
-      if (isAuthFailure(failure)) {
+      if (isRefusal(failure)) {
         forbidden = true;
       } else {
         error = failure;
@@ -93,17 +106,20 @@
 
 <h1>Media health</h1>
 
-{#if !session.isSignedIn}
-  <p class="note">
-    <a href="/sign-in" onclick={(event) => handleLinkClick(event, '/sign-in')}>Sign in</a> to see
-    media health metrics.
-  </p>
-{:else if loading}
+<SignInGate purpose="see this instance's media health metrics" skeletonLines={10}>
+{#if loading}
   <Skeleton lines={10} label="Loading media health metrics" />
 {:else if forbidden}
-  <p class="note">
-    This page belongs to the instance's operator (trust level &ge; 5). If you are the operator and
-    cannot see it, ask an administrator to raise your trust level.
+  <!--
+    The instance operator, named by configuration — not a trust tier, which is what
+    the server actually checks (`media_health::require_operator` reads
+    `administration.operator_account_id`). A non-operator is answered 404 rather
+    than 403 because for an operator view the existence is the disclosure; this note
+    says so plainly instead of rendering the red panel that six 403s used to produce.
+  -->
+  <p class="note" data-testid="media-health-refused">
+    This page belongs to the instance's operator. If that is you and you cannot see it, check that
+    the account is configured as this instance's operator.
   </p>
 {:else if error}
   <ErrorSummary error={error} onretry={() => void load()} />
@@ -240,6 +256,7 @@
     </section>
   {/if}
 {/if}
+</SignInGate>
 
 <style>
   h1 {

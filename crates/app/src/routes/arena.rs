@@ -27,9 +27,26 @@ pub fn router() -> Router<AppState> {
 }
 
 /// Response for GET /arena/next.
+///
+/// `round` is **optional on purpose**. `generate_arena_round` returns `None` for an
+/// ordinary state — a reader who has rated nothing, on an instance whose works do
+/// not yet share a fandom in fours — and that used to be reported as
+/// `AppError::Internal`, i.e. a 500. It is not a server fault: it is the answer to
+/// "is there a round for this reader right now?", and the answer is frequently no.
+/// §0.4.2a's arena is a calibration aid, not a door, so an absent round is `200`
+/// with an explanation rather than a failure string (the same rule §54.6 states for
+/// the concierge, and the same rule `100-ideas-remaining.md` §3 states for every
+/// rail: an empty answer renders as nothing, never as `Internal`).
 #[derive(Debug, Serialize)]
 pub struct ArenaNextResponse {
-    pub round: ArenaRound,
+    pub round: Option<ArenaRound>,
+    /// Why there is no round, when there is none. Absent whenever `round` is.
+    ///
+    /// Kept separate from `round: null` being the *only* signal so the client can
+    /// tell a reader with an empty pool from a reader who has exhausted every
+    /// pair worth asking about.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explained_empty: Option<String>,
     pub dimensions: Vec<DimensionSummary>,
 }
 
@@ -134,11 +151,24 @@ async fn get_arena_next(
     // Vary on every configured dimension: the round should offer the reader a
     // real tradeoff across their whole profile, not one arbitrary axis.
     let targets: Vec<String> = dimensions.iter().map(|d| d.key.clone()).collect();
-    let round = generate_arena_round(&cards, &dimensions, &targets).ok_or_else(|| {
-        ApiError(AppError::Internal(anyhow::anyhow!(
-            "not enough works for arena round"
-        )))
-    })?;
+    // `None` here is an ordinary state, not a fault: a reader who has rated
+    // nothing, on an instance with fewer than four public works sharing a fandom,
+    // has no round to be offered. It used to be `AppError::Internal` — a 500 — and
+    // `/arena` opened with a red "That did not work" for every new account.
+    //
+    // The dimensions are still computed and reported either way, because they are
+    // what the page shows about calibration progress, and an empty round must not
+    // cost the reader that too.
+    let round = generate_arena_round(&cards, &dimensions, &targets);
+    let explained_empty = round.is_none().then(|| {
+        if cards.is_empty() {
+            "No published, public works are available to compare yet."
+        } else {
+            "Not enough comparable works yet — an arena round needs four published \
+             works that share a fandom."
+        }
+        .to_owned()
+    });
 
     // Get existing Elo ratings for dimensions.
     let elos = get_dimension_elos(db, &account_id, &dimensions).await?;
@@ -155,6 +185,7 @@ async fn get_arena_next(
 
     Ok(Json(ArenaNextResponse {
         round,
+        explained_empty,
         dimensions: dimension_summaries,
     }))
 }
@@ -301,6 +332,20 @@ async fn get_arena_weights(
 }
 
 /// Get the account's taste dimensions (or defaults).
+///
+/// The fallback below is load-bearing, and the reason it used not to fire is worth
+/// recording: `accounts.taste_vector` is `DEFAULT '[]'`, not NULL (migration 0053),
+/// so **every** account has a row and `get_taste_vector` returns
+/// `Some((vec![], ..))` rather than `None`. Mapping that empty vector gave a
+/// reader with no quiz answers **zero** dimensions, and `generate_arena_round`
+/// returns `None` when it is given no target dimensions — so every new account got
+/// `Internal("not enough works for arena round")` → 500, on a seeded instance as
+/// well as an empty one, and the message named works when the real problem was
+/// dimensions.
+///
+/// So the test is `vec.is_empty()`, not `profile.is_some()`. A reader who has not
+/// taken the quiz gets the instance's default dimensions, which is what the
+/// `.unwrap_or_else` arm was written to do all along.
 async fn get_account_dimensions(
     db: &lorehaven_db::Database,
     account_id: &str,
@@ -316,6 +361,7 @@ async fn get_account_dimensions(
         .collect();
 
     let dims = profile
+        .filter(|(vec, _, _)| !vec.is_empty())
         .map(|(vec, _, _)| {
             vec.iter()
                 .enumerate()

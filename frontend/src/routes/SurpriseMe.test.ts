@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 import SurpriseMe from './SurpriseMe.svelte';
+import { signInTestReader, resetTestSession } from '../lib/testing/session';
 import { fetchSurpriseMe, ApiError } from '../lib/api';
 
 /**
@@ -28,7 +29,12 @@ const WORK = {
 };
 
 beforeEach(() => {
+  signInTestReader();
   mockFetch.mockReset();
+});
+
+afterEach(() => {
+  resetTestSession();
 });
 
 describe('SurpriseMe', () => {
