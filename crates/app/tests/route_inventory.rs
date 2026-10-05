@@ -1467,6 +1467,25 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
+    // M45-51 — subject access and erasure. Both are reader-scoped and take no
+    // path parameter, so the path cannot be guessed at from the URL and both
+    // are POST/GET on `/me/...` rather than on a resource of their own.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "erasure.rs",
+        handler: "get_data",
+        method: "GET",
+        path: "/me/data",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "erasure.rs",
+        handler: "post_erasure",
+        method: "POST",
+        path: "/me/erasure",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // Pre-read reports — author-only. §23.7: a report is provider-specific and
     // the author is the only person who may see which provider produced it, or
     // withdraw consent from one without discarding another's output.

@@ -23,6 +23,7 @@ pub mod directory;
 pub mod discovery;
 pub mod dnf;
 pub mod economy;
+pub mod erasure;
 pub mod events;
 pub mod exchange;
 pub mod exports;
