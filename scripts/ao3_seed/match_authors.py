@@ -113,6 +113,11 @@ class AuthorIndex:
         Read-only, so it is safe to point at the 1.7 GB file directly. Only the
         three columns needed are selected; the `authors` TEXT column holds one
         name or `Display (pseudonym)`.
+
+        `ambiguous` is deliberately KEPT. Clearing it made `match_works` report
+        every failure as 'no AO3 title match' -- a dry-run then claimed 0
+        ambiguous titles when the corpus really holds 4,841 of them, which hides
+        exactly the cases a curator needs to see.
         """
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
@@ -123,7 +128,6 @@ class AuthorIndex:
             )
             for ao3_work_id, title, author in rows:
                 index.add(str(ao3_work_id), title, author)
-            index.ambiguous.clear()
             return index
         finally:
             con.close()

@@ -69,6 +69,40 @@ def test_an_unmatched_title_is_left_unattributed() -> None:
     assert result.ao3_author_url is None
 
 
+def test_from_db_keeps_ambiguous_titles(tmp_path) -> None:
+    """Regression: `from_db` used to call `ambiguous.clear()`.
+
+    That made every unresolved work report 'no AO3 title match', so a dry-run
+    claimed 0 ambiguous titles when the corpus really holds 2,506 of them --
+    hiding precisely the cases a curator has to look at.
+    """
+    import sqlite3
+
+    db = tmp_path / "ao3.db"
+    con = sqlite3.connect(db)
+    con.execute(
+        "CREATE TABLE works (id TEXT, title TEXT, authors TEXT)"
+    )
+    con.executemany(
+        "INSERT INTO works VALUES (?, ?, ?)",
+        [
+            ("1", "Bridges", "AuthorOne"),
+            ("2", "Bridges", "AuthorTwo"),   # same normalised title
+            ("3", "Unique Work", "AuthorThree"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    index = AuthorIndex.from_db(str(db))
+
+    assert index.ambiguous == {"bridges": 2}
+    results = match_works([("w1", "Bridges"), ("w2", "Unique Work")], index)
+    reasons = {r.work_id: r.reason for r in results}
+    assert reasons["w1"] == "ambiguous title"
+    assert results[1].attributed
+
+
 def test_a_row_with_no_author_never_enters_the_index() -> None:
     index = AuthorIndex()
     index.add("1", "Anonymous Work", "Anonymous")
