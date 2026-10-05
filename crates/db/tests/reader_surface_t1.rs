@@ -79,10 +79,33 @@ async fn connect(tag: &str) -> (Database, Option<String>) {
                     .await
                     .unwrap_or(None);
             if exists.is_none() {
-                sqlx::query(&format!("CREATE DATABASE {name}"))
+                // PostgreSQL has no `CREATE DATABASE IF NOT EXISTS`, so this is
+                // check-then-create and two threads can both see "absent" and both
+                // issue the statement. The loser gets
+                //
+                //   duplicate key value violates unique constraint "pg_database_datname_index"
+                //
+                // which is the OUTCOME, not a fault: the database it wanted now exists.
+                // Failing here reported a working harness as broken, and it only showed
+                // up when two suites happened to run concurrently -- which is why it
+                // read as a flake rather than as the race it is.
+                //
+                // `--test-threads=1` hides it. It does not fix it.
+                let created = sqlx::query(&format!("CREATE DATABASE {name}"))
                     .execute(admin_db.postgres_pool().expect("postgres pool"))
-                    .await
-                    .expect("create the shared scratch database");
+                    .await;
+                if let Err(e) = created {
+                    let still_absent: Option<i32> =
+                        sqlx::query_scalar("SELECT 1 FROM pg_database WHERE datname = $1")
+                            .bind(&name)
+                            .fetch_one(admin_db.postgres_pool().expect("postgres pool"))
+                            .await
+                            .unwrap_or(None);
+                    assert!(
+                        still_absent.is_some(),
+                        "CREATE DATABASE {name} failed for a reason other than a race: {e}"
+                    );
+                }
             }
             admin_db.close().await;
 
@@ -112,8 +135,31 @@ async fn connect(tag: &str) -> (Database, Option<String>) {
         Err(_) => format!("sqlite://{}/lorehaven.sqlite?mode=rwc", dir.display()),
     };
     let db = Database::connect(&make_config(url)).await.expect("connect");
-    db.migrate().await.expect("migrate");
+    // Migration 0092 runs `CREATE EXTENSION IF NOT EXISTS pgcrypto`, and extensions are
+    // DATABASE-scoped while these schemas are not: eight parallel test threads share
+    // one `lorehaven_rs1`, so eight migrators reach 0092 together. `IF NOT EXISTS` is
+    // NOT race-safe here -- it takes a lock that does not serialise the existence check
+    // -- and the losers die with
+    //
+    //   duplicate key value violates unique constraint "pg_extension_name_index"
+    //
+    // which names the extension, not the collision. Serialising the migrators is the
+    // fix, because the alternative (retrying the migration) re-runs every DDL statement
+    // in the file for a failure that has already left the schema correct.
+    migrate_serialised(&db).await;
     (db, schema)
+}
+
+/// One migrator at a time per process.
+///
+/// The lock is process-local on purpose: these suites share a scratch DATABASE between
+/// threads, so an in-process mutex is exactly the scope of the collision. Two processes
+/// against one database would still race, which is a different problem with a different
+/// owner.
+async fn migrate_serialised(db: &lorehaven_db::Database) {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = LOCK.lock().await;
+    db.migrate().await.expect("migrate a scratch schema");
 }
 
 /// The shared PostgreSQL database every scratch schema lives in. One per container, not one

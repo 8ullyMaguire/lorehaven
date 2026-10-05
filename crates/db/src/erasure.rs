@@ -138,14 +138,18 @@ pub async fn subject_data(db: &Database, account_id: &str) -> Result<SubjectData
         "SELECT email FROM accounts WHERE id::text = $1",
     );
     let email: Option<String> = match db.backend() {
-        Backend::Sqlite => sqlx::query_scalar::<_, String>(&sql)
-            .bind(account_id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-            .await?,
-        Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
-            .bind(account_id)
-            .fetch_optional(db.postgres_pool().expect("postgres handle"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_scalar::<_, String>(&sql)
+                .bind(account_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar::<_, String>(&sql)
+                .bind(account_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     let sql = db.sql(
@@ -153,14 +157,18 @@ pub async fn subject_data(db: &Database, account_id: &str) -> Result<SubjectData
         "SELECT handle FROM pseuds WHERE account_id::text = $1 ORDER BY created_at",
     );
     let handles: Vec<String> = match db.backend() {
-        Backend::Sqlite => sqlx::query_scalar::<_, String>(&sql)
-            .bind(account_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?,
-        Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
-            .bind(account_id)
-            .fetch_all(db.postgres_pool().expect("postgres handle"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_scalar::<_, String>(&sql)
+                .bind(account_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar::<_, String>(&sql)
+                .bind(account_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     let sql = db.sql(
@@ -170,14 +178,18 @@ pub async fn subject_data(db: &Database, account_id: &str) -> Result<SubjectData
          FROM bookmarks WHERE account_id::text = $1 ORDER BY created_at, id",
     );
     let bookmarks: Vec<BookmarkRow> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, BookmarkRow>(&sql)
-        .bind(account_id)
-        .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-        .await?,
-        Backend::Postgres => sqlx::query_as::<_, BookmarkRow>(&sql)
-        .bind(account_id)
-        .fetch_all(db.postgres_pool().expect("postgres handle"))
-        .await?,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, BookmarkRow>(&sql)
+                .bind(account_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, BookmarkRow>(&sql)
+                .bind(account_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     let sql = db.sql(
@@ -188,14 +200,18 @@ pub async fn subject_data(db: &Database, account_id: &str) -> Result<SubjectData
          WHERE account_id::text = $1 ORDER BY updated_at, id",
     );
     let reading_progress: Vec<ReadingProgressRow> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, ReadingProgressRow>(&sql)
-        .bind(account_id)
-        .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-        .await?,
-        Backend::Postgres => sqlx::query_as::<_, ReadingProgressRow>(&sql)
-        .bind(account_id)
-        .fetch_all(db.postgres_pool().expect("postgres handle"))
-        .await?,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, ReadingProgressRow>(&sql)
+                .bind(account_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, ReadingProgressRow>(&sql)
+                .bind(account_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     let sql = db.sql(
@@ -205,14 +221,18 @@ pub async fn subject_data(db: &Database, account_id: &str) -> Result<SubjectData
          FROM did_not_finish WHERE account_id::text = $1 ORDER BY id",
     );
     let did_not_finish: Vec<DidNotFinishRow> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, DidNotFinishRow>(&sql)
-        .bind(account_id)
-        .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-        .await?,
-        Backend::Postgres => sqlx::query_as::<_, DidNotFinishRow>(&sql)
-        .bind(account_id)
-        .fetch_all(db.postgres_pool().expect("postgres handle"))
-        .await?,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, DidNotFinishRow>(&sql)
+                .bind(account_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, DidNotFinishRow>(&sql)
+                .bind(account_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     Ok(SubjectData {
@@ -236,14 +256,18 @@ pub async fn plan_erasure(db: &Database, account_id: &str) -> Result<ErasurePlan
         "SELECT handle FROM pseuds WHERE account_id::text = $1 ORDER BY created_at LIMIT 1",
     );
     let handle: Option<String> = match db.backend() {
-        Backend::Sqlite => sqlx::query_scalar::<_, String>(&sql)
-            .bind(account_id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-            .await?,
-        Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
-            .bind(account_id)
-            .fetch_optional(db.postgres_pool().expect("postgres handle"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_scalar::<_, String>(&sql)
+                .bind(account_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar::<_, String>(&sql)
+                .bind(account_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     let mut private_rows = Vec::new();
@@ -254,14 +278,18 @@ pub async fn plan_erasure(db: &Database, account_id: &str) -> Result<ErasurePlan
             format!("SELECT COUNT(*) FROM {table} WHERE account_id::text = $1"),
         );
         let n: i64 = match db.backend() {
-            Backend::Sqlite => sqlx::query_scalar::<_, i64>(&sql)
-                .bind(account_id)
-                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
-                .await?,
-            Backend::Postgres => sqlx::query_scalar::<_, i64>(&sql)
-                .bind(account_id)
-                .fetch_one(db.postgres_pool().expect("postgres handle"))
-                .await?,
+            Backend::Sqlite => {
+                sqlx::query_scalar::<_, i64>(&sql)
+                    .bind(account_id)
+                    .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                    .await?
+            }
+            Backend::Postgres => {
+                sqlx::query_scalar::<_, i64>(&sql)
+                    .bind(account_id)
+                    .fetch_one(db.postgres_pool().expect("postgres handle"))
+                    .await?
+            }
         };
         private_rows.push((table.to_string(), n));
     }
@@ -277,14 +305,18 @@ pub async fn plan_erasure(db: &Database, account_id: &str) -> Result<ErasurePlan
              (SELECT id FROM pseuds WHERE account_id::text = $1) AND lifecycle = 'published'",
     );
     let published_work_count: i64 = match db.backend() {
-        Backend::Sqlite => sqlx::query_scalar::<_, i64>(&sql)
-            .bind(account_id)
-            .fetch_one(db.sqlite_pool().expect("sqlite handle"))
-            .await?,
-        Backend::Postgres => sqlx::query_scalar::<_, i64>(&sql)
-            .bind(account_id)
-            .fetch_one(db.postgres_pool().expect("postgres handle"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(account_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(account_id)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     // An export in flight would re-materialise the data moments after erasure.
@@ -295,14 +327,18 @@ pub async fn plan_erasure(db: &Database, account_id: &str) -> Result<ErasurePlan
            AND state IN ('queued', 'running')",
     );
     let open_export_count: i64 = match db.backend() {
-        Backend::Sqlite => sqlx::query_scalar::<_, i64>(&sql)
-            .bind(account_id)
-            .fetch_one(db.sqlite_pool().expect("sqlite handle"))
-            .await?,
-        Backend::Postgres => sqlx::query_scalar::<_, i64>(&sql)
-            .bind(account_id)
-            .fetch_one(db.postgres_pool().expect("postgres handle"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(account_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(account_id)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
 
     Ok(ErasurePlan {
