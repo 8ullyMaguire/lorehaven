@@ -235,7 +235,7 @@ pub async fn next_entries(
                     FROM series_items si
                     JOIN reading_status rs
                       ON rs.subject_type = 'work' AND rs.subject_id::text = si.work_id
-                     AND rs.account_id::text = $1 AND rs.account_id = ?1 AND rs.status = 'finished'
+                     AND rs.account_id::text = $1 AND rs.status = 'finished'
                      AND rs.finished_at IS NOT NULL
                     WHERE rs.finished_at >= $2 AND rs.finished_at < $3
                 ),
@@ -287,7 +287,7 @@ pub async fn next_entries(
                          AND rs.subject_id::text IN (
                              SELECT i2.work_id::text FROM media_collection_items i2
                               WHERE i2.collection_id = c.id)
-                         AND rs.account_id::text = $1 AND rs.account_id = ?1 AND rs.status = 'finished')
+                         AND rs.account_id::text = $1 AND rs.status = 'finished')
                 LIMIT $4
                 "#,
             )
