@@ -170,7 +170,17 @@ fn blind_date_order_key(work_id: &str, seed: &str) -> u64 {
 /// usable because its output is not guaranteed stable across Rust releases, and a seed
 /// that changes between compiler versions would silently reshuffle every reader's
 /// Blind Date on the next toolchain bump.
-fn blind_date_seed(account: &str, today: &str) -> String {
+///
+/// `pub` so a test can assert the property this exists for. `blind_date.rs`
+/// (`two_readers_get_different_works_on_the_same_day`) claimed to check "the account id
+/// is part of the seed" while sampling one reader pair and asserting they differed --
+/// which is a 1-in-25 coin flip, not a mechanism check, and its own comment above
+/// concedes the odds. The test now computes the seed for two accounts and asserts they
+/// differ, which is the property, is deterministic, and cannot flake.
+///
+/// Publishing a function so a test can reach it is a cost; this one is worth it because
+/// the alternative was a test that lied about what it was checking.
+pub fn blind_date_seed(account: &str, today: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in account
         .as_bytes()

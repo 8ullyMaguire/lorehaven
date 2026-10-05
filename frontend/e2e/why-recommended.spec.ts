@@ -8,6 +8,7 @@
  * comes back is a sentence rather than a raw code.
  */
 import { expect, test } from '@playwright/test';
+import { expectSignedIn, signOutThroughHeader } from './support/session';
 
 const author = {
   handle: 'whytest-author',
@@ -43,7 +44,7 @@ async function ensureAccount(page: import('@playwright/test').Page, person: type
   await page.fill('#sign-in-email', person.email);
   await page.fill('#sign-in-password', person.password);
   await page.click('button[type=submit]');
-  await expect(page.locator('button:text-is("Sign out")')).toBeVisible();
+  await expectSignedIn(page);
 }
 
 /** Write, save and publish a one-chapter work; returns its id. */
@@ -105,8 +106,8 @@ test('why this: a signed-out reader is offered no explanation', async ({ page })
   await publish(page, 'Why This Signed Out');
 
   // Sign out through the UI rather than clearing cookies, so this exercises the real door.
-  await page.locator('button:text-is("Sign out")').click();
-  await expect(page.locator('a:text-is("Sign in")')).toBeVisible();
+  await signOutThroughHeader(page);
+  await expect(page.locator('header a:text-is("Sign in")')).toBeVisible();
 
   await page.goto('/discover');
   // Either no feed, or a feed whose items carry no slot_id (the server only records slots

@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expectSignedIn, signOutThroughHeader } from './support/session';
 
 /**
  * The reader surface end to end — items 14, 27 and 33 of the 100-idea audit.
@@ -73,7 +74,7 @@ async function ensureAccount(page: Page, person: Who): Promise<void> {
   await page.fill('#sign-in-email', person.email);
   await page.fill('#sign-in-password', person.password);
   await page.click('button[type=submit]');
-  await expect(page.locator('button:text-is("Sign out")')).toBeVisible();
+  await expectSignedIn(page);
 }
 
 /** Write, save and publish a one-chapter work; returns its id. */
@@ -238,9 +239,7 @@ test('most bookmarked: the leaderboard is readable signed out', async ({ page })
   const work = await publish(page, 'Rs Signed Out Favourite');
   await bookmark(page.request, { subjectId: work, isPublic: true });
 
-  await page.goto('/account');
-  await page.click('button:text-is("Sign out")');
-  await expect(page.locator('a:text-is("Register")')).toBeVisible();
+  await signOutThroughHeader(page);
 
   await page.goto('/discover');
   // No session at all. A login wall in front of public data teaches readers the data

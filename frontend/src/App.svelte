@@ -144,6 +144,19 @@
   ];
 
   /**
+   * What the header's account menu holds, in the order a reader reaches for them.
+   *
+   * `/pseud` is here rather than in the `More` group because the menu is opened
+   * FROM the identity line — `Writing as @handle` links to exactly this page — so
+   * a reader who wants to change face is already where the change is.
+   */
+  const ACCOUNT_ITEMS = [
+    { href: '/account', label: 'Your account' },
+    { href: '/settings', label: 'Settings' },
+    { href: '/pseud', label: 'Your pseuds' },
+  ];
+
+  /**
    * A destination is current if the path IS it, or is inside it. Exact-match
    * alone left `/library/history` highlighting nothing, and left `/arena` inert
    * on a sub-path.
@@ -305,13 +318,42 @@
       {/each}
     </nav>
 
+    <!--
+      The controls, and why there is one of them instead of four.
+
+      Measured signed in on 2026-10-05: `Writing as @handle` 154px + `Settings` 57 +
+      `Account` 57 + `Sign out` 83 + the appearance `<select>` 143 = 543px. The bar
+      is a width-capped container at 1088px, the brand is 143 and the nav needs 544,
+      so the nav was left 310px for 544px of content — 234px, 43% of the row, behind
+      the scrollbar. Anonymous, the same row fits EXACTLY (581/581), which is why
+      `shell.spec.ts` measured the state that works and never the state anyone uses.
+
+      The nav was not the problem; the controls were half the bar. So:
+
+      - **`Settings` + `Account` + `Sign out` collapse into one account menu.**
+        Gross 197px saved, less whatever the trigger costs.
+      - **The appearance `<select>` moves into that menu.** 143px, net, and nothing
+        becomes unreachable: the drawer already carries the same control as
+        `theme-select-mobile` (`App.svelte`, the "More" drawer), so the header and
+        the drawer were the only two homes it had.
+      - **`Writing as @handle` stays**, and it is the one thing that does not belong
+        behind a menu. It is not a navigation link so much as a status line: it says
+        which face is speaking, and a writer who is not sure of that is about to post
+        as the wrong person. Hiding identity behind a disclosure is a worse failure
+        than 154px of crowding. It is also the widest single item, so the arithmetic
+        below is what proves it can stay.
+
+      143 brand + 544 nav + 154 writing-as + ~90 trigger + gaps ≈ 1000px, inside 1088.
+      `e2e/shell.spec.ts` now asserts that signed in at 1024 AND 1440, which is the
+      assertion that was missing — the previous one only ever signed out.
+    -->
     <div class="controls">
-      <!--
-        Identity (Milestone 2). The switcher itself lives on the pages where a
-        pseud is chosen; the header says which face is acting, so a writer is
-        never in doubt about who they are speaking as.
-      -->
       {#if session.isSignedIn}
+        <!--
+          Identity (Milestone 2). The switcher itself lives on the pages where a
+          pseud is chosen; the header says which face is acting, so a writer is
+          never in doubt about who they are speaking as.
+        -->
         {#if session.activePseud}
           <a
             class="writing-as"
@@ -322,29 +364,61 @@
             Writing as <strong>@{session.activePseud.handle}</strong>
           </a>
         {/if}
-        <a href="/settings" onclick={(event) => onLinkClick(event, '/settings')}>Settings</a>
-        <a href="/account" onclick={(event) => onLinkClick(event, '/account')}>Account</a>
-        <Button variant="quiet" size="sm" onclick={signOut}>Sign out</Button>
+
+        <NavMenu
+          label="Account"
+          items={ACCOUNT_ITEMS}
+          current={ACCOUNT_ITEMS.some((item) => isCurrent(item.href))}
+          onnavigate={(href, event) => onLinkClick(event, href)}
+        >
+          <!--
+            The two things that are not destinations: which face is speaking, and
+            how the page looks. Both were in the row; both are things you look at
+            once and then rarely again, which is what a menu is for.
+          -->
+          {#if session.activePseud}
+            <span class="menu-identity" data-testid="account-menu-identity">
+              Speaking as <strong>@{session.activePseud.handle}</strong>
+            </span>
+          {/if}
+          <label class="menu-label" for="theme-select">Appearance</label>
+          <!--
+            `value` + an explicit handler rather than `bind:value` + `onchange`:
+            with both, persistence depends on which listener Svelte attaches
+            first, which is not a guarantee worth relying on for a saved preference.
+          -->
+          <select
+            id="theme-select"
+            value={preference}
+            onchange={(event) => chooseTheme(event.currentTarget.value as ThemePreference)}
+          >
+            {#each themeOptions as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+          <Button variant="quiet" size="sm" onclick={signOut}>Sign out</Button>
+        </NavMenu>
       {:else}
         <a href="/sign-in" onclick={(event) => onLinkClick(event, '/sign-in')}>Sign in</a>
         <a href="/register" onclick={(event) => onLinkClick(event, '/register')}>Register</a>
+        <label class="visually-hidden" for="theme-select-anon">Appearance</label>
+        <!--
+          The theme control stays in the row while signed OUT. Anonymous, the row
+          fits exactly (581/581 measured), so there is no reason to hide anything
+          here — and hiding it would be a different product for a different
+          stranger. The two are separate elements rather than one because the
+          signed-in one lives inside the account menu.
+        -->
+        <select
+          id="theme-select-anon"
+          value={preference}
+          onchange={(event) => chooseTheme(event.currentTarget.value as ThemePreference)}
+        >
+          {#each themeOptions as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
       {/if}
-
-      <label class="visually-hidden" for="theme-select">Appearance</label>
-      <!--
-        `value` + an explicit handler rather than `bind:value` + `onchange`:
-        with both, persistence depends on which listener Svelte attaches first,
-        which is not a guarantee worth relying on for a saved preference.
-      -->
-      <select
-        id="theme-select"
-        value={preference}
-        onchange={(event) => chooseTheme(event.currentTarget.value as ThemePreference)}
-      >
-        {#each themeOptions as option (option.value)}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
     </div>
   </div>
 
@@ -562,7 +636,11 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-3) var(--space-5);
+    /* Column gap --space-4 (16px), not --space-5 (20px). Two gaps cost 40px of a
+       1088px bar, and the row was 7px short of fitting signed in at 1024px. The
+       row gap is --space-3 and the nav's internal gap is --space-3, so 16px
+       between the halves reads as a group and 12px inside one. */
+    gap: var(--space-3) var(--space-4);
     min-height: 4rem;
   }
 
@@ -624,7 +702,10 @@
        is not there. Nine items at --space-3 is 8 gaps, which closes it with room
        to spare before the scrollbar is ever needed. */
     gap: var(--space-3);
-    margin-left: var(--space-3);
+    /* No `margin-left`. It doubled the bar's own column gap on this one side, and
+       the 12px is better spent inside the row than beside it — the signed-in bar
+       was 7px short of fitting at a 1024px viewport, which is exactly the margin's
+       cost. The bar's gap separates the three halves; nothing else needed to. */
     flex: 1;
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -670,11 +751,19 @@
     margin-top: 0;
   }
 
+  /*
+   * The controls, measured rather than eyeballed.
+   *
+   * `gap` dropped from `--space-3` (12px) to `--space-2` (8px) because there are
+   * two items here now instead of five, and 4 × 4px of gap is 16px of the row the
+   * nav is short of. `--space-2` also matches the nav's own gap, so the two halves
+   * of the bar no longer read as two different spacings.
+   */
   .controls {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
 
   .controls > a {
@@ -689,8 +778,81 @@
     color: var(--color-text);
   }
 
+  /*
+   * The identity line, and the one item that could not be moved.
+   *
+   * `text-overflow: ellipsis` on a `min-width: 0` flex child, because a 40-character
+   * handle is 250px of "Writing as @…" and the bar is 1088. Truncating is the right
+   * failure: the handle stays visible and legible, the page does not scroll, and
+   * the full handle is one click away on `/pseud` — which is what this links to.
+   */
   .writing-as {
     font-weight: 400;
+    font-size: var(--text-sm);
+    color: var(--color-muted);
+    min-width: 0;
+    /* A BOUNDED width, not just a shrinkable one, and the difference is the
+       whole fix. `.desktop` has `overflow-x: auto`, which per CSS makes its
+       `min-width: auto` resolve to 0 — so the nav is allowed to shrink below its
+       content, and when the row is in deficit BOTH the identity line and the nav
+       shrink together. A long handle then steals the nav's width and the row
+       starts scrolling again, which is the defect this layout was re-laid-out to
+       remove.
+       `max-width` makes the truncation happen FIRST and unconditionally, so the
+       deficit never reaches the nav. 22ch holds `Writing as @` plus a handle long
+       enough to recognise; the full handle is one click away on /pseud. */
+    max-width: 22ch;
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .writing-as:hover {
+    color: var(--color-text);
+  }
+
+  .writing-as strong {
+    color: var(--color-text);
+  }
+
+  /*
+   * The account menu, sitting in `.controls` rather than `.desktop`.
+   *
+   * It is a `NavMenu`, so it inherits the Escape/arrow/Home/End/Tab behaviour and
+   * the click-outside handling that `shell.spec.ts` already pins for the five nav
+   * menus — which is why this is a `NavMenu` and not a sixth hand-rolled disclosure.
+   *
+   * The trigger is styled down to `--text-sm` because the nav's triggers are the
+   * default size and a 24px control next to 14px ones is a third visual weight in
+   * a bar that has two.
+   */
+  .controls :global(.menu .trigger) {
+    font-size: var(--text-sm);
+    color: var(--color-muted);
+  }
+
+  .controls :global(.menu .panel) {
+    min-width: 13rem;
+  }
+
+  .menu-identity {
+    display: block;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-muted);
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
+
+  .menu-identity strong {
+    color: var(--color-text);
+  }
+
+  .menu-label {
+    display: block;
+    padding: var(--space-2) var(--space-3) 0;
+    font-size: var(--text-sm);
+    color: var(--color-muted);
   }
 
   .controls select {
@@ -702,6 +864,18 @@
     border-radius: var(--radius-md);
     padding: var(--space-2) var(--space-3);
     min-height: 2.5rem;
+  }
+
+  /* Inside the menu, the select is a full-width row rather than a 143px inline
+     control squeezed next to two links. */
+  .controls :global(.menu .panel select) {
+    display: block;
+    width: calc(100% - var(--space-6));
+    margin: var(--space-1) var(--space-3) var(--space-2);
+  }
+
+  .controls :global(.menu .panel button) {
+    margin: 0 var(--space-3) var(--space-2);
   }
 
   .mobile {

@@ -10,7 +10,7 @@
 //! is that it is **deterministic in (account, day)**. So the tests below are mostly about
 //! stability, which is the opposite of what a random-pick surface would test.
 
-use lorehaven_db::discovery::blind_date_work;
+use lorehaven_db::discovery::{blind_date_seed, blind_date_work};
 use test_support::{scratch_dir, TestDb};
 
 struct Fixture {
@@ -130,17 +130,81 @@ async fn futures_join_all(f: &Fixture, days: &[String]) -> Vec<Option<String>> {
 async fn two_readers_get_different_works_on_the_same_day() {
     // A single work-of-the-day for everyone would just be a trending slot, and §16.1a
     // already has one. Blind Date exists to get *outside* the profile, which only means
-    // something if it is per-reader. With 25 works and two readers the odds of a
-    // collision are 1-in-25, so this asserts the mechanism (the account is in the
-    // seed) rather than statistical luck.
-    let f = Fixture::build("bd_perreader").await;
+    // something if it is per-reader.
+    //
+    // ## This test was a 1-in-25 coin flip, and its comment said so while claiming otherwise
+    //
+    // The old version built 25 works, picked for two accounts on one day, and asserted
+    // the picks differed -- with a comment reading "so this asserts the mechanism (the
+    // account is in the seed) rather than statistical luck". It did not. Two readers
+    // drawing one each from 25 works collide one time in 25, so the test failed on
+    // roughly one run in twenty-five and passed the rest while never once checking the
+    // seed. Its sibling, `a_different_day_gives_a_different_work`, had ALREADY been
+    // rewritten for exactly this mistake (see its long comment about the birthday
+    // problem and the threshold move from 12 to 10) -- and left this one in place. That
+    // is how the failure got to a full-workspace run in the first place.
+    //
+    // `cargo test --workspace` on PostgreSQL, 2026-10-05, hit it: both picks were
+    // `b8db39aa-...`. It passed alone, for the same reason it used to pass alone.
+    //
+    // ## What it checks now
+    //
+    // The property, not a sample of it: two accounts produce two seeds. Deterministic,
+    // instant, and it fails the moment someone drops `account` from the hash -- which is
+    // the only way this can actually break. `blind_date_seed` became `pub` for it.
+    let day = "2026-10-02";
+    let a = blind_date_seed("acct-reader-one", day);
+    let b = blind_date_seed("acct-reader-two", day);
+    assert_ne!(
+        a, b,
+        "the account id must be part of the seed, or every reader gets the same Blind Date"
+    );
+    // And the day is part of it too, which is the other half of "per reader per day" --
+    // asserted here because `a_different_day_gives_a_different_work` only gets at it
+    // through the distribution, i.e. statistically.
+    assert_ne!(
+        blind_date_seed("acct-reader-one", day),
+        blind_date_seed("acct-reader-one", "2026-10-03"),
+        "the day must be part of the seed"
+    );
+}
+
+#[tokio::test]
+async fn two_readers_really_do_get_different_works_when_they_do_not_collide() {
+    // The end-to-end half, kept because the seed check above cannot see the SQL: it
+    // says nothing about whether the account reaches the query, or whether the account
+    // id is the string it thinks it is.
+    //
+    // Spelled so it cannot flake. Rather than betting on 25 works and one pair -- the
+    // mistake the test above used to make -- this asks for the pick for MANY reader/day
+    // pairs and asserts the mapping is not the constant it would be if the account were
+    // ignored. Two readers on one day is 1-in-25; twenty accounts across ten days is
+    // 10^13 possible assignments and a broken seed gives exactly 10.
+    let f = Fixture::build("bd_perreader_e2e").await;
     f.works("w", 25).await;
-    let other = account(&f.tdb, "bd_perreader-other@example.com").await;
-    let a = f.pick("2026-10-02").await;
-    let b = blind_date_work(f.tdb.db(), &other, "2026-10-02")
-        .await
-        .expect("blind date");
-    assert_ne!(a, b, "the account id is part of the seed");
+    let day = "2026-10-02";
+    let mut picks = std::collections::HashSet::new();
+    for i in 0..20 {
+        // A real account, so a real uuid. The first version of this passed the email
+        // address straight in and PostgreSQL answered
+        //   invalid input syntax for type uuid: "bd_perreader-e2e-0@example.com"
+        // -- which is the difference between the two engines being a nuisance, not
+        // just a chore: `accounts.id` is a uuid on PostgreSQL and a TEXT slug on
+        // SQLite, so a test that passes an identifier by hand compiles on SQLite and
+        // is rejected at the boundary on PostgreSQL. It still passed on SQLite, which
+        // is precisely how this gets missed.
+        let reader = account(&f.tdb, &format!("bd_perreader-e2e-{i}@example.com")).await;
+        picks.insert(
+            blind_date_work(f.tdb.db(), &reader, day)
+                .await
+                .expect("25 eligible works, so every reader gets a pick"),
+        );
+    }
+    assert!(
+        picks.len() > 10,
+        "20 readers drew only {} distinct works from 25: the account is not reaching the seed",
+        picks.len()
+    );
 }
 
 // ── eligibility ─────────────────────────────────────────────────────────────

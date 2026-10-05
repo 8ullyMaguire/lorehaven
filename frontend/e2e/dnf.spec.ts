@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { expectSignedIn, signOutThroughHeader } from './support/session';
 
 /**
  * Item 11 of the 100-idea audit: "Mark as DNF", end to end.
@@ -50,7 +51,7 @@ async function signUp(page: Page, base: string): Promise<void> {
   await page.fill('#sign-in-email', `${handle.toLowerCase()}@dnf.test`);
   await page.fill('#sign-in-password', PASSPHRASE);
   await page.click('button[type=submit]');
-  await expect(page.locator('button:text-is("Sign out")')).toBeVisible();
+  await expectSignedIn(page);
 }
 
 /** Publish a one-chapter work so there is a page to mark. Returns its id. */
@@ -110,9 +111,7 @@ test('a signed-out reader is offered no DNF control', async ({ page }) => {
   await signUp(page, 'DnfSignedOut');
   const workId = await publish(page, 'Dnf Signed Out Work');
 
-  await page.goto('/account');
-  await page.click('button:text-is("Sign out")');
-  await expect(page.locator('a:text-is("Register")')).toBeVisible();
+  await signOutThroughHeader(page);
 
   await page.goto(`/works/${workId}`);
   // Absent, not disabled: a DNF row belongs to a pseud, so a signed-out reader has no row
