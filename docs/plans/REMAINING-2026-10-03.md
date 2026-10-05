@@ -8,7 +8,7 @@ what is *still* to do, in the order it will be done.
 | Fact | Value |
 |---|---|
 | Toolchain | `export PATH="$HOME/.cargo/bin:$PATH"` **first**. System `rustc` is broken (partial Arch upgrade, libLLVM 22.1 gone). |
-| PostgreSQL | `sudo docker start lh-pg-test`. Container `lh-pg-test` on **127.0.0.1:55433**, user `lorehaven`, db `postgres`, password `lorehaven`. |
+| PostgreSQL | **`scripts/pg-test-db.sh`** — run it; it creates/starts `lh-pg-test` and prints the URL. Container on **127.0.0.1:55433**, user `lorehaven`, db `postgres`, password `lorehaven`. **It must be created with `--shm-size 4g`** (see `pg-test-db.sh`): Docker's 64 MB default produces `Connection reset by peer`, `out of shared memory (53200)` and `could not resize shared memory segment` — all one fault — and `ShmSize` is fixed at create time, so `docker start` cannot repair it. |
 | Test URL | `export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:lorehaven@127.0.0.1:55433/postgres'` — **both engines means running the suite twice**, once with this set and once without. `unset` it before the SQLite run; a leftover value sends every test to a host that does not resolve. |
 | SQLite | Default. Unset the variable above and nothing else is needed. |
 | Frontend | `cd frontend && node node_modules/vitest/vitest.mjs run <file>`. Not `pnpm test`. |
