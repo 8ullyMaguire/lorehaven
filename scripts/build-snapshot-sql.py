@@ -185,6 +185,9 @@ def parse_columns(mig: pathlib.Path) -> dict[str, dict[str, str]]:
     def add(table: str, col: str, ctype: str) -> None:
         tables.setdefault(table, {})[col] = ctype
 
+    def replace(table: str, cols: dict[str, str]) -> None:
+        tables[table] = cols
+
     for path in sorted(mig.glob("*.sql")):
         sql = re.sub(r"--[^\n]*", "", path.read_text(encoding="utf-8", errors="replace"))
         for m in re.finditer(
@@ -200,13 +203,28 @@ def parse_columns(mig: pathlib.Path) -> dict[str, dict[str, str]]:
             while i < len(sql) and depth:
                 depth += (sql[i] == "(") - (sql[i] == ")")
                 i += 1
+            cols: dict[str, str] = {}
             for line in sql[m.end(): i - 1].splitlines():
                 line = line.strip().rstrip(",")
                 cm = re.match(r"^([a-z_]\w*)\s+([A-Za-z]+)", line, re.I)
                 if cm and cm.group(1).lower() not in {
                     "primary", "foreign", "constraint", "unique", "check", "key"
                 }:
-                    add(table, cm.group(1).lower(), cm.group(2).lower())
+                    cols[cm.group(1).lower()] = cm.group(2).lower()
+            # REPLACE, never merge. `mutes` is created twice in this repository:
+            # `0001_identity.sql` with (id, pseud_id, target_type, target_id, ...), then
+            # `0013_community.sql` DROPs it and recreates it as
+            # (muter, muted, until, created_at). The second definition is the live one --
+            # it has no `id` column at all -- but merging the two produced a table
+            # carrying the union, and the generator emitted `SELECT "id" FROM
+            # public.mutes` for a column that does not exist.
+            #
+            # The symptom was `column "id" does not exist` at position 12992 of 35KB of
+            # generated SQL: a fault naming the generator, three files from its cause,
+            # that reads as a schema defect. An `ALTER TABLE ... ADD COLUMN` still merges
+            # (that genuinely is additive), but a CREATE TABLE is a redefinition and the
+            # later one is authoritative -- which is exactly what the runner does.
+            replace(table, cols)
     return tables
 
 
@@ -415,7 +433,19 @@ def build(out: pathlib.Path, mode: str = "cache",
                     # refusing would make the flag look mandatory when the spec
                     # only requires the offset to be unpublished.
                     pass
-                elif ctype in ("timestamptz", "timestamp", "date"):
+                # `information_schema.columns.data_type` spells these out in full --
+                # `timestamp with time zone`, `timestamp without time zone` -- while the
+                # migration parser records the shorthand `TIMESTAMPTZ`. Matching only the
+                # shorthand meant the LIVE path took the text branch for every timestamp
+                # column in the schema, and the text branch's `~` regex guard does not
+                # exist for a timestamp:
+                #
+                #   operator does not exist: timestamp with time zone ~ unknown
+                #
+                # which aborted the whole mask and took the offset test with it. Both
+                # spellings have to be accepted, and matching on a prefix covers the
+                # third variant rather than enumerating it.
+                elif ctype.startswith("timestamp") or ctype in ("timestamptz", "date"):
                     projection.append(
                         f'    ({col}::timestamptz + INTERVAL \'{offset_days} days\') AS "{col}"'
                     )

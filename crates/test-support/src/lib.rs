@@ -1486,25 +1486,82 @@ mod tests {
     async fn cleanup_removes_the_sqlite_scratch_directory() {
         let dir = super::scratch_dir("cleanup-removes-dir");
         let tdb = super::TestDb::connect_with_dir("cleanup-removes-dir", &dir).await;
-        let recorded = tdb
-            .sqlite_dir
-            .clone()
-            .expect("a SQLite TestDb records its directory");
-        assert!(
-            recorded.is_dir(),
-            "the scratch directory exists while in use"
-        );
-        assert!(
-            recorded.join("lorehaven.sqlite").is_file(),
-            "and holds the database"
-        );
+        let pg_name = tdb.pg_name.clone();
+
+        // The property is "cleanup removes what it recorded", and it holds on BOTH
+        // engines -- `cleanup` drops the scratch database or removes the directory,
+        // whichever this run built. Asserting on `sqlite_dir` alone made this a
+        // SQLite-only test inside a suite that runs on both, so it failed under
+        // `LOREHAVEN_TEST_PG_URL` with "a SQLite TestDb records its directory" --
+        // a message that reads as a harness defect when it is really a test that
+        // never considered the other backend.
+        let recorded = match (&tdb.sqlite_dir, &pg_name) {
+            (Some(dir), _) => {
+                assert!(dir.is_dir(), "the scratch directory exists while in use");
+                assert!(
+                    dir.join("lorehaven.sqlite").is_file(),
+                    "and holds the database"
+                );
+                CleanupWitness::Sqlite(dir.clone())
+            }
+            // A PostgreSQL `TestDb` records no directory: the scratch artefact is the
+            // database itself, and the directory handed to `connect_with_dir` is
+            // untouched by design (it is only used on the SQLite arm).
+            (None, Some(name)) => {
+                let admin = tdb
+                    .pg_admin
+                    .as_ref()
+                    .expect("a PostgreSQL TestDb keeps its admin handle")
+                    .postgres_pool()
+                    .expect("postgres admin pool");
+                let survives: i64 =
+                    sqlx::query_scalar("SELECT COUNT(*) FROM pg_database WHERE datname = $1")
+                        .bind(name)
+                        .fetch_one(admin)
+                        .await
+                        .expect("the scratch database exists while in use");
+                assert_eq!(survives, 1, "the scratch database exists while in use");
+                CleanupWitness::Postgres(name.clone())
+            }
+            (None, None) => panic!("a TestDb records a scratch artefact on every engine"),
+        };
 
         tdb.cleanup().await;
 
-        assert!(
-            !recorded.exists(),
-            "cleanup left {recorded:?} behind -- this is the leak that put 29GB in TMPDIR"
-        );
+        match recorded {
+            CleanupWitness::Sqlite(dir) => assert!(
+                !dir.exists(),
+                "cleanup left {dir:?} behind -- this is the leak that put 29GB in TMPDIR"
+            ),
+            CleanupWitness::Postgres(name) => {
+                // A FRESH admin connection: `cleanup` consumes and closes the
+                // handle the TestDb was holding, so the post-condition has to be
+                // checked from outside the thing under test.
+                let url = std::env::var("LOREHAVEN_TEST_PG_URL")
+                    .expect("LOREHAVEN_TEST_PG_URL is set on the PostgreSQL arm");
+                let admin = super::Database::connect(&super::DatabaseConfig::new(url))
+                    .await
+                    .expect("a fresh admin connection to check the post-condition");
+                let survives: i64 =
+                    sqlx::query_scalar("SELECT COUNT(*) FROM pg_database WHERE datname = $1")
+                        .bind(&name)
+                        .fetch_one(admin.postgres_pool().expect("postgres admin pool"))
+                        .await
+                        .expect("query the admin database after cleanup");
+                admin.close().await;
+                assert_eq!(
+                    survives, 0,
+                    "cleanup left the scratch database {name:?} behind"
+                );
+            }
+        }
+    }
+
+    /// What a `TestDb` was recorded to hold, so the assertions above can talk about
+    /// "the scratch artefact" without repeating the per-engine spelling.
+    enum CleanupWitness {
+        Sqlite(std::path::PathBuf),
+        Postgres(String),
     }
 
     /// The sweep must not remove a directory that was touched moments ago, which is

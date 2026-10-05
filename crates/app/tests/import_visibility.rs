@@ -118,12 +118,7 @@ impl Client {
         }
     }
 
-    async fn send(
-        &mut self,
-        method: &str,
-        path: &str,
-        body: Option<Value>,
-    ) -> (StatusCode, Value) {
+    async fn send(&mut self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(path);
         let cookies = self.cookie_header();
         if !cookies.is_empty() {
@@ -134,9 +129,7 @@ impl Client {
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(axum::body::Body::from(value.to_string()))
                 .expect("request"),
-            None => builder
-                .body(axum::body::Body::empty())
-                .expect("request"),
+            None => builder.body(axum::body::Body::empty()).expect("request"),
         };
         let response = self
             .app
@@ -230,7 +223,12 @@ impl Harness {
             "INSERT INTO works (id, owner_pseud_id, title, lifecycle, visibility, created_at, \
              updated_at, generated_content_posture) \
              VALUES ({w:uuid}, {p:uuid}, {t}, 'published', 'public', {n}, {n}, 'forbid')",
-            &[("w:uuid", &work), ("p:uuid", &pseud), ("t", title), ("n", now)],
+            &[
+                ("w:uuid", &work),
+                ("p:uuid", &pseud),
+                ("t", title),
+                ("n", now),
+            ],
         )
         .await;
 
@@ -262,7 +260,11 @@ async fn seed(db: &Database, sql: &str, binds: &[(&str, &str)]) {
     let mut sqlite = sql.to_string();
     let mut postgres = sql.to_string();
     for (i, (name, _value)) in binds.iter().enumerate() {
-        let cast = if name.ends_with(":uuid") { "::uuid" } else { "" };
+        let cast = if name.ends_with(":uuid") {
+            "::uuid"
+        } else {
+            ""
+        };
         sqlite = sqlite.replace(&format!("{{{name}}}"), &format!("?{}", i + 1));
         postgres = postgres.replace(&format!("{{{name}}}"), &format!("${}{cast}", i + 1));
     }
@@ -369,7 +371,9 @@ async fn a_visitor_with_no_session_reaches_no_library_metadata() {
 async fn a_visitor_cannot_reach_a_readers_items_by_guessing_nothing() {
     let harness = Harness::new("visitor_ids").await;
     let _alice = harness.reader("alice").await;
-    let item = harness.library_item_for("alice", "Alice's Private Import").await;
+    let item = harness
+        .library_item_for("alice", "Alice's Private Import")
+        .await;
     let mut visitor = harness.client();
 
     // A valid, real, other reader's item id, asked for by name.
@@ -402,7 +406,9 @@ async fn a_reader_sees_only_their_own_library_items() {
     let harness = Harness::new("own_items").await;
     let mut alice = harness.reader("alice").await;
     let _bob = harness.reader("bob").await;
-    harness.library_item_for("alice", "Alice's Private Import").await;
+    harness
+        .library_item_for("alice", "Alice's Private Import")
+        .await;
     harness
         .library_item_for("bob", "Bob's Own Private Import")
         .await;
@@ -438,10 +444,10 @@ async fn a_readers_listing_ignores_an_account_id_supplied_by_the_caller() {
     let harness = Harness::new("supplied_account").await;
     let mut alice = harness.reader("alice").await;
     let _bob = harness.reader("bob").await;
-    harness.library_item_for("alice", "Alice Marker Title").await;
     harness
-        .library_item_for("bob", "Bob Marker Title")
+        .library_item_for("alice", "Alice Marker Title")
         .await;
+    harness.library_item_for("bob", "Bob Marker Title").await;
 
     // Alice asks for bob's account explicitly. If any route honoured this, it would be
     // the leak M45-53 exists to prevent — and it would work with a VALID id.
@@ -482,7 +488,9 @@ async fn a_readers_own_item_is_found_by_its_real_id() {
         );
     } else {
         assert!(
-            serde_json::to_string(&body).unwrap_or_default().contains("Alice"),
+            serde_json::to_string(&body)
+                .unwrap_or_default()
+                .contains("Alice"),
             "alice fetched her own item and it is not hers: {body}"
         );
     }

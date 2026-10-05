@@ -64,18 +64,22 @@ async fn count(db: &Database, table: &str, column: &str, value: &str) -> i64 {
         format!("SELECT COUNT(*) FROM {table} WHERE {column} = $1"),
     );
     match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, (i64,)>(&sql)
-            .bind(value)
-            .fetch_one(db.sqlite_pool().expect("sqlite"))
-            .await
-            .expect("count")
-            .0,
-        Backend::Postgres => sqlx::query_as::<_, (i64,)>(&sql)
-            .bind(uuid::Uuid::parse_str(value).expect("uuid"))
-            .fetch_one(db.postgres_pool().expect("postgres"))
-            .await
-            .expect("count")
-            .0,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (i64,)>(&sql)
+                .bind(value)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("count")
+                .0
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (i64,)>(&sql)
+                .bind(uuid::Uuid::parse_str(value).expect("uuid"))
+                .fetch_one(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("count")
+                .0
+        }
     }
 }
 
@@ -212,7 +216,12 @@ impl Fixture {
 
     async fn seed_private_rows(&self) -> Vec<&'static str> {
         let db = self.db();
-        let work = work(db, &self.other_pseud, &format!("{}-someone", self.other_pseud)).await;
+        let work = work(
+            db,
+            &self.other_pseud,
+            &format!("{}-someone", self.other_pseud),
+        )
+        .await;
 
         exec_bind(
             db,
@@ -326,8 +335,7 @@ async fn plan_erasure_reports_no_published_works_for_a_reader_who_only_reads() {
     let plan = plan_erasure(f.db(), &f.account).await.expect("plan");
 
     assert_eq!(
-        plan.published_work_count,
-        0,
+        plan.published_work_count, 0,
         "reading a work is not authoring it; a reader who has only bookmarked things must not be \
          told they would orphan published work"
     );
@@ -342,8 +350,7 @@ async fn plan_erasure_reports_published_works_the_erasure_would_orphan() {
     let plan = plan_erasure(f.db(), &f.account).await.expect("plan");
 
     assert_eq!(
-        plan.published_work_count,
-        1,
+        plan.published_work_count, 1,
         "works.owner_pseud_id is ON DELETE CASCADE, so erasing this account DELETES the work. The \
          plan has to say so, or the reader finds out afterwards."
     );
@@ -358,7 +365,9 @@ async fn subject_data_reports_the_readers_own_rows() {
     let f = Fixture::build("erasure_subject").await;
     let _ = f.seed_private_rows().await;
 
-    let data = subject_data(f.db(), &f.account).await.expect("subject data");
+    let data = subject_data(f.db(), &f.account)
+        .await
+        .expect("subject data");
 
     assert_eq!(
         data.bookmarks.len(),
@@ -402,7 +411,9 @@ async fn subject_data_never_carries_a_numeric_resonance_score() {
 
     let f = Fixture::build("erasure_forbidden").await;
     let _ = f.seed_private_rows().await;
-    let data = subject_data(f.db(), &f.account).await.expect("subject data");
+    let data = subject_data(f.db(), &f.account)
+        .await
+        .expect("subject data");
     let json = serde_json::to_value(&data).expect("serialise");
 
     // Walk the PARSED json rather than grepping a string: the case that matters is a numeric
@@ -432,7 +443,9 @@ async fn subject_data_never_carries_a_numeric_resonance_score() {
     }
 
     assert!(
-        !found.iter().any(|k| k.contains("resonance") && k.contains("numeric")),
+        !found
+            .iter()
+            .any(|k| k.contains("resonance") && k.contains("numeric")),
         "no numeric resonance key of any spelling"
     );
 }
@@ -605,7 +618,13 @@ async fn erasure_leaves_no_export_a_worker_could_still_deliver() {
          it can still hand the reader their exported data after they asked for it to be erased."
     );
     assert_eq!(
-        count(f.db(), "jobs", "id", &test_support::id("erasure-export-job")).await,
+        count(
+            f.db(),
+            "jobs",
+            "id",
+            &test_support::id("erasure-export-job")
+        )
+        .await,
         1,
         "the queue row SURVIVES by design — jobs.requested_by is SET NULL so a failure can be \
          diagnosed after the requester is gone. Asserted rather than left implicit, because \

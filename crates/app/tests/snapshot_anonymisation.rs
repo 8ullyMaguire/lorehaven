@@ -130,12 +130,17 @@ async fn apply_mask(tdb: &TestDb) {
         .env(
             "LOREHAVEN_PG_URL",
             // The scratch database, not the template — same reason as in `dump`.
-            format!(
-                "postgres://postgres:{}@127.0.0.1:5432/{}",
-                pg_password(),
-                tdb.pg_database_name().expect("pg database name")
-            ),
+            pg_scoped_url(tdb.pg_database_name().expect("pg database name")),
         )
+        // Belt and braces, NOT the fix. I added this believing psql was failing auth
+        // without it; measured, `psql <url-with-password>` authenticates fine, because
+        // the password is in the URL and that is the first place psql looks. The real
+        // fault was `pg_endpoint`/`pg_scoped_url` splitting the credential without
+        // stripping the scheme, so the subprocesses were handed
+        // `postgres://lorehaven` as a username. Kept because a subprocess that inherits
+        // an unrelated PGPASSWORD is a hazard, and because this generator silently
+        // degrades to a lossy parse on ANY connection failure -- see the note there.
+        .env("PGPASSWORD", pg_password())
         .current_dir(&repo)
         .output()
         .expect("run the generator");
@@ -168,7 +173,8 @@ fn dump(tdb: &TestDb, extra: &[&str], out: &std::path::Path) -> String {
         .expect("a postgres scratch database name")
         .to_owned();
     let mut cmd = std::process::Command::new("pg_dump");
-    cmd.args(["-h", "127.0.0.1", "-U", "postgres", "-d"])
+    let (host, port, user) = pg_endpoint();
+    cmd.args(["-h", &host, "-p", &port, "-U", &user, "-d"])
         .arg(&name)
         .args(extra)
         .arg("-f")
@@ -191,6 +197,107 @@ fn pg_password() -> String {
             creds.rsplit_once(':').map(|(_, pw)| pw.to_owned())
         })
         .unwrap_or_default()
+}
+
+/// `-h`, `-p` and `-U` for the `psql`/`pg_dump` subprocesses, read out of
+/// `LOREHAVEN_TEST_PG_URL` rather than written down.
+///
+/// These five call sites used to hardcode `127.0.0.1` / `5432` / `postgres`, while
+/// `pg_password()` — thirty lines above — parsed the password out of the same URL. So the
+/// credential came from the environment and the endpoint did not, and every one of these
+/// tests can only pass on a machine that happens to run PostgreSQL on the default port.
+/// The container this project tests against is on 55433, where `pg_dump` answered
+/// `connection to server at "127.0.0.1", port 5432 failed: Connection refused`.
+///
+/// A hardcoded port is not a neutral default here: it turns "the masking pipeline is
+/// broken" into "the masking pipeline could not be reached", which is a false pass for
+/// any test whose assertion is on the dump's *contents*.
+/// Whether the server under test knows this setting, cached per name.
+///
+/// `current_setting(name, true)` returns NULL rather than erroring for an unknown
+/// name when the second argument is true, which is the only non-throwing way to ask.
+/// Probing the server beats hardcoding a version list: a GUC added in PostgreSQL 18
+/// would otherwise need a code change here.
+fn probe_guc(name: &str) -> bool {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<Vec<(String, bool)>>> = Mutex::new(None);
+    let mut guard = CACHE.lock().expect("guc cache");
+    let entries = guard.get_or_insert_with(Vec::new);
+    if let Some((_, known)) = entries.iter().find(|(n, _)| n == name) {
+        return *known;
+    }
+    // The endpoint, not the default: a probe that quietly connects to the wrong port
+    // returns "unknown" for EVERY name and would strip every SET line from the dump,
+    // which is the failure this whole filter exists to prevent.
+    let (host, port, user) = pg_endpoint();
+    let known = std::process::Command::new("psql")
+        .args([
+            "-h",
+            &host,
+            "-p",
+            &port,
+            "-U",
+            &user,
+            // `-d` is REQUIRED, not decorative: psql defaults the database to the
+            // user name, and `lorehaven` does not exist on this server, so the probe
+            // failed with `FATAL: database "lorehaven" does not exist`. The `.ok()`
+            // below then treated the failure as "known" and kept the line -- which is
+            // how `transaction_timeout` survived the filter it was added to remove.
+            "-d",
+            "postgres",
+            "-tAc",
+            &format!("SELECT current_setting('{name}', true) IS NOT NULL"),
+        ])
+        .env("PGPASSWORD", pg_password())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "t")
+        // An unprobeable name is treated as UNKNOWN, so a broken probe removes the
+        // line rather than keeping a line the server will reject. Dropping a session
+        // setting is harmless; keeping an unparseable one aborts the restore.
+        .unwrap_or(false);
+    entries.push((name.to_owned(), known));
+    known
+}
+
+fn pg_endpoint() -> (String, String, String) {
+    let url = pg_url().expect("LOREHAVEN_TEST_PG_URL is set for these tests");
+    // The SCHEME has to come off before the credentials are split, and that is the
+    // whole bug this function was born with. `rsplit_once('@')` on
+    // `postgres://lorehaven:pw@127.0.0.1:55433/postgres` leaves the scheme attached to
+    // the credential (`"postgres://lorehaven:pw"`), and the next `rsplit_once(':')`
+    // then splits at the PASSWORD's colon -- so the "user" came out as
+    // `postgres://lorehaven` and pg_dump reported
+    // `password authentication failed for user "postgres://lorehaven"`, which reads
+    // like a credential problem and is a string-parsing one.
+    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(&url);
+    let (creds, host) = after_scheme
+        .rsplit_once('@')
+        .expect("a url with credentials");
+    let (user, _) = creds.rsplit_once(':').expect("a url with a password");
+    let host = host.split('/').next().unwrap_or(host);
+    let (hostname, port) = match host.rsplit_once(':') {
+        Some((h, p)) => (h.to_owned(), p.to_owned()),
+        None => (host.to_owned(), "5432".to_owned()),
+    };
+    (hostname, port, user.to_owned())
+}
+
+/// The same URL `pg_url()` returns, but pointed at one specific scratch database.
+///
+/// The generator and the `psql`/`pg_dump` subprocesses need a *connection string*, not
+/// the separate `-h`/`-p`/`-U`/`PGPASSWORD` pieces `pg_endpoint()` and `pg_password()`
+/// produce, so this rebuilds it from the same parse. Keeping one parser is the point:
+/// the bug being fixed here was two independent readings of one env var.
+fn pg_scoped_url(database: &str) -> String {
+    let url = pg_url().expect("LOREHAVEN_TEST_PG_URL is set for these tests");
+    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(&url);
+    let (creds, host) = after_scheme
+        .rsplit_once('@')
+        .expect("a url with credentials");
+    let host = host.split('/').next().unwrap_or(host);
+    format!("postgresql://{creds}@{host}/{database}")
 }
 
 /// The control: an UNMASKED dump contains every canary.
@@ -422,12 +529,9 @@ async fn apply_mask_in_mode(tdb: &TestDb, mode: &str) {
         .arg(mode)
         .env(
             "LOREHAVEN_PG_URL",
-            format!(
-                "postgres://postgres:{}@127.0.0.1:5432/{}",
-                pg_password(),
-                tdb.pg_database_name().expect("pg database name")
-            ),
+            pg_scoped_url(tdb.pg_database_name().expect("pg database name")),
         )
+        .env("PGPASSWORD", pg_password())
         .current_dir(&repo)
         .output()
         .expect("run the generator");
@@ -789,12 +893,20 @@ async fn a_restored_snapshot_passes_doctor() {
     // against it. Asserting on the ledger's row count would be a test of the
     // helper; this is the requirement itself.
     let restored = format!("lh_snapshot_doctor_restore_{}", std::process::id());
+    // Read the endpoint out of the env rather than assuming the default port: these
+    // three psql calls are what create, populate and drop the database the real
+    // binary's `doctor` then runs against, so a wrong port does not fail one
+    // assertion -- it fails the REQUIREMENT, and reports it as
+    // "doctor FAILS against a snapshot that restored cleanly".
+    let (restore_host, restore_port, restore_user) = pg_endpoint();
     let create = std::process::Command::new("psql")
         .args([
             "-h",
-            "127.0.0.1",
+            &restore_host,
+            "-p",
+            &restore_port,
             "-U",
-            "postgres",
+            &restore_user,
             "-d",
             "postgres",
             "-c",
@@ -821,6 +933,37 @@ async fn a_restored_snapshot_passes_doctor() {
     let rewritten = text
         .lines()
         .filter(|l| l.trim() != "CREATE SCHEMA snapshot_masked;")
+        // Drop `SET <guc>` lines for parameters this SERVER does not have.
+        //
+        // The client `pg_dump` here is 18.6 and the server under test is 15.19, and a
+        // newer client emits GUCs the older server rejects:
+        //
+        //   ERROR:  unrecognized configuration parameter "transaction_timeout"
+        //
+        // (`transaction_timeout` arrived in PostgreSQL 17.) Under `ON_ERROR_STOP=1` that
+        // aborts the whole restore, so the test reported "the dump does not restore into
+        // an empty database" -- a statement about the SNAPSHOT, when the fault was the
+        // toolchain pairing.
+        //
+        // A GUC is a session setting, not schema or data: dropping the ones the server
+        // rejects removes nothing the restore needs. The alternative -- pinning the
+        // client to the server's major version -- would make the test unable to run at
+        // all on a host that has only the newer tools.
+        .filter(|l| {
+            let t = l.trim();
+            if !(t.starts_with("SET ") && t.ends_with(';')) {
+                return true;
+            }
+            let name = t
+                .trim_start_matches("SET ")
+                .trim_end_matches(';')
+                .split('=')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"');
+            probe_guc(name)
+        })
         .map(|l| l.replace("snapshot_masked", "public"))
         .collect::<Vec<_>>()
         .join("\n");
@@ -829,9 +972,11 @@ async fn a_restored_snapshot_passes_doctor() {
     let load = std::process::Command::new("psql")
         .args([
             "-h",
-            "127.0.0.1",
+            &restore_host,
+            "-p",
+            &restore_port,
             "-U",
-            "postgres",
+            &restore_user,
             "-d",
             &restored,
             "-v",
@@ -849,10 +994,17 @@ async fn a_restored_snapshot_passes_doctor() {
         String::from_utf8_lossy(&load.stderr)
     );
 
-    let url = format!(
-        "postgresql://postgres:{}@127.0.0.1:5432/{restored}",
-        pg_password()
-    );
+    // The REAL database name, not the literal "restored". This was a string where a
+    // variable belonged: every other statement in this test uses `{restored}`, which is
+    // `lh_snapshot_doctor_restore_<pid>`. The restore therefore succeeded and `doctor`
+    // was pointed at a database that had never existed:
+    //
+    //   [FAIL] database  cannot connect to .../restored: database "restored" does not exist
+    //
+    // reported as `doctor FAILS against a snapshot that restored cleanly` — which is
+    // self-contradictory, and was the tell. A failure whose own message contradicts its
+    // assertion is a wiring bug in the test, not a defect in what it asserts.
+    let url = pg_scoped_url(&restored);
     let doctor = std::process::Command::new(env!("CARGO_BIN_EXE_lorehaven"))
         .args(["doctor"])
         .env("LOREHAVEN_DATABASE_URL", &url)
@@ -862,9 +1014,11 @@ async fn a_restored_snapshot_passes_doctor() {
     std::process::Command::new("psql")
         .args([
             "-h",
-            "127.0.0.1",
+            &restore_host,
+            "-p",
+            &restore_port,
             "-U",
-            "postgres",
+            &restore_user,
             "-d",
             "postgres",
             "-c",
@@ -964,12 +1118,9 @@ async fn a_snapshot_shifts_every_timestamp_by_one_unpublished_offset() {
         .arg("cache")
         .env(
             "LOREHAVEN_PG_URL",
-            format!(
-                "postgres://postgres:{}@127.0.0.1:5432/{}",
-                pg_password(),
-                tdb.pg_database_name().expect("pg database name")
-            ),
+            pg_scoped_url(tdb.pg_database_name().expect("pg database name")),
         )
+        .env("PGPASSWORD", pg_password())
         .current_dir(&repo)
         .output()
         .expect("run the generator with an offset");
