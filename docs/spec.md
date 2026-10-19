@@ -10730,3 +10730,5 @@ The owner's 2026-10-16 request is specified per site in `docs/ROADMAP-guest-trus
 `secondbrain/10-Projects/2026-10-16-guest-access-trust-and-self-governance.md` (items GS-1…GS-5, each configurable). This repo's deltas, firewalls and order of work are
 in that file; it is the place to start, not this pointer.
 
+
+**Amendment — Ultimate Fanfiction Site (2026-10-17):** `docs/spec-amendments/ultimate-fanfiction-site.md` designates Darkhold as the base for the Ultimate Fanfiction Site (ficnexus = ingestion/search module, kindred = recommendation/taste module). See `~/secondbrain/10-Projects/ultimate-fanfiction-site-spec.md`.
