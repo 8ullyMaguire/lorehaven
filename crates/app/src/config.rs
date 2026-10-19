@@ -1528,12 +1528,8 @@ impl ImportsConfig {
     pub fn validate_robots_posture_overrides(&self) -> Result<(), String> {
         let instance = self.resolved_robots_posture();
         for (source, override_) in &self.robots_posture_overrides {
-            darkhold_scrapers::robots::resolve_source_override(
-                source,
-                override_.posture,
-                instance,
-            )
-            .map_err(|refused| refused.to_string())?;
+            darkhold_scrapers::robots::resolve_source_override(source, override_.posture, instance)
+                .map_err(|refused| refused.to_string())?;
         }
         Ok(())
     }
@@ -1631,6 +1627,10 @@ pub struct AgeConfig {
 pub struct SiteConfig {
     /// Human-readable site name.
     pub name: String,
+    /// The instance's one-line identity, shown under the name and in the
+    /// meta payload. It is the operator's to set, because the instance's
+    /// identity is the operator's (spec 12.1, D-8).
+    pub tagline: String,
     /// Public base URL, without a trailing slash.
     pub base_url: String,
     /// Operator contact address, for legal pages and feeds.
@@ -1775,6 +1775,9 @@ impl Config {
 
         let site = SiteConfig {
             name: site_file.name.unwrap_or_else(|| "Darkhold".to_owned()),
+            tagline: site_file
+                .tagline
+                .unwrap_or_else(|| "The dark side of fanfiction".to_owned()),
             base_url: base_url.trim_end_matches('/').to_owned(),
             contact_email: site_file.contact_email,
             topics: site_file.topics.unwrap_or_default(),
@@ -2506,6 +2509,7 @@ impl Config {
             environment: Environment::Development,
             site: SiteConfig {
                 name: "Darkhold".to_owned(),
+                tagline: "The dark side of fanfiction".to_owned(),
                 base_url: "http://localhost:8080".to_owned(),
                 contact_email: None,
                 topics: Vec::new(),
@@ -3246,6 +3250,7 @@ struct PostureOverrideSection {
 #[serde(deny_unknown_fields)]
 struct SiteSection {
     name: Option<String>,
+    tagline: Option<String>,
     base_url: Option<String>,
     contact_email: Option<String>,
     topics: Option<Vec<InstanceTopic>>,

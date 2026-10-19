@@ -362,6 +362,87 @@ async fn the_api_reports_real_instance_metadata_not_mock_data() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The tagline is the instance's one-line identity, and it is the operator's to set.
+///
+/// **It is public because the instance's identity is public** (spec §12.1, D-8) — a hidden
+/// identity is a private preference, and an instance that is one thing on its front page and
+/// another in its metadata payload is lying to somebody.
+///
+/// This test is the evidence for the `DM0-06` ledger row, so it has to drive the real route.
+#[tokio::test]
+async fn the_meta_payload_carries_the_instances_tagline() {
+    let dir = scratch_dir("meta-tagline");
+    let mut config = config_for(&dir);
+    config.site.tagline = "The dark side of fanfiction".to_owned();
+    let db = scratch_database(&dir).await;
+    db.migrate().await.expect("migrate");
+
+    let app = server::build_router(AppState::new(config, db.clone()));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/meta")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("body");
+    let json: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+
+    assert_eq!(
+        json["tagline"], "The dark side of fanfiction",
+        "the operator's tagline is published in the meta payload"
+    );
+
+    db.close().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The tagline has a default, so an instance that has not set one still says something.
+///
+/// A missing tagline must not render as an empty eyebrow. This is the control for the test
+/// above: without it, "the payload carries the tagline" would also be true of a payload that
+/// carried the *default* when the operator had set something else.
+#[tokio::test]
+async fn the_meta_payload_has_a_tagline_even_when_the_operator_sets_none() {
+    let dir = scratch_dir("meta-tagline-default");
+    let config = config_for(&dir);
+    let db = scratch_database(&dir).await;
+    db.migrate().await.expect("migrate");
+
+    let app = server::build_router(AppState::new(config, db.clone()));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/meta")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("body");
+    let json: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+
+    let tagline = json["tagline"].as_str().expect("a tagline");
+    assert!(
+        !tagline.trim().is_empty(),
+        "the default tagline is not empty"
+    );
+    assert_eq!(tagline, "The dark side of fanfiction");
+
+    db.close().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[tokio::test]
 async fn the_frontend_shell_is_served_from_the_binary() {
     let dir = scratch_dir("assets");

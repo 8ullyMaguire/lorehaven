@@ -90,11 +90,19 @@ def _write_raw(path: str, text: str) -> None:
 
 
 def _header_for(path: str) -> List[str]:
-    """The ledger's header, or the canonical one when the file has none.
+    """The ledger's header, exactly as the file has it.
 
-    An existing header is **preserved**, and the canonical columns it is missing are appended
-    in canonical order. So a ledger that has not yet grown `verified_at` and `gates` does not
-    grow them because a row was edited, and a ledger that has does not lose them.
+    An existing header is **preserved, verbatim** — its columns, its order, and its count. The
+    canonical order is what a *new* ledger gets; it is not a repair job for an existing one.
+
+    This is the rule the module's own header states: *"a ledger that has not yet gained a
+    column does not gain one because somebody edited a row."* Appending the missing canonical
+    columns to a ledger that does not have them violates exactly that: the ledger gains
+    `verified_at` and `gates` — empty, on every one of 703 rows — because one row was edited.
+
+    A ledger that has *not* yet grown a column therefore keeps not having it, and the column
+    arrives when the migration that introduces it arrives, which is a deliberate act with its
+    own commit.
     """
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return list(CANONICAL_FIELDS)
@@ -102,11 +110,7 @@ def _header_for(path: str) -> List[str]:
     if not raw.strip():
         return list(CANONICAL_FIELDS)
     first = raw.split(LINE_TERMINATOR)[0]
-    header = next(csv.reader([first]))
-    for field in CANONICAL_FIELDS:
-        if field not in header:
-            header.append(field)
-    return header
+    return next(csv.reader([first]))
 
 
 def read_rows(path: str = DEFAULT_LEDGER) -> List[Dict[str, str]]:

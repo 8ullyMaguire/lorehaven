@@ -220,10 +220,9 @@ async fn graduated_response_ladder_roundtrip() {
     .await
     .expect("apply_sanction");
 
-    let sanction =
-        darkhold_db::moderation::check_sanction(harness.tdb.db(), &target_account, None)
-            .await
-            .expect("check_sanction");
+    let sanction = darkhold_db::moderation::check_sanction(harness.tdb.db(), &target_account, None)
+        .await
+        .expect("check_sanction");
     assert!(sanction.is_some());
     let s = sanction.expect("sanction");
     assert_eq!(s.level, "post_throttle");
@@ -275,10 +274,9 @@ async fn featured_post_roundtrip() {
 
     let topic_id = create_topic(&mut client, "general", "Test Topic").await;
 
-    let post_id =
-        darkhold_db::community::create_post(harness.tdb.db(), &topic_id, &pseud, "Hello")
-            .await
-            .expect("create_post");
+    let post_id = darkhold_db::community::create_post(harness.tdb.db(), &topic_id, &pseud, "Hello")
+        .await
+        .expect("create_post");
 
     darkhold_db::moderation::feature_post(harness.tdb.db(), &post_id, &account_id)
         .await

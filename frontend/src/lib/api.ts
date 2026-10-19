@@ -175,6 +175,8 @@ export async function apiFetch<T>(
 /** Instance metadata, as returned by `/api/v1/meta`. */
 export interface InstanceMeta {
   name: string;
+  /** The instance's one-line identity, published (spec 12.1, D-8). */
+  tagline: string;
   version: string;
   build: string;
   api_version: string;

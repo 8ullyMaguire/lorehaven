@@ -386,14 +386,10 @@ async fn get_topic_replies(
     Path(id): Path<String>,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let posts = darkhold_db::community::list_posts(
-        state.db(),
-        &id,
-        params.cursor.as_deref(),
-        params.limit,
-    )
-    .await
-    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    let posts =
+        darkhold_db::community::list_posts(state.db(), &id, params.cursor.as_deref(), params.limit)
+            .await
+            .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     let posts = filter_blocked_posts(&state, &user.account_id.to_string(), posts)
         .await
         .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
@@ -418,8 +414,8 @@ async fn post_reply(
     let topic = darkhold_db::community::topic_by_id(state.db(), &id)
         .await
         .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
-    let topic = topic
-        .ok_or_else(|| ApiError(darkhold_domain::AppError::NotFound { resource: "topic" }))?;
+    let topic =
+        topic.ok_or_else(|| ApiError(darkhold_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.locked {
         return Err(ApiError(darkhold_domain::AppError::field(
             "body",
@@ -585,13 +581,10 @@ async fn get_groups(
     RequireSession(user): RequireSession,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let items = darkhold_db::community::list_groups(
-        state.db(),
-        &user.account_id.to_string(),
-        params.limit,
-    )
-    .await
-    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    let items =
+        darkhold_db::community::list_groups(state.db(), &user.account_id.to_string(), params.limit)
+            .await
+            .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "items": items })))
 }
 

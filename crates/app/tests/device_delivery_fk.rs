@@ -297,13 +297,8 @@ async fn a_device_delivery_row_may_omit_its_export_entirely() {
 
 /// A real account row, since `device_deliveries.account_id` cascades from it.
 async fn make_account(db: &darkhold_db::Database, email: &str) -> uuid::Uuid {
-    darkhold_db::identity::create_account(
-        db,
-        email,
-        AgeState::DeclaredAdult,
-        AccountStatus::Active,
-    )
-    .await
-    .expect("create account")
-    .as_uuid()
+    darkhold_db::identity::create_account(db, email, AgeState::DeclaredAdult, AccountStatus::Active)
+        .await
+        .expect("create account")
+        .as_uuid()
 }

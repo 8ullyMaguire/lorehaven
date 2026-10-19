@@ -1,0 +1,6 @@
+literal:LOREHAVEN==>DARKHOLD
+literal:Lorehaven==>Darkhold
+literal:lorehaven==>darkhold
+literal:lore-metadata==>metadata
+literal:darkhold_lore_metadata==>darkhold_metadata
+regex:\blore_metadata\b==>darkhold_metadata

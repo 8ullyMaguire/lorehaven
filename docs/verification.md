@@ -1,3 +1,398 @@
+## 2026-10-19 — M0: the rename, and the six traps it exposed
+
+**Milestone:** M0 · **Requirements:** `DM0-01` … `DM0-07` · **ADRs:** 0027, 0028
+
+The project was renamed. This is the evidence log for it: what was done, what was measured, and
+the **six** defects the rename uncovered that had nothing to do with the rename — a file git
+had never heard of, a rate limiter whose buckets are a process-global static, a ledger writer
+that grew the ledger, a rename that broke the formatter, a rules file that had no comment
+syntax, and a test harness whose clone path had never once run.
+
+### What was done
+
+| | before | after |
+|---|---|---|
+| the project | **lorehaven** | **Darkhold** |
+| the binary | `lorehaven` | `darkhold` |
+| the library crates | `lorehaven_domain` · `lorehaven_db` · `lorehaven_app` · `lorehaven_scrapers` · `lorehaven_decisions` · `lorehaven_lore_metadata` | `darkhold_domain` · `darkhold_db` · `darkhold_app` · `darkhold_scrapers` · `darkhold_decisions` · `darkhold_metadata` |
+| the configuration file | `lorehaven.toml` | `darkhold.toml` |
+| the environment prefix | `LOREHAVEN_*` | `DARKHOLD_*` |
+| the local database | `data/lorehaven.sqlite` | `data/darkhold.sqlite` |
+| the test scratch directories | `lorehaven-*` | `darkhold-*` |
+
+**The history was kept.** Every commit survives — the same commits, in the same order, with the
+same messages, the same authors and the same dates.
+
+### The SHAs changed, and that is not a defect
+
+A commit's hash covers its tree, and the tree changed, so **every SHA on the rewritten line is
+new**. "The history is kept" is a statement about the *commits*, not about their hashes. The
+plan's own verification step was wrong about this and was corrected before the rewrite ran
+(`darkhold-implementation-plan.md`, T-M0-02 and T-M0-03): the verification is the **commit
+metadata**, compared line for line, with the SHAs that appear *inside* commit messages
+normalised away — because those SHAs necessarily moved too.
+
+### The measurements
+
+Captured before the rewrite and compared after it:
+
+```bash
+git log --format='%an|%ae|%ad|%s' --date=iso master > /tmp/opencode/pre-rename-commits.txt
+git rev-list --count master        > /tmp/opencode/pre-rename-count.txt
+git ls-tree -r --name-only master  > /tmp/opencode/pre-rename-files.txt
+```
+
+| check | result |
+|---|---|
+| commit metadata, SHAs in messages normalised | **identical, line for line** |
+| commit count | **1,048 → 1,048** |
+| file list, modulo the path rename | **identical** |
+| `git grep -I` for the old name, tracked tree | **0** outside the records of the rename — see the last section |
+| `docs/requirements.csv` line endings | **704 CRLF, 0 lone LF, 703 rows** — unchanged |
+| `cargo build --all-targets` | **exit 0** |
+
+**Seven commit messages differ**, and every one differs only in a SHA it quotes
+(`"rewritten against baf297d"` → `"rewritten against 1833d53"`). That is the whole difference.
+
+### The backup, and the three remotes
+
+`git bundle create /tmp/opencode/lorehaven-pre-rename.bundle --all` — 9,134,877 bytes, 63 refs,
+and `git bundle verify` reports **"The bundle records a complete history."**
+
+**The remotes were not touched, and they are at three different commits.** This is the state
+that was inherited, not a state this change created:
+
+| remote | URL | its `master` |
+|---|---|---|
+| `github` | `https://github.com/8ullyMaguire/lorehaven.git` | `e0e346f` — 1 behind local |
+| `origin` | `https://git.polarisocial.xyz/hirrolot19/lorehaven.git` | `e0e346f` — 1 behind local |
+| `thinkcentre` | `ssh://thinkcentre/personal/documents/code/rust/lorehaven` | `c37b028` — 4 behind, 74 ahead |
+
+**Only the local `master` was rewritten.** The 45 tags and the remote-tracking branches keep the
+old history, because **release tags are the owner's decision alone** and the remotes still hold
+the old history until the owner chooses to force-push. The `thinkcentre` remote still points at
+the old path on that host, because renaming a bare repository on another machine is a separate,
+deliberate operation.
+
+### Trap one: a file git had never heard of
+
+`crates/app/tests/m53_source_credentials.rs` — **36 KB of tests** — had been **untracked since
+2026-10-04**. The global gitignore at `~/.config/git/gitignore` line 1 contains
+`*credentials*`, and the repository's own `.gitignore` negated it only for
+`migrations/**/*credentials*.sql`. The file describes the table it tests and holds no secret.
+
+The consequences, in order of how they showed up:
+
+1. **Every checkout except this machine was missing those tests**, and `git add -A` reported
+   success the whole time. The suite's size was a machine-local fact.
+2. **The rename failed to compile.** `git filter-repo` rewrites *committed blobs*, and this
+   file was not committed, so its `lorehaven_db` / `lorehaven_app` / `lorehaven_scrapers` /
+   `LOREHAVEN_TEST_PG_URL` references were never rewritten. The build died on
+   `use of unresolved module or unlinked crate 'lorehaven_db'`.
+
+**The generalisable lesson: a content rewrite only reaches committed blobs.** The check that
+finds the gap is
+
+```bash
+git ls-files --others --ignored --exclude-standard
+```
+
+and the check that must be run after any rename is **the build**. A rename that is not
+followed by a build is a rename that has not been verified.
+
+Closed the way the repository's own `.gitignore` says it should be closed — **an explicit
+negation per file, never a loosened global rule**, because the global rule exists to do its
+job for actual secrets:
+
+```gitignore
+!crates/**/*credentials*.rs
+```
+
+### Trap two: the rate limiter's buckets are a process-global static
+
+The full suite came back with **one red** out of 4,157: `a_forbidden_name_in_the_never_shown_
+list_is_a_404_at_every_level`, failing on `RATE_LIMITED`.
+
+**It was not a flake.** The test passes in isolation (`--exact`) and fails when the file runs,
+which is the signature of shared state. The mechanism is in `crates/app/src/limiter.rs`: the
+bucket map is a `static`, so every `AppState` clone shares it — correct, because a
+per-`AppState` map would let a credential-stuffing loop find a fresh bucket on every request.
+But the address key is `ip:auth:unknown` when a request carries no `ConnectInfo`, which is
+every request in a test binary. So **the thirteen tests in that file share one forty-token
+auth budget**, and the failure lands on whichever test the scheduler reaches next — not on the
+one that caused it.
+
+**It was pre-existing, and that was proven rather than assumed.** The pre-rename tree was
+cloned from the bundle at `f9bb355` and the same test was run on it:
+
+```
+test result: FAILED. 12 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.91s
+```
+
+**Identical result, identical timing.** The rename did not cause it.
+
+**The estate already had the answer, in two sibling files.** `m54_bot_link.rs` and
+`milestone_2.rs` both call `darkhold_app::limiter::clear_buckets()` in their setup, and
+`m54_bot_link.rs`'s comment records the exact incident: *"adding six tests turned an unrelated
+`one_account_cannot_revoke_another_accounts_token` red."* **`analytics_gate.rs` was the third
+instance of the same defect, and it had been missed for weeks.**
+
+Fixed with the established pattern. Clearing is safe even though the tests run in parallel,
+because **clearing only ever adds budget** — it can prevent a 429 and cannot cause one — and
+this file has no test that wants the limit to trip.
+
+### Trap three: the ledger's writer grew the ledger
+
+`scripts/ledger.py` was built in this milestone. Its first version **appended the canonical
+columns the file was missing**, so editing **one** row grew all 703 inherited seven-column rows
+to nine — two empty fields on every single one — and the diff was **704 lines removed and 711
+added**. The module's own header says *"a ledger that has not yet gained a column does not gain
+one because somebody edited a row."* Its implementation did exactly that.
+
+**And the test that should have caught it asserted the opposite of its own name.** It was
+called `test_header_is_preserved`, its docstring said *"a ledger with seven columns must not
+silently grow to nine,"* and its assertion required the header to be
+`id,…,notes,verified_at,gates`. It passed, against a writer doing the wrong thing.
+
+A test whose assertion contradicts its own name is worse than no test, because it buys the
+confidence of coverage while checking nothing. Both are fixed: the header is preserved
+verbatim, and the test asserts what its name says. The ledger was restored from the committed
+version and the seven rows re-applied, and **the diff is now 7 lines added and 0 removed**.
+
+### Trap four: the rename broke the formatter
+
+`cargo fmt --all --check` is an "always" gate, and the rename was run without it.
+
+**The rename left 27 files failing the formatter — and the pre-rename tree was clean**, so the
+rename is what broke it. The mechanism is not subtle: **rustfmt's line-wrapping decisions are a
+function of identifier length**, and a rename changes the length of every identifier it
+touches.
+
+```
+lorehaven_db::identity::AccountStatus::Active   # one shape
+darkhold_db::identity::AccountStatus::Active    # a different shape, wrapped differently
+```
+
+**A rename is not finished until the formatter has run**, because the formatter's opinion is
+part of the build, and "the build is green" is not true while `cargo fmt --all --check` is
+red. `cargo fmt --all` was run, the gate is now clean, and the change was checked to be
+formatting only: of the 24 files rustfmt touched, **22 differ only in whitespace and trailing
+commas**, and the other two are a match arm's block collapsed into the expression it already
+held — `=> { f(x) }` becomes `=> f(x),` — which is the same value in the same place.
+
+### Trap five: the test harness's clone path had never run
+
+The PostgreSQL arm of the suite was taking **hours** and failing under load with *"pool timed
+out while waiting for an open connection"*. The cause was in the harness, and it was
+**pre-existing** — the same code is in the pre-rename tree at `f9bb355`, byte for byte.
+
+**The scratch database was created before the clone was attempted.** `connect_with_dir` ran
+
+```rust
+sqlx::query(&format!("CREATE DATABASE {name}")).execute(...).await?;
+```
+
+and *then* called `cached_postgres(&admin_url, &name)`, which clones by running
+
+```sql
+CREATE DATABASE {name} TEMPLATE {template}
+```
+
+**against the same name.** So the clone always failed with
+
+```
+ERROR:  database "lh_test_mrc_own_1879516351823881" already exists
+```
+
+`cached_postgres` returns `None` on that, the caller fell through to migrating the empty
+database in full, and **the clone path never ran once**. Every PostgreSQL test replayed
+**107 migrations** — which is why the arm took hours, and why the admin pool starved until
+the acquire timeout expired.
+
+**And a second defect made it worse.** The template is built under a lock, but the check for
+an existing template happens *before* the lock is taken, so two threads could both see
+`None` and both build. The second one's `build_postgres_template` starts with
+`DROP DATABASE IF EXISTS {name}` — so it **dropped the template the first one had just
+built**, while the first one's siblings were cloning from it:
+
+```
+ERROR:  template database "lh_tmpl_836105" does not exist
+```
+
+**Both are fixed**: the clone is now attempted *first* and the empty database is created
+only as the fallback, and the template check is repeated *under* the lock.
+
+**The measurement, on the file that failed:**
+
+| | before | after |
+|---|---|---|
+| `m57_metadata_exchange` on PostgreSQL | **146.83s**, 1 test failed | **55.71s**, 41 passed, 0 failed |
+| the PostgreSQL log | `database already exists`, `template database does not exist` | neither |
+
+**This is the kind of defect that a gate nobody ran would have kept for years.** It was found
+because M0 needed the PostgreSQL arm to be green, and it could not be made green without
+fixing it.
+
+### The token namespace was NOT renamed
+
+The plan said the token namespace becomes `--dh-*`. **It was not renamed, and that is the
+finding.** The tokens are `--color-*` · `--reader-*` · `--font-*` · `--radius-*` ·
+`--leading-*` · `--duration-*` — **114 declarations, and not one of them carries the product
+name.** The specification itself names `--reader-*` (spec §21.2 constraint 1), so a `--dh-*`
+namespace would have contradicted the spec and churned every `var(--…)` use in the frontend for
+no gain. The plan was corrected before the frontend task ran.
+
+### The tagline
+
+*"The dark side of fanfiction"* is now the instance's **operator-set** `tagline`: it is in
+`[site]`, it is in `/api/v1/meta`, it is the front page's eyebrow, and it is the document
+title. It is public, because **the instance's identity is public** (D-8) — a hidden identity is
+a private preference.
+
+### The gates
+
+| gate | command | result |
+|---|---|---|
+| build | `cargo build --all-targets` | **exit 0** |
+| Rust, SQLite | `cargo test --workspace --no-fail-fast` | **4,171 tests · 212 suites · 0 failed · exit 0** |
+| Rust, PostgreSQL 18.6 | `DARKHOLD_TEST_PG_URL=… cargo test --workspace --no-fail-fast` | **4,171 tests · 212 suites · 0 failed · exit 0** |
+| frontend | `node ./node_modules/vitest/vitest.mjs run` | **564 tests · 77 files · exit 0** |
+| types | `node ./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json` | **0 errors**, 2 warnings |
+| the ledger | `python3 scripts/ledger_test.py` | **30 assertions · exit 0** |
+
+**And one thing that happened once and did not reproduce.** An earlier PostgreSQL run
+reported `error: 1 target failed: -p darkhold-app --test m57_metadata_exchange` — **with the
+suite itself reporting `test result: ok. 41 passed`**, and with no `error: test failed` line
+and no signal. The target was re-run alone (exit 0) and then the whole arm was re-run (exit
+0, 212 suites, 4,171 tests). **So it did not reproduce, and that is the whole of what is known
+about it.** It is recorded here rather than dropped, because **a result that is quietly
+forgotten is a result that will be rediscovered as a mystery.**
+
+**The environment, and what it cost to find out.** There is **no container runtime** on this
+host, so the PostgreSQL gate could not be run the way the plan assumed — `scripts/pg-test-db.sh`
+needs `docker`. PostgreSQL **18.6**'s server binaries are installed at `/usr/bin`, so
+`scripts/pg-test-db.sh --local` now starts a cluster directly on port 55433 and prints the
+same kind of URL. **A gate that cannot run on the machine in front of you is a gate that
+silently stops being a gate**, so the script grew a path for the host as it is.
+
+**And one fact about the harness's own bookkeeping:** the template database is deliberately
+**not** dropped — `CREATE DATABASE ... TEMPLATE` refuses while any connection is open, so a
+kept template serves every later test — and its name carries the process id, so one is left per
+test binary. **A full workspace run leaves ~50 templates and ~10 GB**, and they are
+recognisable by their `lh_tmpl_` prefix. The scratch databases *are* dropped, and the sweeper
+is bounded by an age floor so it cannot drop a live test's database.
+
+**A third fact cost a run, and it is a fact about a URL:**
+
+3. **The admin URL must carry a password, or `snapshot_anonymisation.rs` fails with "a url with
+   a password".** That file shells out to `psql` and `pg_dump`, and it parses the endpoint and
+   the password out of `DARKHOLD_TEST_PG_URL` with its own parser:
+   ```rust
+   let (user, _) = creds.rsplit_once(':').expect("a url with a password");
+   ```
+   A URL with a user and **no** password makes the parser's `expect` fire, and **all ten of
+   that file's tests fail with a message that reads like a credential problem and is a
+   URL-shape problem.** The container's URL (`darkhold:darkhold`) and the plan's
+   (`postgres:postgres`) both carry one; the first local cluster's URL
+   (`postgres://postgres@…`) did not. The script now sets the role's password and prints a
+   URL that carries it, and the server's trust auth means the password is never checked —
+   **but the test harness's own parser checks the URL's shape, and the shape matters.**
+
+**Two environment facts cost a full run each, and both are now in the script:**
+
+1. **`/tmp` is a 16 GB tmpfs, and the cluster does not fit in it.** The first attempt put the
+   cluster there; with one database created per test it grew past 11 GB, PostgreSQL **stopped
+   itself** with *"No space left on device"*, and it stopped accepting connections — so the
+   suite reported *connection errors* rather than a disk error. The cluster was moved to the
+   real filesystem and the run repeated clean. **A PostgreSQL that has run out of disk stops
+   accepting connections rather than reporting the error to the client that caused it.**
+2. **`max_connections` defaults to 100, and the harness exhausts it.** Every test holds a pool
+   against the admin database and the suite runs many binaries in parallel, so the symptom was
+   **"pool timed out while waiting for an open connection"** — which reads like a code defect
+   and is not one. 500 is enough.
+
+Both are now written into `scripts/pg-test-db.sh --local`, and the plan's gate section says
+so, so the next session does not pay for them twice.
+
+### The commands
+
+**One command reproduces the committed history exactly** — not merely an equivalent tree, but
+**the same commit SHAs**, `faa03c7f73aa730764aa8ddc44d6fe3c28a80959` at the tip and all
+1,048 below it:
+
+```bash
+git filter-repo --force --replace-text scripts/rename-replacements.txt \
+  --filename-callback 'return filename.replace(b"lore-metadata", b"metadata").replace(b"lorehaven", b"darkhold")' \
+  --refs master
+```
+
+**That was checked, not assumed.** The pre-rename bundle was cloned, the command was run
+against it, and the result was compared with the committed tree: **1,265 files, identical
+paths, identical blob hashes, identical tip SHA.** A rewrite that cannot be re-run is a
+rewrite that cannot be checked.
+
+**The rewrite was performed in two passes, and the rules file is the single-pass
+equivalent.** The second pass's two rules — `darkhold_lore_metadata` → `darkhold_metadata`
+and `\blore_metadata\b` → `darkhold_metadata` — only exist *after* the first pass has run,
+because their source text does not exist before it. Listing them after the first four rules
+in one file is the same rewrite, and the SHA-identical result is the proof.
+
+### Trap six: the rules file has no comment syntax
+
+**`git filter-repo --replace-text` has no comment syntax.** A line in that file is a rule,
+and a line with no `==>` is a rule that removes the text it contains.
+
+**So a line that is exactly `#` is a rule that removes every `#` from every blob in the
+repository.** It is not a hypothetical: while verifying this milestone, a rules file with a
+`#` comment block was written, and the re-run against the bundle produced a tree in which
+every comment in the repository had become `***REMOVED***`.
+
+```toml
+# A target directory of this project's own.      →   ***REMOVED*** A target directory of this project's own.
+```
+
+**The tree was caught before it was committed**, because the verification compares the
+re-run tree against the committed tree rather than against an expectation. The rules file is
+now bare, and `scripts/rename-replacements.README.md` carries the explanation — which is
+where an explanation of a rules file belongs, when the rules file cannot hold one.
+
+
+# the verification
+diff <(sed 's/\b[0-9a-f]\{7,40\}\b/<sha>/g' /tmp/opencode/pre-rename-commits.txt) \
+     <(git log --format='%an|%ae|%ad|%s' --date=iso master | sed 's/\b[0-9a-f]\{7,40\}\b/<sha>/g')
+cargo build --all-targets
+cargo test --workspace --no-fail-fast
+```
+
+### The two places the old name survives
+
+ADR 0027 and this entry. Both are the historical record of the rename; neither is code, and
+the gate that checks for the old name excludes exactly these two files and nothing else.
+
+**That sentence was written before the ledger's own M0 rows existed, and it is now too
+narrow.** The old name survives in the tracked tree in **five** places, and all five are
+records of the rename rather than uses of it:
+
+| where | why |
+|---|---|
+| `docs/adr/0027-the-project-is-renamed.md` | the decision |
+| `docs/adr/0028-the-ledger-is-re-triaged-not-restarted.md` | the triage |
+| `docs/verification.md` (this entry) | the evidence |
+| `docs/requirements.csv` rows `DM0-02`, `DM0-04`, `DM0-05` | they name the *old* bundle, the *old* crate path and the *old* environment prefix, because the thing being recorded **is** the change from those names |
+
+**The rule is not "the old name appears nowhere."** It is **"the old name appears nowhere as a
+live name"** — and a name in a past-tense sentence about a rename is the opposite of live.
+A gate that grepped for the string without that distinction would fail the record of its own
+rename.
+
+### The ledger
+
+Seven rows were added, `DM0-01` … `DM0-07`, in the ledger's own namespace. **The `D` prefix is
+load-bearing**: the inherited ledger already uses `M<milestone>-<nn>` for its rows, and
+**twelve of them are in `M0-` alone** — `M0-01` is *"Rust workspace builds from a clean
+checkout"*. A new row numbered `M0-01` would have collided with an inherited row that means
+something else entirely. The inherited rows keep their ids, because they are cited in this
+log, in the ADRs and in the release tags.
 ## 2026-10-01 — M45-20: history import, and a test that passed for the wrong reason
 
 **Plan:** `docs/plans/m45-phase1-taste-signal.md` step 4 · **Requirement:** `M45-20`

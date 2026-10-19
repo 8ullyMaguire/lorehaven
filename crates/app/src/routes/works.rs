@@ -1677,8 +1677,7 @@ async fn create_highlight(
     // §50.1's span is a reason about a *span*, and `Span::new` refuses an empty
     // one. A zero-length highlight would be a bookmark that claims to be about
     // something, which is precisely the confusion the span type exists to prevent.
-    let Some(span) = darkhold_domain::reasons::Span::new(body.start_offset, body.end_offset)
-    else {
+    let Some(span) = darkhold_domain::reasons::Span::new(body.start_offset, body.end_offset) else {
         return Err(ApiError(AppError::Validation {
             message: format!(
                 "a highlight must span at least one character, got [{}, {})",
@@ -2135,13 +2134,12 @@ pub async fn put_work_permissions(
         })?;
     }
     if let Some(v) = &body.continuation {
-        stmt.continuation =
-            darkhold_domain::permission::Permission::parse(v).ok_or_else(|| {
-                ApiError(AppError::Validation {
-                    message: format!("invalid continuation permission: {v}"),
-                    field_errors: Default::default(),
-                })
-            })?;
+        stmt.continuation = darkhold_domain::permission::Permission::parse(v).ok_or_else(|| {
+            ApiError(AppError::Validation {
+                message: format!("invalid continuation permission: {v}"),
+                field_errors: Default::default(),
+            })
+        })?;
     }
     if let Some(v) = &body.redistribution {
         stmt.redistribution =

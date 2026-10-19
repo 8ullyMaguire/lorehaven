@@ -154,16 +154,9 @@ async fn seed_world(h: &Db) -> World {
         .await
         .expect("seed progress");
 
-    darkhold_db::thread_modes::create_topic(
-        h.db(),
-        &topic,
-        "general",
-        &pseud,
-        "A thread",
-        "plain",
-    )
-    .await
-    .expect("seed topic");
+    darkhold_db::thread_modes::create_topic(h.db(), &topic, "general", &pseud, "A thread", "plain")
+        .await
+        .expect("seed topic");
 
     match h.db().backend() {
         darkhold_db::Backend::Sqlite => {

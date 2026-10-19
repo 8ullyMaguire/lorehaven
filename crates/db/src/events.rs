@@ -738,11 +738,8 @@ pub async fn get_wishlist(
     let viewer_id = viewer.map(|v| {
         darkhold_domain::AccountId::from_uuid(uuid::Uuid::parse_str(v).unwrap_or_default())
     });
-    let is_visible = darkhold_domain::events::wishlist_visible(
-        wl.is_public != 0,
-        viewer_id.as_ref(),
-        &owner_id,
-    );
+    let is_visible =
+        darkhold_domain::events::wishlist_visible(wl.is_public != 0, viewer_id.as_ref(), &owner_id);
     if !is_visible {
         return Ok(None);
     }

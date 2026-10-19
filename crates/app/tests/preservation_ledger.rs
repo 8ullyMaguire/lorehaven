@@ -152,10 +152,9 @@ async fn paid_target(
     credits: i64,
 ) -> (String, String) {
     let work = seed_work(tdb.db(), account, "A Work").await;
-    let identity =
-        darkhold_db::story_identity::ensure_identity_for_work(tdb.db(), &work, "A Work")
-            .await
-            .expect("identity");
+    let identity = darkhold_db::story_identity::ensure_identity_for_work(tdb.db(), &work, "A Work")
+        .await
+        .expect("identity");
     preservation::write_destination(
         tdb.db(),
         destination,
@@ -410,10 +409,9 @@ async fn a_replayed_clawback_does_not_reclaim_twice() {
 async fn a_never_paid_target_reclaims_nothing() {
     let (tdb, account) = harness("clawback_unpaid").await;
     let work = seed_work(tdb.db(), &account, "A Work").await;
-    let identity =
-        darkhold_db::story_identity::ensure_identity_for_work(tdb.db(), &work, "A Work")
-            .await
-            .expect("identity");
+    let identity = darkhold_db::story_identity::ensure_identity_for_work(tdb.db(), &work, "A Work")
+        .await
+        .expect("identity");
     preservation::write_destination(
         tdb.db(),
         "aot",
@@ -578,10 +576,9 @@ async fn the_clawback_names_the_payee_from_the_ledger_not_from_the_work() {
 async fn the_reward_is_paid_to_the_work_owner() {
     let (tdb, owner) = harness("pay_owner").await;
     let work = seed_work(tdb.db(), &owner, "A Work").await;
-    let identity =
-        darkhold_db::story_identity::ensure_identity_for_work(tdb.db(), &work, "A Work")
-            .await
-            .expect("identity");
+    let identity = darkhold_db::story_identity::ensure_identity_for_work(tdb.db(), &work, "A Work")
+        .await
+        .expect("identity");
 
     // A *different* account on the *same* instance performs the crosspost --
     // which is the point of the test, and also why the two accounts have to

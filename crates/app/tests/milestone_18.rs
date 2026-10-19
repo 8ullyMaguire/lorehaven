@@ -275,12 +275,8 @@ async fn feed_building_produces_valid_xml() {
     assert!(rss.contains("<title>My Feed</title>"));
     assert!(rss.contains("<item>"));
 
-    let atom = darkhold_domain::feeds::build_atom(
-        "My Feed",
-        "https://example.com",
-        "Description",
-        &items,
-    );
+    let atom =
+        darkhold_domain::feeds::build_atom("My Feed", "https://example.com", "Description", &items);
     assert!(atom.contains(r#"<feed xmlns="http://www.w3.org/2005/Atom">"#));
     assert!(atom.contains("<entry>"));
 

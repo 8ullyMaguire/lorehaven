@@ -453,10 +453,8 @@ async fn withdrawal_removes_the_review_but_keeps_the_audit_row() {
 #[tokio::test]
 async fn neutral_text_is_deterministic_and_never_double_classified() {
     // Determinism lives in the domain: same input, same verdict, every time.
-    let a =
-        darkhold_domain::positivity::classify("The dialogue could improve with a second pass.");
-    let b =
-        darkhold_domain::positivity::classify("The dialogue could improve with a second pass.");
+    let a = darkhold_domain::positivity::classify("The dialogue could improve with a second pass.");
+    let b = darkhold_domain::positivity::classify("The dialogue could improve with a second pass.");
     assert_eq!(a, b);
     // Idempotency lives in the store: re-submitting one review rewrites one
     // classification row, never two.

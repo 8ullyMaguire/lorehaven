@@ -904,10 +904,7 @@ fn capability_note(state: &AppState, because: &str) -> String {
     }
 }
 
-fn account_view(
-    account: &darkhold_db::identity::Account,
-    session_expires_at: &str,
-) -> AccountView {
+fn account_view(account: &darkhold_db::identity::Account, session_expires_at: &str) -> AccountView {
     AccountView {
         id: account.id,
         email: account.email.clone(),
@@ -1024,10 +1021,7 @@ mod tests {
             "a b@example.com",
         ] {
             let error = normalise_email(bad).expect_err("must refuse");
-            assert_eq!(
-                error.0.code(),
-                darkhold_domain::ErrorCode::ValidationFailed
-            );
+            assert_eq!(error.0.code(), darkhold_domain::ErrorCode::ValidationFailed);
         }
     }
 

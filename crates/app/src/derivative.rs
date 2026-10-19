@@ -55,12 +55,9 @@ pub async fn handle_derivative(
             // failure recorded only on the job row would leave the derivative
             // looking queued forever.
             let message = failure.message().to_owned();
-            if let Err(error) = darkhold_db::derivative::mark_derivative_failed(
-                state.db(),
-                derivative_id,
-                &message,
-            )
-            .await
+            if let Err(error) =
+                darkhold_db::derivative::mark_derivative_failed(state.db(), derivative_id, &message)
+                    .await
             {
                 tracing::warn!(
                     derivative = derivative_id,

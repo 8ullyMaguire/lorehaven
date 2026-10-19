@@ -60,12 +60,7 @@ pub struct GlobalArgs {
 
     /// Database URL, e.g. `sqlite://./data/darkhold.sqlite?mode=rwc`
     /// or `postgres://user:pass@host/db`.
-    #[arg(
-        long,
-        global = true,
-        env = "DARKHOLD_DATABASE_URL",
-        value_name = "URL"
-    )]
+    #[arg(long, global = true, env = "DARKHOLD_DATABASE_URL", value_name = "URL")]
     pub database_url: Option<String>,
 
     /// Root directory for uploaded and generated files.

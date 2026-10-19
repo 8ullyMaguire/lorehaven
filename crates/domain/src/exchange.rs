@@ -302,9 +302,7 @@ pub fn signal_site_ids(signal: &WorkSignal) -> Vec<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use darkhold_metadata::{
-        Completion, ExchangeVersion, SignalBatch, SiteIdentifier, WorkSignal,
-    };
+    use darkhold_metadata::{Completion, ExchangeVersion, SignalBatch, SiteIdentifier, WorkSignal};
 
     fn signal() -> WorkSignal {
         WorkSignal {

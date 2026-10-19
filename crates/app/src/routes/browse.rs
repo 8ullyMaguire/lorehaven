@@ -501,12 +501,9 @@ async fn resolve_surface_sort(
     // 2. Stored preference.
     if let Some(user) = session {
         if let Some(pseud_id) = &user.pseud_id {
-            if let Ok(Some(pref)) = darkhold_db::browse::get_sort_preference(
-                state.db(),
-                &pseud_id.to_string(),
-                surface,
-            )
-            .await
+            if let Ok(Some(pref)) =
+                darkhold_db::browse::get_sort_preference(state.db(), &pseud_id.to_string(), surface)
+                    .await
             {
                 if Sort::parse(&pref.sort_value).is_some() {
                     return pref.sort_value;

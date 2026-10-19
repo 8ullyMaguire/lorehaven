@@ -197,12 +197,10 @@ pub async fn submit_signals(
             exch::BatchRejection::UnsupportedVersion(v) => {
                 darkhold_domain::AppError::field("version", v)
             }
-            exch::BatchRejection::SignalWithoutTitle { index } => {
-                darkhold_domain::AppError::field(
-                    &format!("signals[{index}].title"),
-                    "a signal must carry a title",
-                )
-            }
+            exch::BatchRejection::SignalWithoutTitle { index } => darkhold_domain::AppError::field(
+                &format!("signals[{index}].title"),
+                "a signal must carry a title",
+            ),
             exch::BatchRejection::UnknownEntityKind { index, kind } => {
                 darkhold_domain::AppError::field(
                     &format!("signals[{index}].kind"),

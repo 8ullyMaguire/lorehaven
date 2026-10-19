@@ -81,9 +81,8 @@ pub async fn request_derivative(
     // own bytes and becomes part of what the work offers.
     require_contributor(&state, &id, &session).await?;
 
-    let derivative_kind =
-        darkhold_domain::derivative::DerivativeKind::parse(&body.derivative_kind)
-            .ok_or_else(|| validation("unknown derivative_kind"))?;
+    let derivative_kind = darkhold_domain::derivative::DerivativeKind::parse(&body.derivative_kind)
+        .ok_or_else(|| validation("unknown derivative_kind"))?;
 
     // A kind this instance cannot produce is refused before a row exists: a
     // queued derivative that can never build is a row an operator has to
@@ -132,8 +131,7 @@ pub async fn request_derivative(
         &darkhold_domain::jobs::RetryPolicy::default(),
     )
     .await?;
-    darkhold_db::derivative::attach_derivative_job(db, &derivative_id, &job_id.to_string())
-        .await?;
+    darkhold_db::derivative::attach_derivative_job(db, &derivative_id, &job_id.to_string()).await?;
 
     Ok(Json(json!({
         "id": derivative_id,

@@ -498,7 +498,25 @@ pub async fn cached_postgres(admin_url: &str, name: &str) -> Option<Database> {
         Some(_) => return None,
         None => {
             let _guard = PG_TEMPLATE_BUILD.lock().await;
-            build_postgres_template(admin_url, &key).await?
+            // RE-CHECK under the lock.
+            //
+            // The check above happens before the lock, so two threads can both see
+            // `None` and both go on to build. The second one DROPs the template the
+            // first one just built — `build_postgres_template` starts with
+            // `DROP DATABASE IF EXISTS {name}` — and the first thread's siblings are
+            // cloning from it. PostgreSQL then says
+            //
+            //     ERROR: template database "lh_tmpl_836105" does not exist
+            //
+            // which reads as a broken fixture and is a lock that was taken after the
+            // check instead of around it.
+            //
+            // So: check again, now that the lock is held.
+            match PG_TEMPLATE.get() {
+                Some((k, t)) if k == &key => t.clone(),
+                Some(_) => return None,
+                None => build_postgres_template(admin_url, &key).await?,
+            }
         }
     };
 
@@ -575,18 +593,27 @@ impl TestDb {
                     .expect("connect to the PostgreSQL admin database");
                 // Before adding to the pile, clear what earlier failed runs left.
                 sweep_idle_scratch_databases(&admin).await;
-                sqlx::query(&format!("CREATE DATABASE {name}"))
-                    .execute(admin.postgres_pool().expect("postgres admin pool"))
-                    .await
-                    .expect("create the scratch test database");
-                let url = admin_url
-                    .rsplit_once('/')
-                    .map(|(prefix, _)| format!("{prefix}/{name}"))
-                    .unwrap_or_else(|| admin_url.clone());
 
-                // The clone path. `CREATE DATABASE ... TEMPLATE` is one statement
+                // The clone path FIRST. `CREATE DATABASE ... TEMPLATE` is one statement
                 // against an already-migrated database, instead of 107 migrations
                 // replayed per test.
+                //
+                // THE ORDER MATTERS, AND IT WAS WRONG. The scratch database used to be
+                // created HERE, before this call — and `cached_postgres` clones by
+                // running `CREATE DATABASE {name} TEMPLATE {template}` against the same
+                // name. The clone therefore always failed with
+                //
+                //     ERROR:  database "lh_test_mrc_own_..." already exists
+                //
+                // `cached_postgres` returns `None` on that, the caller fell through to
+                // migrating the empty database in full, and **the clone path never ran
+                // once**. Every PostgreSQL test replayed 107 migrations — which is why
+                // the PostgreSQL arm of the suite took hours, and why the admin pool
+                // starved under load until the acquire timeout expired and suites
+                // failed with "pool timed out while waiting for an open connection".
+                //
+                // So the clone is tried FIRST, and the empty database is created only
+                // as the fallback.
                 if let Some(db) = cached_postgres(&admin_url, &name).await {
                     // The clone is already fully migrated, so `migrate()` has nothing to do
                     // and reports everything under `already_applied`. That call is also what
@@ -606,6 +633,22 @@ impl TestDb {
                         sqlite_dir: None,
                     };
                 }
+
+                // The fallback: an empty database, migrated in full. The drop first is
+                // because the clone may have created the database and then failed to
+                // connect to it, and `CREATE DATABASE` on an existing name is an error.
+                sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+                    .execute(admin.postgres_pool().expect("postgres admin pool"))
+                    .await
+                    .ok();
+                sqlx::query(&format!("CREATE DATABASE {name}"))
+                    .execute(admin.postgres_pool().expect("postgres admin pool"))
+                    .await
+                    .expect("create the scratch test database");
+                let url = admin_url
+                    .rsplit_once('/')
+                    .map(|(prefix, _)| format!("{prefix}/{name}"))
+                    .unwrap_or_else(|| admin_url.clone());
 
                 let db = Database::connect(&DatabaseConfig::new(url))
                     .await

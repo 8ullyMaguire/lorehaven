@@ -53,6 +53,16 @@ __pycache__/
 # global ones, so this negation restores it.
 !migrations/**/*credentials*.sql
 
+# Same trap, second instance: crates/app/tests/m53_source_credentials.rs. It
+# describes the TABLE it tests and holds no secret, and the global rule's
+# `*credentials*` swallowed it anyway - so it sat untracked from 2026-10-04
+# until the rename, when it failed to compile because nothing had renamed its
+# crate references. The file is 36 KB of tests that only ever existed on this
+# machine: every other checkout was missing them, and `git add -A` reported
+# success the whole time. Same rule as above - an explicit negation per file,
+# never a loosened global rule.
+!crates/**/*credentials*.rs
+
 # Same trap for any future file whose NAME is about credentials rather than
 # contents. Prefer an explicit negation per file over loosening the global rule,
 # which exists to do its job for actual secrets.

@@ -17,6 +17,10 @@ environment = "development"
 [site]
 # Shown in the interface, feeds and notification emails.
 name = "Darkhold"
+# The instance's one-line identity: the document title, the front page's
+# eyebrow, and /api/v1/meta. It is public, because the instance's identity is
+# public (spec §12.1, D-8) — a hidden identity is a private preference.
+tagline = "The dark side of fanfiction"
 # Public address, used for links, feeds and cookie scoping. Must be https in
 # production.
 base_url = "http://localhost:8080"

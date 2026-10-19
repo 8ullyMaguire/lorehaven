@@ -106,10 +106,7 @@ pub async fn resolve_session(
         }
     };
 
-    if !matches!(
-        account.status,
-        darkhold_db::identity::AccountStatus::Active
-    ) {
+    if !matches!(account.status, darkhold_db::identity::AccountStatus::Active) {
         tracing::debug!(
             account = %account.id,
             status = account.status.as_str(),
@@ -550,8 +547,7 @@ impl axum::extract::FromRequestParts<AppState> for MaybeToken {
         // a valid call because the audit write failed would turn a bookkeeping
         // problem into an outage, which is the wrong trade for a column that
         // only reports.
-        if let Err(err) = darkhold_db::external::touch_token(state.db(), &identity.token_id).await
-        {
+        if let Err(err) = darkhold_db::external::touch_token(state.db(), &identity.token_id).await {
             tracing::error!(error = %err, "recording a token's last use failed");
         }
         Ok(Self(Some(TokenUser {
@@ -739,11 +735,7 @@ mod tests {
         );
         // A value containing `=` keeps the whole value after the first split.
         assert_eq!(
-            read_cookie(
-                &headers_with_cookie("darkhold_session=a=b"),
-                SESSION_COOKIE
-            )
-            .as_deref(),
+            read_cookie(&headers_with_cookie("darkhold_session=a=b"), SESSION_COOKIE).as_deref(),
             Some("a=b")
         );
     }

@@ -42,6 +42,27 @@ fn router_for_preset(
     dir: &std::path::Path,
     preset: &str,
 ) -> axum::Router {
+    // The rate limiter's bucket map is a **process-global static** (see
+    // `crate::limiter::clear_buckets`), so every test in this binary shares
+    // one auth quota — ten sign-ins in a burst, and a burst of forty for the
+    // address bucket. This file alone registers thirteen accounts across
+    // thirteen tests, and one of them registers six in a loop, so the quota is
+    // spent long before the last test runs and the failure lands on whichever
+    // test the scheduler reaches next.
+    //
+    // This is the third instance of that defect in this repository.
+    // `m54_bot_link.rs` and `milestone_2.rs` already clear the buckets for
+    // exactly this reason, and the comment in `m54_bot_link.rs` records how
+    // the last one presented: *"adding six tests turned an unrelated
+    // `one_account_cannot_revoke_another_accounts_token` red."*
+    //
+    // Clearing is safe here even though the tests run in parallel, because
+    // clearing only ever **adds** budget — it can prevent a 429 and cannot
+    // cause one. This file has no test that wants the limit to trip; the
+    // limiter's own tests are in `crates/app/src/limiter.rs` and in
+    // `milestone_2.rs`, where the budget is guarded by a lock.
+    darkhold_app::limiter::clear_buckets();
+
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.instance.preset = preset.to_owned();

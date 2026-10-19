@@ -115,7 +115,7 @@
 <ContinueReadingBanner signedIn={session.isSignedIn} />
 
 <section class="hero">
-  <p class="eyebrow">A self-hosted home for fanfiction</p>
+  <p class="eyebrow">{meta?.tagline ?? 'The dark side of fanfiction'}</p>
   <h1>Read, write, and keep what you love.</h1>
   <p class="lede">
     A place to read without an account, write without a publishing queue, import the

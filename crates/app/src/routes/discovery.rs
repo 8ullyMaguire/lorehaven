@@ -875,12 +875,9 @@ async fn resolve_sort(
     // 2. Stored preference (if there's a session with a pseud).
     if let Some(user) = session {
         if let Some(pseud_id) = &user.pseud_id {
-            if let Ok(pref) = darkhold_db::browse::get_sort_preference(
-                state.db(),
-                &pseud_id.to_string(),
-                surface,
-            )
-            .await
+            if let Ok(pref) =
+                darkhold_db::browse::get_sort_preference(state.db(), &pseud_id.to_string(), surface)
+                    .await
             {
                 // Clippy suggests collapsing these into a let-chain, which
                 // needs edition 2024. This crate is 2021, so the combined
@@ -1664,13 +1661,10 @@ pub async fn reverse_search(
     // a hash is only comparable with a hash made the same way, and the
     // comparison below rejects a mismatched pair rather than scoring it.
     let threshold = state.config().media_resilience.perceptual_match_threshold;
-    let refs = darkhold_db::media_resilience::find_by_perceptual_hash(
-        state.db(),
-        &hash,
-        threshold as i32,
-    )
-    .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let refs =
+        darkhold_db::media_resilience::find_by_perceptual_hash(state.db(), &hash, threshold as i32)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     // The spec asks for a match confidence score the curator can act on, and a
     // bare reference list cannot tell a re-encode of the same image from a

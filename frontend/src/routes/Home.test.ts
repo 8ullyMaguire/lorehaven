@@ -184,6 +184,38 @@ describe('Home page', () => {
   });
 
   /**
+   * The eyebrow is the instance's one-line identity, and it is the OPERATOR's to set.
+   *
+   * It is published rather than private because the instance's identity is public (spec §12.1,
+   * D-8) — an instance that is one thing on its front page and another in its metadata payload
+   * is lying to somebody.
+   */
+  it('shows the instance tagline as the eyebrow', async () => {
+    (fetchInstanceMeta as any).mockResolvedValue({
+      ...META,
+      tagline: 'The dark side of fanfiction',
+    });
+    render(Home);
+
+    await waitFor(() =>
+      expect(screen.getByText('The dark side of fanfiction')).toBeInTheDocument(),
+    );
+  });
+
+  /**
+   * The control. A tagline that is present but empty would render an empty eyebrow, and the
+   * test above would still pass — so the fallback has to be asserted too.
+   */
+  it('falls back to a tagline when the instance has not set one', async () => {
+    (fetchInstanceMeta as any).mockResolvedValue({ ...META });
+    render(Home);
+
+    await waitFor(() =>
+      expect(screen.getByText('The dark side of fanfiction')).toBeInTheDocument(),
+    );
+  });
+
+  /**
    * WIRING, not behaviour.
    *
    * `ContinueReadingBanner.test.ts` proves the component renders a row. It cannot prove

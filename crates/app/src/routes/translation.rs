@@ -165,10 +165,9 @@ pub async fn open_review(
     let gate = darkhold_domain::translation::ReviewGate::from_str(&body.gate)
         .map_err(|e| ApiError(darkhold_domain::AppError::field("gate", &e)))?;
 
-    let id =
-        darkhold_db::translation::open_review_gate(state.db(), &job_id, &body.reviewer, &gate)
-            .await
-            .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
+    let id = darkhold_db::translation::open_review_gate(state.db(), &job_id, &body.reviewer, &gate)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
 
     Ok(Json(json!({ "id": id })))
 }

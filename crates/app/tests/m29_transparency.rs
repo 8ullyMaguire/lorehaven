@@ -2421,10 +2421,9 @@ async fn an_unconfirmed_tag_does_not_move_a_readers_ranking() {
             .await
             .expect("tags");
         assert_eq!(tags, vec!["space".to_string()], "PREMISE: liked is tagged");
-        let with_state =
-            darkhold_db::tag_confirmation::tags_with_confirmation(&harness.db, &liked)
-                .await
-                .expect("confirmation state");
+        let with_state = darkhold_db::tag_confirmation::tags_with_confirmation(&harness.db, &liked)
+            .await
+            .expect("confirmation state");
         assert_eq!(
             with_state[0].confirmation,
             darkhold_db::tag_confirmation::TagConfirmation::Unconfirmed,

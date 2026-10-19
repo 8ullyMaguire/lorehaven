@@ -102,12 +102,10 @@ impl Harness {
                 .fetch_optional(self.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("text"),
-            darkhold_db::Backend::Postgres => {
-                sqlx::query_scalar::<_, String>(&self.tdb.sql(query))
-                    .fetch_optional(self.db().postgres_pool().expect("pg"))
-                    .await
-                    .expect("text")
-            }
+            darkhold_db::Backend::Postgres => sqlx::query_scalar::<_, String>(&self.tdb.sql(query))
+                .fetch_optional(self.db().postgres_pool().expect("pg"))
+                .await
+                .expect("text"),
         }
     }
 

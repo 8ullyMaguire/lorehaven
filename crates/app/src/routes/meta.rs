@@ -29,6 +29,9 @@ struct ThemeSummary {
 #[derive(Debug, Serialize)]
 struct MetaResponse {
     name: String,
+    /// The instance's one-line identity. It is public, because the
+    /// instance's identity is public (spec 12.1, D-8).
+    tagline: String,
     version: &'static str,
     build: String,
     api_version: &'static str,
@@ -113,6 +116,7 @@ async fn meta(
 
     Json(MetaResponse {
         name: config.site.name.clone(),
+        tagline: config.site.tagline.clone(),
         version: version::VERSION,
         build: version::build_id(),
         api_version: version::API_VERSION,

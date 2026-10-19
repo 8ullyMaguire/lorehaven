@@ -88,9 +88,9 @@ async fn budget_for(state: &AppState, account_id: &str) -> ApiResult<VoteBudget>
         .await
         .map_err(internal_sql)?;
     let limit = budget_limit_for(&state.config().forum.vote_budget, trust);
-    let start = darkhold_db::identity::format_rfc3339(
-        darkhold_domain::typed_votes::window_start(OffsetDateTime::now_utc()),
-    );
+    let start = darkhold_db::identity::format_rfc3339(darkhold_domain::typed_votes::window_start(
+        OffsetDateTime::now_utc(),
+    ));
     let spent = darkhold_db::typed_votes::budget_spent(state.db(), account_id, &start)
         .await
         .map_err(internal)?;
@@ -212,10 +212,9 @@ async fn cast_vote(
     // The taxonomy is the category's: a Critique category that configures
     // `constructive | harsh_but_fair | needs_sources` refuses `insightful`
     // without any code change (spec §35.2).
-    let taxonomy =
-        darkhold_db::typed_votes::vote_types_for_category(state.db(), &post.category_id)
-            .await
-            .map_err(internal)?;
+    let taxonomy = darkhold_db::typed_votes::vote_types_for_category(state.db(), &post.category_id)
+        .await
+        .map_err(internal)?;
     let vote_type = find_vote_type(&taxonomy, &body.vote_type)
         .cloned()
         .ok_or_else(|| {
@@ -410,9 +409,9 @@ async fn post_meta_vote(
     }
 
     let forum = &state.config().forum;
-    let start = darkhold_db::identity::format_rfc3339(
-        darkhold_domain::typed_votes::window_start(OffsetDateTime::now_utc()),
-    );
+    let start = darkhold_db::identity::format_rfc3339(darkhold_domain::typed_votes::window_start(
+        OffsetDateTime::now_utc(),
+    ));
     let spent = darkhold_db::typed_votes::meta_mods_cast(state.db(), &account, &start)
         .await
         .map_err(internal)?;

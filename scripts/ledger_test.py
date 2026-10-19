@@ -92,7 +92,20 @@ def test_upsert_appends_a_new_id(tmp):
 
 
 def test_header_is_preserved(tmp):
-    """A ledger with seven columns must not silently grow to nine."""
+    """A ledger with seven columns must not silently grow to nine.
+
+    This test's name is the rule, and the rule is the *only* thing it asserts. An earlier
+    version of it asserted the opposite — that the canonical columns were appended to an
+    existing header — which is the exact defect the module's own header warns about:
+
+        "a ledger that has not yet gained a column does not gain one because somebody
+         edited a row."
+
+    The test passed against a writer that grew the ledger from 703 rows of 7 columns to 703
+    rows of 9 columns, with two empty fields on every single one, and the diff was 704 lines
+    removed and 711 added. **A test whose assertion contradicts its own name is worse than no
+    test, because it reads like coverage.**
+    """
     path = os.path.join(tmp, "requirements.csv")
     legacy = "id,area,requirement,milestone,status,evidence,notes\r\nM0-01,platform,a thing,M0,planned,,\r\n"
     with io.open(path, "w", encoding="utf-8", newline="") as handle:
@@ -100,12 +113,54 @@ def test_header_is_preserved(tmp):
     ledger.upsert_row(path, row("M0-01", status="implemented-fully-tested"))
     header = open(path, encoding="utf-8", newline="").read().split("\r\n")[0]
     check(
-        header == "id,area,requirement,milestone,status,evidence,notes,verified_at,gates",
-        "the canonical columns are appended to an existing header (got %r)" % header,
+        header == "id,area,requirement,milestone,status,evidence,notes",
+        "the header is preserved verbatim (got %r)" % header,
     )
     rows = ledger.read_rows(path)
     check(len(rows) == 1, "the legacy row survived the write")
     check(rows[0]["status"] == "implemented-fully-tested", "the legacy row was updated")
+
+
+def test_an_edit_does_not_change_the_header_or_the_field_count(tmp):
+    """The real ledger's shape, and the shape it must keep.
+
+    The 703 inherited rows have seven fields. An edit that added two empty fields to every
+    one of them would be a 1,411-line diff for a one-line change — the same trap, at the same
+    size, as the 698-line diff that made this module necessary in the first place.
+    """
+    path = os.path.join(tmp, "requirements.csv")
+    legacy_header = "id,area,requirement,milestone,status,evidence,notes"
+    body = "".join(
+        "M0-%02d,platform,thing %d,M0,planned,,notes\r\n" % (n, n) for n in range(1, 6)
+    )
+    with io.open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(legacy_header + "\r\n" + body)
+    before = open(path, "rb").read()
+
+    ledger.upsert_row(path, row("M0-03", status="implemented-fully-tested"))
+    after = open(path, "rb").read()
+
+    lines = after.split(b"\r\n")
+    check(
+        lines[0].decode() == legacy_header,
+        "the header is untouched (got %r)" % lines[0].decode(),
+    )
+    for index, line in enumerate(lines[1:6], start=1):
+        check(
+            line.count(b",") == 6,
+            "row %d has seven fields, not nine (got %r)" % (index, line),
+        )
+    # Only the one edited row differs. Everything else is byte-identical.
+    before_lines = before.split(b"\r\n")
+    changed = [
+        i
+        for i, (a, b) in enumerate(zip(before_lines, lines))
+        if a != b
+    ]
+    check(
+        changed == [3],
+        "exactly one line changed, and it is the edited row (got %r)" % changed,
+    )
 
 
 def test_unknown_column_is_refused(tmp):
