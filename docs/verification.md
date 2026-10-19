@@ -54,6 +54,19 @@ git ls-tree -r --name-only master  > /tmp/opencode/pre-rename-files.txt
 **Seven commit messages differ**, and every one differs only in a SHA it quotes
 (`"rewritten against baf297d"` → `"rewritten against 1833d53"`). That is the whole difference.
 
+### The directory
+
+The repository directory was renamed to match: **`~/code-local/rust/lorehaven` →
+`~/code-local/rust/darkhold`**, and the build, the formatter and the ledger's own writer were
+re-run at the new path before the rename was called done.
+
+**The remotes' URLs are unchanged, and deliberately so.** All three of them point at a
+repository that still carries the old name — `github` at `8ullyMaguire/lorehaven.git`, `origin`
+at `hirrolot19/lorehaven.git`, and `thinkcentre` at a path on another host — and **renaming
+those is the owner's decision, exactly like the release tags and the force-push.** The remote
+*aliases* are unchanged too: renaming `origin` to `darkhold-origin` would break `git push
+origin` for anyone and for any script, and it would buy nothing.
+
 ### The backup, and the three remotes
 
 `git bundle create /tmp/opencode/lorehaven-pre-rename.bundle --all` — 9,134,877 bytes, 63 refs,
