@@ -54,11 +54,44 @@ git ls-tree -r --name-only master  > /tmp/opencode/pre-rename-files.txt
 **Seven commit messages differ**, and every one differs only in a SHA it quotes
 (`"rewritten against baf297d"` → `"rewritten against 1833d53"`). That is the whole difference.
 
-### The directory
+### The directory, and the trap in moving it
 
 The repository directory was renamed to match: **`~/code-local/rust/lorehaven` →
-`~/code-local/rust/darkhold`**, and the build, the formatter and the ledger's own writer were
-re-run at the new path before the rename was called done.
+`~/code-local/rust/darkhold`**.
+
+**And moving it broke five tests — for a reason worth writing down.**
+
+```rust
+let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+```
+
+`CARGO_MANIFEST_DIR` is **baked in at compile time**, so a test binary that was compiled at
+the old path looks for its fixtures at the old path forever. The failure reads like a missing
+fixture:
+
+```
+reading /home/alvaro/code-local/rust/lorehaven/crates/scrapers/tests/fixtures/ao3/work.html:
+No such file or directory (os error 2)
+```
+
+**And cargo did not rebuild the binaries.** A move preserves every file's mtime, and cargo's
+freshness check for a path dependency is mtime-based — so the outputs still looked newer than
+the inputs, cargo considered the workspace fresh, and the stale absolute paths survived. **The
+build was green and the tests were red, and the build was green *because* nothing was rebuilt.**
+
+The fix is to invalidate the fingerprints — `find crates -name '*.rs' -exec touch {} +` — and
+then rebuild. It is in the plan's M0 as a step, because **a directory rename is a change to
+every baked-in path in the tree and cargo will not notice it for you.**
+
+The blast radius is the three crates that use `CARGO_MANIFEST_DIR`: `darkhold-app`,
+`darkhold-db` and `darkhold-scrapers`.
+
+**The generalisable rule: `env!("CARGO_MANIFEST_DIR")` is an absolute path, and an absolute
+path is a promise about where the code will live.** A build that is supposed to be relocatable
+wants `env!("CARGO_MANIFEST_DIR")` only for files that are *inside* the crate, and wants
+`std::env::current_dir()` for anything relative to the repository root — which is what
+`crates/app/tests/config_sections.rs` and `crates/app/tests/milestone_32.rs` do when they join
+`../..` onto it, and which is the right shape for those.
 
 **The remotes' URLs are unchanged, and deliberately so.** All three of them point at a
 repository that still carries the old name — `github` at `8ullyMaguire/lorehaven.git`, `origin`
