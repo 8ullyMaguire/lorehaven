@@ -55,7 +55,13 @@ pub fn document() -> Value {
         if entry.audience != Audience::Public {
             continue;
         }
-        let path = format!("{API_PREFIX}{}", entry.path);
+        // The paths are **relative to the `servers` entry**, which is where
+        // `/api/v1` lives. OpenAPI 3.1's `paths` are resolved against the server
+        // URL, so a path that carried the prefix itself would be
+        // `/api/v1/api/v1/works` for a client that resolves it. The table's
+        // paths are already relative — the table is mounted under `/api/v1` —
+        // and the document says so once, in `servers`.
+        let path = entry.path.to_string();
         let method = entry.method.to_ascii_lowercase();
         let operation = json!({
             "operationId": format!("{}_{}", method, entry.handler),

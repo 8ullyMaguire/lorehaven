@@ -635,7 +635,10 @@ impl Default for ChannelsConfig {
 /// adult-content host by default, and no mainstream payment processor accepts that
 /// content — so a payment-only tier is *unbuildable on the default instance*, which
 /// is the configuration the specification otherwise assumes (spec §18).
-#[derive(Debug, Clone)]
+///
+/// The `Default` is **derived**, so it takes each half's own default — and each
+/// half's default is the *documented* one, not a field's zero value.
+#[derive(Debug, Clone, Default)]
 pub struct SupportersConfig {
     /// The grant sources this instance runs.
     pub grants: SupportersGrantsConfig,
@@ -687,15 +690,6 @@ impl Default for SupportersPriceConfig {
             monthly: 500,
             annual: 5_000,
             currency: "EUR".to_string(),
-        }
-    }
-}
-
-impl Default for SupportersConfig {
-    fn default() -> Self {
-        Self {
-            grants: SupportersGrantsConfig::default(),
-            price: SupportersPriceConfig::default(),
         }
     }
 }
@@ -3225,7 +3219,10 @@ impl Config {
                 c.period_days
             );
         }
-        if !(c.tau > 0.0) {
+        // `is_nan` is checked explicitly rather than written as `!(tau > 0.0)`:
+        // a negated comparison on a partially ordered type hides the NaN case,
+        // and a NaN convergence rate would make every vote count for nothing.
+        if c.tau.is_nan() || c.tau <= 0.0 {
             anyhow::bail!("channels.voting.tau must be greater than 0, got {}", c.tau);
         }
 

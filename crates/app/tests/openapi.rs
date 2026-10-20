@@ -42,7 +42,11 @@ fn table_paths() -> BTreeSet<String> {
     ROUTE_TABLE
         .iter()
         .filter(|entry| entry.audience == Audience::Public)
-        .map(|entry| format!("/api/v1{}", entry.path))
+        // The table's paths are **relative**, because the document's `servers`
+        // entry carries the `/api/v1` prefix and OpenAPI 3.1 resolves `paths`
+        // against it. A path that carried the prefix itself would be
+        // `/api/v1/api/v1/works` for a client that resolves it.
+        .map(|entry| entry.path.to_string())
         .collect()
 }
 
@@ -97,16 +101,21 @@ fn the_document_is_openapi_31_and_says_so() {
 }
 
 #[test]
-fn every_documented_path_is_under_the_api_prefix() {
-    // The document's `servers` entry says the base is `/api/v1`, and the paths
-    // are relative to it. A path that carried the prefix itself would be
-    // `/api/v1/api/v1/works` for a client that prefixes it — which is the kind
-    // of drift a generated document is supposed to make impossible.
-    let documented = document_paths();
-    for path in &documented {
+fn the_documented_paths_are_relative_to_the_server() {
+    // OpenAPI 3.1 resolves `paths` against the `servers` URL, and the document's
+    // `servers` entry says the base is `/api/v1`. **A path that carried the
+    // prefix itself would be `/api/v1/api/v1/works`** for a client that resolves
+    // it — which is the kind of drift a generated document is supposed to make
+    // impossible, and which an existing test in `milestone_45.rs` caught.
+    let document = openapi::document();
+    assert_eq!(
+        document["servers"][0]["url"], "/api/v1",
+        "the server entry carries the prefix, so the paths must not"
+    );
+    for path in document_paths() {
         assert!(
-            path.starts_with("/api/v1/"),
-            "{path} is not under the API prefix the document advertises"
+            !path.starts_with("/api/v1"),
+            "{path} carries the prefix the servers entry already carries"
         );
     }
 }
@@ -129,7 +138,7 @@ fn a_path_with_both_a_public_and_an_authenticated_variant_is_published() {
         .map(|entry| entry.path)
         .collect();
     for entry in ROUTE_TABLE {
-        let path = format!("/api/v1{}", entry.path);
+        let path = entry.path.to_string();
         if public_paths.contains(entry.path) {
             assert!(
                 documented.contains(&path),

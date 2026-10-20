@@ -67,10 +67,10 @@ fn the_caps_are_the_specifications_numbers() {
     // 220 MiB for the full engine and 60 MiB for the lite one (spec §22.3).
     assert_eq!(health::CAP_FULL_BYTES, 220 * 1024 * 1024);
     assert_eq!(health::CAP_LITE_BYTES, 60 * 1024 * 1024);
-    assert!(
-        health::CAP_LITE_BYTES < health::CAP_FULL_BYTES,
-        "the lite cap is below the full one, or the tiers are not tiers"
-    );
+    // A constant assertion, so it is a constant assertion: the compiler checks
+    // it once, at compile time, and a change to either cap that breaks the
+    // ordering does not build.
+    const { assert!(health::CAP_LITE_BYTES < health::CAP_FULL_BYTES) };
 }
 
 #[test]

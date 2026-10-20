@@ -642,6 +642,37 @@ marked `KNOWN DEFECT`. They assert the **current** behaviour on purpose: a fix
 turns them red, which is the point. The fix deserves to be noticed rather than
 to happen in passing.
 
+### M1-D01 · The test harness leaks its scratch directories, and a run fills the filesystem
+
+`TestDb` has no `Drop` that removes the directory its SQLite file lives in, and
+`std::env::temp_dir()` is not swept. **A full workspace run leaves thousands of
+`darkhold-test-*` directories under `TMPDIR`** — a measured run on the development host left
+**1,399 of them, 6.9 GB**, and the harness's own comment puts the figure at "~7000 directories
+totalling 29GB".
+
+**On this host that is not a nuisance, it is a failure.** `/tmp` is a **16 GB tmpfs**, and the
+suite's failures arrive as
+
+```
+error returned from database: (code: 13) database or disk is full
+```
+
+which reads like a storage problem and is a **tmpfs** problem. The SQLite arm of M1's gate run
+failed **twelve suites** this way before the directories were swept.
+
+**The workaround is in the gate runner, and it is a workaround.** `scripts/gate.sh` points
+`TMPDIR` at a directory on the real filesystem and sweeps the stale `darkhold-*` directories
+before a run. **That is not a fix**, because the directories are still created and still left
+behind — the gate just stops tripping over them.
+
+**The fix is a shared template directory plus a sweep at exit**, as the harness's own comment
+says, and *not* a naive `remove_dir_all` in a `Drop`: a `Drop` that deletes a directory a
+still-running test holds a handle to would be a worse bug than the leak.
+
+Pinned by `a_scratch_directory_outlives_its_test` in
+`crates/app/tests/scratch_leak.rs`, so the current behaviour is recorded rather than assumed,
+and a fix turns it red rather than passing silently.
+
 ## Unreachable tables
 
 **Seventy-five tables have one side and not the other.** A table that is written

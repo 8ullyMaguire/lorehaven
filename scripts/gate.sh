@@ -52,6 +52,33 @@ GATE_DIR="$REPO_ROOT/target/gate"
 # edit this file.
 PG_URL="${DARKHOLD_TEST_PG_URL:-postgres://postgres:postgres@127.0.0.1:55433/postgres}"
 
+# Where the test harness puts its scratch directories.
+#
+# **`/tmp` is a 16 GB tmpfs on the development host, and the harness leaks its scratch
+# directories** — a workspace run leaves thousands of `darkhold-*` directories, because
+# `TestDb` has no `Drop` and `std::env::temp_dir()` is not swept (the harness says so in
+# its own comment). A full run needs several gigabytes of them, so on a 16 GB tmpfs the
+# suite fills the filesystem and the failures arrive as **"database or disk is full"** —
+# which reads like a storage problem and is a tmpfs problem.
+#
+# So the scratch lives on the real filesystem, and the stale directories are swept
+# before the run. **A gate that fails because it ran out of room is not a gate that
+# measured anything.**
+SCRATCH_ROOT="${DARKHOLD_SCRATCH:-$REPO_ROOT/target/scratch}"
+export TMPDIR="$SCRATCH_ROOT"
+mkdir -p "$SCRATCH_ROOT"
+
+sweep_scratch() {
+    # Only this harness's directories, and only ones that are clearly abandoned.
+    # A run in flight has a live process holding a handle, so the sweep is for
+    # directories left by a run that is over.
+    local dir
+    for dir in "$SCRATCH_ROOT"/darkhold-*; do
+        [ -d "$dir" ] || continue
+        rm -rf "$dir" 2>/dev/null || true
+    done
+}
+
 # How many lines of a failed gate's log to print. Enough to see the assertion, not so
 # much that the failure scrolls off the top of the terminal.
 TAIL_LINES="${DARKHOLD_GATE_TAIL:-40}"
@@ -203,10 +230,12 @@ case "$cmd" in
         run_gate build cargo build --all-targets
         ;;
     test)
+        sweep_scratch
         run_gate test run_tests "$@"
         ;;
     pg)
         require_postgres
+        sweep_scratch
         DARKHOLD_TEST_PG_URL="$PG_URL" run_gate pg run_tests "$@"
         ;;
     doc)
