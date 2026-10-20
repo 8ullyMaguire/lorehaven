@@ -1,3 +1,75 @@
+## 2026-10-20 — M1: the measured RSS baseline, and the caps that cite it
+
+**Milestone:** M1 · **Requirements:** `DM1-01` … `DM1-10`
+
+The specification's rule is a **provenance rule**: every cap names where its number came from,
+and a cap with neither a measurement nor a derivation is not a cap (§22.3). M1 produced the
+archive's measured RSS baseline, and the cap is now written against it.
+
+### The measurement
+
+```bash
+cargo build --release -p darkhold-app
+bash scripts/measure-rss.sh            # three against an empty database
+bash scripts/measure-rss.sh --migrated # three against a migrated one
+```
+
+| run | empty database | migrated database |
+|---|---|---|
+| 1 | 22.64 | 22.14 |
+| 2 | 22.77 | 21.96 |
+| 3 | 23.00 | 21.96 |
+
+**The baseline is the median of the six: 22.39 MiB.** The cap is the baseline **plus 25 %**:
+**27.99 MiB**, written in the specification as **28.0 MiB**.
+
+**Three things the measurement is careful about, and each is a recorded failure somewhere:**
+
+- **It reads `VmHWM` from `/proc/<pid>/status`** — the kernel's own high-water mark, which is
+  the *peak*. A script that read `VmRSS` would report a number that goes **down** when the
+  instance is idle, and a budget gate that reports a lower number when nothing is happening is
+  not a budget gate.
+- **It waits for `/health/ready`** — it does not sleep a guessed interval, because a guess
+  that is too short measures a process that has not finished starting and a guess that is too
+  long measures an idle one.
+- **It measures the release binary.** The debug build allocates differently, and a budget
+  measured against the wrong binary is a budget for a program nobody ships.
+
+### What the number is, and what it is not
+
+**It is the RSS of the archive with no catalogue**, because the corpus arrives at M9 and this
+instance does not have one. So the derived cap is the cap for an instance *without* a
+catalogue; the **1 GiB** figure in the specification is the cap for an instance *with* one, and
+**it has to be re-derived at M9 against the measured corpus** rather than carried over.
+
+**And the gate refuses to run here.** `scripts/budget.sh` boots the real binary against the real
+catalogue and reads the kernel's high-water mark after each step. This host's instance database
+is a migrated schema with **zero works** in it, so the gate refuses:
+
+```
+the catalogue at sqlite://data/lorehaven.sqlite?mode=rwc holds no works.
+Measuring an empty catalogue is measuring the binary, not the instance,
+and measuring nothing is not a pass.
+```
+
+**That is the gate working, not the gate failing.** A gate that booted against an empty
+database and reported a beautiful number would be measuring the binary and not the instance,
+and the cap is about the instance.
+
+### The other nine cards
+
+| card | what it shipped |
+|---|---|
+| `DM1-01` | the `taste` crate: eleven modules, each an empty file naming the section it will implement, and a `health` module that is **real** — it reads the process's actual RSS and its kernel high-water mark, and refuses when it is over the cap |
+| `DM1-02` | `scripts/gate.sh`: eleven subcommands, every gate's verdict its **exit code**, and no gate is ever piped through `grep -c` |
+| `DM1-03` | eleven configuration sections, every one `deny_unknown_fields`, every value range-checked at startup, and two refused outright rather than clamped |
+| `DM1-04` | the split specification: 41 files, slots 00–40, **made by a script** because a split that is done by hand is a split that is done once |
+| `DM1-05` | the health endpoints, the meta payload's published gates, the doctor's tier report, and the taste engine's real `/healthz` |
+| `DM1-07` | the route inventory's reverse direction, and **a test that proves the check catches what it claims to catch** |
+| `DM1-08` | the reachability probe: 308 tables, **75 of them one-sided** and named |
+| `DM1-09` | the OpenAPI document, **generated from the route table**: 145 paths, where there were four |
+| `DM1-10` | the ledger's two columns, added by a deliberate migration that changed no row |
+
 ## 2026-10-19 — M0: the rename, and the six traps it exposed
 
 **Milestone:** M0 · **Requirements:** `DM0-01` … `DM0-07` · **ADRs:** 0027, 0028

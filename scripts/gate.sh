@@ -36,7 +36,8 @@
 #   scripts/gate.sh e2e <suite>             one Playwright suite at a time
 #   scripts/gate.sh dialects                the dialect-parity gates
 #   scripts/gate.sh repo                    the reachability probe and the split-spec check
-#   scripts/gate.sh budget                  the taste engine's RSS budget
+#   scripts/gate.sh budget                  the archive's RSS budget
+#   scripts/gate.sh taste-budget            the taste engine's RSS budget (M13-09)
 #   scripts/gate.sh all                     fmt, lint, build, test, doc, frontend, dialects
 #
 # Every log lands in `target/gate/<name>.log`.
@@ -225,11 +226,18 @@ case "$cmd" in
         run_gate repo run_repo
         ;;
     budget)
+        # The archive's RSS budget (T-M1-06). It boots the real binary against the
+        # real catalogue, reads the kernel's high-water mark after each step, and
+        # prints the baseline, the current figure and the delta. It REFUSES to run
+        # when the catalogue is unreadable: measuring nothing is not a pass.
+        run_gate budget bash scripts/budget.sh
+        ;;
+    taste-budget)
         # NOT IMPLEMENTED YET — the taste engine's budget gate is T-M13-09.
         #
         # It exits 2, and it does not exit 0. A gate that did not run must never report
         # success, or the record says the budget was checked when it was not.
-        printf "budget: not implemented (T-M13-09, the taste engine's RSS gate)\n" >&2
+        printf "taste-budget: not implemented (T-M13-09, the taste engine's RSS gate)\n" >&2
         exit 2
         ;;
     all)
