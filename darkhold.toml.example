@@ -363,3 +363,225 @@ consult_floor = 0.10
 #   DARKHOLD_DECISIONS_API_KEY=sk-unsloth-...
 # A key in this file is a key in a git repository, a backup, and a paste into
 # a bug report.
+# ---------------------------------------------------------------------------
+# The Darkhold sections: governance, policy, tiers and the instance theme.
+#
+# Every key below has a documented default, and an absent section is the
+# default — so this file documents the defaults, it does not have to be
+# complete. A section that names one key keeps the documented value for every
+# key it omits.
+#
+# **Precedence: command line → environment (`DARKHOLD_*`) → file → default.**
+# **Validation at startup, not at use:** a value that cannot be sane is refused
+# when the instance starts, and the refusal names the key.
+# ---------------------------------------------------------------------------
+
+# The compute tiers — who gets which algorithm (spec §12.6).
+#
+# **A tier buys compute, and never rank** (D-10, N-1). Every key here decides
+# how much work the instance does for a reader, and none of them decides where
+# a reader's work appears in a list.
+#
+# The three T2 gates are evaluated in a fixed order — supporter, then trust,
+# then resonance — and exactly one wins, because three overlapping "or"
+# conditions produce an ambiguous tier and an ambiguous explanation.
+[tiers]
+# T0 is the house theme, and it is always available. The only value is
+# "always": T0 is not "no recommendations", it is a real recommendation and it
+# is explained.
+house = "always"
+# T1 (personal, lite) needs a registered account. Lite mode is the reader's own
+# profile blended with the house floor: tag overlap and neighbourhood, no
+# embeddings and no multi-strategy fusion.
+personal_min_trust = 1
+# Whether the Supporter tier reaches T2.
+full_supporter = true
+# The trust level that reaches T2.
+full_min_trust = 4
+# The resonance that reaches T2. A reader with no evidence has resonance 0
+# regardless of agreement, because agreement without evidence is a coincidence.
+full_min_resonance = 0.55
+
+# Channel voting — the community's share of a channel's tag weights (spec §12.10,
+# §12.12). A channel is a theme (§12.10: "Two kinds, and they are the same
+# object"), so this is the specification's `[themes.voting]` table under the
+# name the operator actually sees it by.
+[channels.voting]
+enabled = true
+# The trust level a ballot needs.
+min_trust_level = 3
+# The resonance a ballot needs.
+min_resonance = 0.55
+# Whether only supporters may vote.
+supporter_only = false
+# How long a voting period runs.
+period_days = 7
+# The most a tag's weight may move in one period, as a fraction of the
+# remaining distance. A weight that could jump would make last month's
+# recommendation unexplainable against this month's weights.
+max_shift_per_period = 0.25
+# The owner's permanent share of every weight. The owner votes like anyone
+# else; the seed floor is the structural advantage, not a second ballot.
+seed_floor = 0.2
+# The community's convergence rate.
+tau = 25
+
+# The Supporter tier — the grant sources and the price (spec §18).
+#
+# **The grant sources must be more than one.** D-9 makes the instance an
+# adult-content host by default, and no mainstream payment processor accepts
+# that content — so a payment-only tier is unbuildable on the default instance.
+[supporters.grants]
+# The operator issues signed codes, grants by account, by invite, or through a
+# manual approval queue. The default, and the only one that works with D-9.
+self_hosted = true
+# A monthly or annual subscription through an operator-chosen processor.
+payment_processor = false
+# A peer instance vouches for a reader's entitlement.
+federated = false
+# The operator sells codes by hand, by transfer, by crypto, or through a page
+# of their own.
+code_purchase = false
+
+[supporters.price]
+# In the smallest unit of the currency: 500 is 5.00.
+monthly = 500
+annual = 5000
+currency = "EUR"
+
+# Consent — the gate that creates a guest identity (spec §14.3).
+#
+# Until consent is accepted the site is anonymous read-only, and the refusal is
+# the API's, not the toast's.
+[consent]
+# Whether a guest must accept consent before the instance will create one.
+required_for_guest = true
+# The version stamped on the record. Bumping it re-asks.
+version = 1
+# The age gate's mode. "required" on an adult-content instance (D-9).
+age_gate = "required"
+# Whether a version bump re-asks every reader.
+reask_on_version_change = true
+
+[consent.categories]
+# `essential` is always on.
+essential = true
+# `analytics` and `personalisation` are opt-in.
+analytics = false
+personalisation = false
+
+# Guests — real identities with a door that closes on MAU (spec §14.1).
+#
+# A guest is a row in `accounts` with an empty credential, not a cookie-only
+# shadow. A guest's rate limits are a logged-in new user's: never higher,
+# never lower.
+[guest]
+# Whether guest identities may be created at all.
+enabled = true
+# Monthly active accounts above which new guests are refused. 0 disables guest
+# access entirely.
+mau_limit = 500
+# The window MAU is counted over, in days.
+mau_window_days = 30
+# What happens at the cap: "close" refuses new guests, "throttle" slows them.
+on_cap = "close"
+# How many days a refused guest is refused for.
+grace_days = 7
+# The trust level a guest holds. Never a moderation level.
+parity_level = 1
+
+# Merges — the identity model's merge policy (spec §9.5).
+[merge]
+# Whether merges may be proposed at all.
+enabled = true
+# Whether a merge grants trust. False by default: a merge is a statement about
+# identity, not a grant of standing.
+grants_trust = false
+# Whether a merge grants tenure.
+grants_tenure = true
+# Whether the parties are notified of a merge.
+notify = true
+# What happens to the merged-away record: "anonymize" keeps it, scrubbed.
+tombstone = "anonymize"
+
+# Trust — the ladder, and the elasticity beneath it (spec §14.4).
+[trust]
+# The fewest holders an elastic level needs before it holds.
+elastic_min_holders = 1
+# The floor an elastic level decays to.
+floor_level = 2
+# How long an elastic level takes to decay, in days.
+elastic_decay_days = 30
+# The level a guest holds.
+guest_level = 1
+# Whether a guest may earn trust. FALSE, ALWAYS — a guest can never extend
+# trust, so setting this to true is refused at startup rather than ignored.
+guest_earns = false
+
+# Self-governance — the jury and the appeals (spec §14.5).
+[governance]
+# Whether the instance's self-governance surfaces are live.
+enabled = true
+# How many people sit on a jury.
+jury_size = 5
+# The trust level a juror needs.
+jury_min_level = 3
+# The fewest holders an elastic juror pool needs.
+jury_elastic_min = 3
+# Whether an appeal is heard by a fresh jury.
+appeal_fresh_jury = true
+# Whether administrators may act outside the jury.
+admin_emergency_only = true
+# How many days before a ban is reviewed.
+ban_review_days = 90
+
+# The mood gate — who may create a mood, and how many (spec §12.3).
+#
+# A mood is a TRUST gate, not a payment gate (spec §18), so it is configured
+# separately from the Supporter tier even when both are enabled.
+[discovery.moods]
+enabled = true
+# The trust level a reader needs to create one.
+min_trust_level = 3
+# Whether only supporters may create one.
+supporter_only = false
+# The most moods one account may hold.
+max_moods_per_account = 12
+
+# The instance theme — the published editorial position (spec §12.1).
+[theme]
+# Whether the instance theme is published. It defaults to false, because an
+# instance with no theme seed has no theme to publish, and an empty published
+# theme is a position nobody took.
+published = false
+# How strongly a work carrying a tag the theme is AGAINST is demoted. It is a
+# penalty and never a negative weight in the vector, because §12.12.3 asserts a
+# share against the normalised effective weight, and a negative weight makes
+# that share undefined.
+opposition_weight = 0.35
+
+# The three signal weights the house taste is blended from (spec §12.1, D-11).
+#
+# **The ordering is the design and the numbers are configuration.** Works
+# indicate a theme better than authors, and authors better than tags: a work is
+# a complete statement of what an instance is about, an author is a statement
+# about a body of work, and a tag is a statement about a category, which is the
+# most widely shared thing in a catalogue.
+#
+# The order is NOT a preference. A file that inverts it is refused at startup.
+[theme.signal_weights]
+works = 0.60
+authors = 0.25
+tags = 0.15
+
+# The taste engine's deployment shape (spec §8.2).
+[taste]
+# "embedded" runs the taste engine inside the archive, which is right for a
+# small instance and leaves one binary to deploy. "service" runs it as its own
+# process, which is right for a large one, because the graph's RSS is then the
+# service's problem and the archive's RSS stays flat.
+#
+# In one process the peak RSS is the SUM of the phases, not the maximum, and
+# the sum does not fit on the target hardware. That measurement is why this is a
+# setting rather than a decision.
+mode = "embedded"

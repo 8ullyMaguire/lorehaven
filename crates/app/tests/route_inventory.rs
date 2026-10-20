@@ -5243,27 +5243,18 @@ fn registered_routes_are_tabled() {
 /// is merged by a *helper* rather than spelled inline would be reported here as
 /// unmerged, and the fix is to spell it — which is what every router in this tree
 /// already does, so the check has no false negatives to accommodate.
-#[test]
-fn every_declared_router_is_merged_into_server_rs() {
-    let routes_dir = Path::new("src/routes");
-    let server = fs::read_to_string("src/server.rs").expect("cannot read src/server.rs");
+///
+/// **The checker is a pure function, so it can be tested.** A check that only
+/// runs against the real tree cannot be shown to catch anything: it is green, and
+/// green is indistinguishable from "it is not looking". `the_reverse_check_catches_
+/// an_unmounted_router` below feeds it a synthetic module and asserts the failure
+/// names the file and the router — which is the card's "prove the test works"
+/// step, done permanently rather than by adding a file and removing it in the
+/// same commit.
+fn unmounted_routers(modules: &[(String, String, String)], server: &str) -> (Vec<String>, usize) {
     let mut failures: Vec<String> = Vec::new();
     let mut checked = 0usize;
-
-    let entries = fs::read_dir(routes_dir).expect("cannot read routes directory");
-    for entry in entries {
-        let entry = entry.expect("read_dir entry");
-        let path = entry.path();
-        if !path.is_file() || !path.extension().is_some_and(|e| e == "rs") {
-            continue;
-        }
-        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-        if file_name == "lib.rs" || file_name == "mod.rs" {
-            continue;
-        }
-        let module = path.file_stem().unwrap().to_string_lossy().to_string();
-        let src = fs::read_to_string(&path).expect("read route module");
-
+    for (module, file_name, src) in modules {
         // `pub fn NAME(` on a line that also mentions `Router<` — a router
         // builder, as opposed to a helper that happens to be named `routerize`.
         // The return type is read from the whole signature rather than the
@@ -5288,10 +5279,10 @@ fn every_declared_router_is_merged_into_server_rs() {
             // The signature runs to the `{` that opens the body, or to the end of
             // the declaration line if the body is on the same line.
             let mut sig = String::new();
-            for m in n..(n + 4).min(lines.len()) {
-                sig.push_str(lines[m]);
+            for line in lines.iter().skip(n).take(4) {
+                sig.push_str(line);
                 sig.push('\n');
-                if lines[m].contains('{') || lines[m].contains(';') {
+                if line.contains('{') || line.contains(';') {
                     break;
                 }
             }
@@ -5317,6 +5308,33 @@ fn every_declared_router_is_merged_into_server_rs() {
             }
         }
     }
+    (failures, checked)
+}
+
+#[test]
+fn every_declared_router_is_merged_into_server_rs() {
+    let routes_dir = Path::new("src/routes");
+    let server = fs::read_to_string("src/server.rs").expect("cannot read src/server.rs");
+
+    // (module name, file name, source) for every route module.
+    let mut modules: Vec<(String, String, String)> = Vec::new();
+    let entries = fs::read_dir(routes_dir).expect("cannot read routes directory");
+    for entry in entries {
+        let entry = entry.expect("read_dir entry");
+        let path = entry.path();
+        if !path.is_file() || !path.extension().is_some_and(|e| e == "rs") {
+            continue;
+        }
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        if file_name == "lib.rs" || file_name == "mod.rs" {
+            continue;
+        }
+        let module = path.file_stem().unwrap().to_string_lossy().to_string();
+        let src = fs::read_to_string(&path).expect("read route module");
+        modules.push((module, file_name, src));
+    }
+
+    let (failures, checked) = unmounted_routers(&modules, &server);
 
     assert!(
         checked >= 40,
@@ -5326,4 +5344,57 @@ fn every_declared_router_is_merged_into_server_rs() {
     if !failures.is_empty() {
         panic!("Unmerged routers:\n{}", failures.join("\n"));
     }
+}
+
+/// **The check is proved to catch what it claims to catch.**
+///
+/// The plan's step for this was "temporarily add a `pub fn unmounted_router()` to a
+/// route module and assert the inventory test fails. Remove it in the same commit."
+/// That is a one-shot experiment, and a one-shot experiment is not a test: it proves
+/// the check worked on the day it was run and nothing after.
+///
+/// This is the same proof, permanently. The checker is a pure function over
+/// `(module, file, source)` triples, so a synthetic module with an unmounted router
+/// is fed to it and the failure is asserted — **and the failure has to NAME the file
+/// and the router**, because a check that reports "something is wrong" costs the
+/// reader the half hour it exists to save.
+#[test]
+fn the_reverse_check_catches_an_unmounted_router() {
+    let synthetic = (
+        "synthetic".to_string(),
+        "synthetic.rs".to_string(),
+        "use axum::Router;\n\
+         \n\
+         pub fn unmounted_router() -> Router<AppState> {\n\
+         \x20   Router::new()\n\
+         }\n"
+        .to_string(),
+    );
+
+    let (failures, _) = unmounted_routers(std::slice::from_ref(&synthetic), "");
+    assert_eq!(
+        failures.len(),
+        1,
+        "an unmounted router must be reported exactly once, and it was not: {failures:?}"
+    );
+    assert!(
+        failures[0].contains("synthetic.rs"),
+        "the failure must name the file it is in: {}",
+        failures[0]
+    );
+    assert!(
+        failures[0].contains("unmounted_router"),
+        "the failure must name the router that is not merged: {}",
+        failures[0]
+    );
+
+    // And the same module, merged, must NOT be reported. A check that reports
+    // everything is not a check.
+    let merged = "routes::synthetic::unmounted_router()";
+    let (failures, checked) = unmounted_routers(std::slice::from_ref(&synthetic), merged);
+    assert!(
+        failures.is_empty(),
+        "a merged router must not be reported: {failures:?}"
+    );
+    assert_eq!(checked, 1, "the merged router was still examined");
 }

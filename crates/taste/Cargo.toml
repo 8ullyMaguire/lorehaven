@@ -1,0 +1,30 @@
+[package]
+name = "darkhold-taste"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The taste engine: the catalogue, the graph, the ranker and the budgets"
+
+[lib]
+name = "darkhold_taste"
+path = "src/lib.rs"
+
+[[bin]]
+name = "taste"
+path = "src/main.rs"
+
+[dependencies]
+# The domain primitives, and nothing else.
+#
+# This crate does NO I/O to the archive's database. That is not a style preference: the
+# taste engine is a pure function of a catalogue, and the catalogue is a table (D-7). A
+# taste engine that could reach the database would make every ranking a read of whatever
+# happened to be there, and a ranking that depends on the archive's state is not a
+# ranking that can be measured (spec §8.3).
+darkhold-domain = { path = "../domain" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

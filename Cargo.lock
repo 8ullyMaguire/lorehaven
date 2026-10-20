@@ -814,6 +814,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkhold-taste"
+version = "0.1.0"
+dependencies = [
+ "darkhold-domain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"

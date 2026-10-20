@@ -180,6 +180,22 @@ pub struct Config {
     pub roadmap: RoadmapConfig,
     /// Retention governance settings (spec §5, §19.15, amendment §5).
     pub retention_governance: RetentionGovernanceConfig,
+    /// The compute tiers — who gets which algorithm (spec §12.6).
+    pub tiers: TiersConfig,
+    /// Channel voting (spec §12.10, §12.12).
+    pub channels: ChannelsConfig,
+    /// The Supporter tier's grant sources and price (spec §18).
+    pub supporters: SupportersConfig,
+    /// Consent (spec §14.3).
+    pub consent: ConsentConfig,
+    /// Guests (spec §14.1).
+    pub guest: GuestConfig,
+    /// Merges (spec §9.5).
+    pub merge: MergeConfig,
+    /// Trust (spec §14.4).
+    pub trust: TrustConfig,
+    /// Self-governance (spec §14.5).
+    pub governance: GovernanceConfig,
 }
 
 /// Roadmap participation settings (spec §29.4).
@@ -422,6 +438,25 @@ pub struct ThemeConfig {
     /// Per-tag gravity overrides in basis points (tag -> bp).
     #[serde(default)]
     pub tag_gravity_bp: std::collections::HashMap<String, i64>,
+    /// Whether the instance theme is **published** (spec §12.1).
+    ///
+    /// The instance theme is a public, versioned editorial position, and publishing
+    /// it is a deliberate act. **It defaults to false**, because an instance with no
+    /// theme seed has no theme to publish, and an empty published theme is a
+    /// position nobody took.
+    pub published: bool,
+    /// The three signal weights the house taste is blended from (spec §12.1, D-11).
+    ///
+    /// **The ordering is the design and the numbers are configuration.** Works
+    /// indicate a theme better than authors, and authors better than tags.
+    pub signal_weights: ThemeSignalWeights,
+    /// How strongly a work carrying a tag the theme is *against* is demoted
+    /// (spec §12.1.1).
+    ///
+    /// **It is a penalty and never a negative weight in the vector**, because
+    /// §12.12.3 asserts a share against the normalised effective weight, and a
+    /// negative weight makes that share undefined.
+    pub opposition_weight: f64,
 }
 
 fn default_theme_mode() -> String {
@@ -455,6 +490,9 @@ impl Default for ThemeConfig {
             boost_tags: Vec::new(),
             suppress_tags: Vec::new(),
             tag_gravity_bp: std::collections::HashMap::new(),
+            published: false,
+            signal_weights: ThemeSignalWeights::default(),
+            opposition_weight: 0.35,
         }
     }
 }
@@ -485,6 +523,11 @@ pub struct DiscoveryConfig {
     /// `discovery.rec_engine` per-account setting, which falls back to this
     /// when unset; see `rec_preference::resolve_strategies`.
     pub rec_enabled_strategies: Vec<String>,
+    /// The mood gate: who may create a mood, and how many (spec §12.3).
+    ///
+    /// **A mood is a trust gate, not a payment gate** (spec §18), so this is
+    /// configured separately from the Supporter tier even when both are enabled.
+    pub moods: MoodsConfig,
 }
 
 impl Default for DiscoveryConfig {
@@ -499,6 +542,379 @@ impl Default for DiscoveryConfig {
             rec_rrf_k: 60.0,
             rec_per_strategy_cap: 100,
             rec_enabled_strategies: Vec::new(),
+            moods: MoodsConfig::default(),
+        }
+    }
+}
+
+/// The compute tiers — who gets which algorithm (spec §12.6).
+///
+/// **A tier buys compute, and never rank** (D-10, N-1). Every field here decides
+/// *how much work* an instance does for a reader, and none of them decides where a
+/// reader's work appears in a list.
+///
+/// The three T2 gates are evaluated in a **fixed order** — supporter, then trust,
+/// then resonance — and exactly one wins, because three overlapping "or" conditions
+/// produce an ambiguous tier and an ambiguous tier produces an ambiguous explanation
+/// (spec §12.6 rule 6).
+#[derive(Debug, Clone)]
+pub struct TiersConfig {
+    /// T0 — the house theme — is always available. The only value is `always`,
+    /// because "T0 is not 'no recommendations'" (spec §12.6 rule 1).
+    pub house: String,
+    /// The trust level T1 (personal, lite) needs. T1 is the reader's own profile
+    /// blended with the house floor, in lite mode only.
+    pub personal_min_trust: i64,
+    /// Whether the Supporter tier reaches T2.
+    pub full_supporter: bool,
+    /// The trust level that reaches T2.
+    pub full_min_trust: i64,
+    /// The resonance that reaches T2. A reader with no evidence has resonance 0
+    /// regardless of agreement, because agreement without evidence is a coincidence.
+    pub full_min_resonance: f64,
+}
+
+impl Default for TiersConfig {
+    fn default() -> Self {
+        Self {
+            house: "always".to_string(),
+            personal_min_trust: 1,
+            full_supporter: true,
+            full_min_trust: 4,
+            full_min_resonance: 0.55,
+        }
+    }
+}
+
+/// Channel voting — the community's share of a channel's tag weights (spec §12.10,
+/// §12.12).
+///
+/// **A channel is a theme** (§12.10: "Two kinds, and they are the same object"), so
+/// this is the configuration the specification's `[themes.voting]` example describes,
+/// under the name the operator actually sees it by.
+#[derive(Debug, Clone)]
+pub struct ChannelsConfig {
+    /// Whether the community may vote on a channel's weights at all.
+    pub voting_enabled: bool,
+    /// The trust level a ballot needs.
+    pub min_trust_level: i64,
+    /// The resonance a ballot needs.
+    pub min_resonance: f64,
+    /// Whether only supporters may vote.
+    pub supporter_only: bool,
+    /// How long a voting period runs.
+    pub period_days: i64,
+    /// The most a tag's weight may move in one period, as a fraction of the
+    /// remaining distance (spec §12.12).
+    pub max_shift_per_period: f64,
+    /// The owner's permanent share of every weight. **The owner votes like anyone
+    /// else**; the seed floor is the structural advantage, not a second ballot.
+    pub seed_floor: f64,
+    /// The community's convergence rate.
+    pub tau: f64,
+}
+
+impl Default for ChannelsConfig {
+    fn default() -> Self {
+        Self {
+            voting_enabled: true,
+            min_trust_level: 3,
+            min_resonance: 0.55,
+            supporter_only: false,
+            period_days: 7,
+            max_shift_per_period: 0.25,
+            seed_floor: 0.2,
+            tau: 25.0,
+        }
+    }
+}
+
+/// The Supporter tier — the four grant sources and the price (spec §18).
+///
+/// **The grant sources must be more than one.** D-9 makes the instance an
+/// adult-content host by default, and no mainstream payment processor accepts that
+/// content — so a payment-only tier is *unbuildable on the default instance*, which
+/// is the configuration the specification otherwise assumes (spec §18).
+#[derive(Debug, Clone)]
+pub struct SupportersConfig {
+    /// The grant sources this instance runs.
+    pub grants: SupportersGrantsConfig,
+    /// The price, in the smallest unit of the currency.
+    pub price: SupportersPriceConfig,
+}
+
+/// The four grant sources (spec §18).
+#[derive(Debug, Clone)]
+pub struct SupportersGrantsConfig {
+    /// The operator issues signed codes, grants by account, by invite, or through a
+    /// manual approval queue. **The default, and the only one that works with
+    /// D-9's content policy.**
+    pub self_hosted: bool,
+    /// A monthly or annual subscription through an operator-chosen processor.
+    pub payment_processor: bool,
+    /// A peer instance vouches for a reader's entitlement.
+    pub federated: bool,
+    /// The operator sells codes by hand, by transfer, by crypto, or through a page
+    /// of their own.
+    pub code_purchase: bool,
+}
+
+impl Default for SupportersGrantsConfig {
+    fn default() -> Self {
+        Self {
+            self_hosted: true,
+            payment_processor: false,
+            federated: false,
+            code_purchase: false,
+        }
+    }
+}
+
+/// The Supporter tier's price (spec §18).
+#[derive(Debug, Clone)]
+pub struct SupportersPriceConfig {
+    /// The monthly price, in the smallest unit of the currency.
+    pub monthly: i64,
+    /// The annual price, in the smallest unit of the currency.
+    pub annual: i64,
+    /// The currency the prices are in.
+    pub currency: String,
+}
+
+impl Default for SupportersPriceConfig {
+    fn default() -> Self {
+        Self {
+            monthly: 500,
+            annual: 5_000,
+            currency: "EUR".to_string(),
+        }
+    }
+}
+
+impl Default for SupportersConfig {
+    fn default() -> Self {
+        Self {
+            grants: SupportersGrantsConfig::default(),
+            price: SupportersPriceConfig::default(),
+        }
+    }
+}
+
+/// Consent — the gate that creates a guest identity (spec §14.3).
+///
+/// **Until consent is accepted, the site is anonymous read-only**, and the refusal
+/// is the API's, not the toast's.
+#[derive(Debug, Clone)]
+pub struct ConsentConfig {
+    /// Whether a guest must accept consent before the instance will create one.
+    pub required_for_guest: bool,
+    /// The version stamped on the record. **Bumping it re-asks.**
+    pub version: i64,
+    /// The consent categories and whether each is on.
+    pub categories: std::collections::HashMap<String, bool>,
+    /// The age gate's mode. `required` on an adult-content instance (D-9).
+    pub age_gate: String,
+    /// Whether a version bump re-asks every reader.
+    pub reask_on_version_change: bool,
+}
+
+impl Default for ConsentConfig {
+    fn default() -> Self {
+        let mut categories = std::collections::HashMap::new();
+        categories.insert("essential".to_string(), true);
+        categories.insert("analytics".to_string(), false);
+        categories.insert("personalisation".to_string(), false);
+        Self {
+            required_for_guest: true,
+            version: 1,
+            categories,
+            age_gate: "required".to_string(),
+            reask_on_version_change: true,
+        }
+    }
+}
+
+/// Guests — real identities with a door that closes on MAU (spec §14.1).
+///
+/// A guest is a row in `accounts` with an empty credential, not a cookie-only
+/// shadow. **A guest's rate limits are a logged-in new user's — never higher, never
+/// lower.**
+#[derive(Debug, Clone)]
+pub struct GuestConfig {
+    /// Whether guest identities may be created at all.
+    pub enabled: bool,
+    /// The monthly active accounts above which new guests are refused. **0 disables
+    /// guest access entirely.**
+    pub mau_limit: i64,
+    /// The window MAU is counted over, in days.
+    pub mau_window_days: i64,
+    /// What happens at the cap: `close` refuses new guests, `throttle` slows them.
+    pub on_cap: String,
+    /// How many days a refused guest is refused for.
+    pub grace_days: i64,
+    /// The trust level a guest holds — **never a moderation level**.
+    pub parity_level: i64,
+}
+
+impl Default for GuestConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mau_limit: 500,
+            mau_window_days: 30,
+            on_cap: "close".to_string(),
+            grace_days: 7,
+            parity_level: 1,
+        }
+    }
+}
+
+/// Merges — the identity model's merge policy (spec §9.5).
+#[derive(Debug, Clone)]
+pub struct MergeConfig {
+    /// Whether merges may be proposed at all.
+    pub enabled: bool,
+    /// Whether a merge grants trust. **False by default: a merge is a statement
+    /// about identity, not a grant of standing.**
+    pub grants_trust: bool,
+    /// Whether a merge grants tenure.
+    pub grants_tenure: bool,
+    /// Whether the parties are notified of a merge.
+    pub notify: bool,
+    /// What happens to the merged-away record: `anonymize` keeps it, scrubbed.
+    pub tombstone: String,
+}
+
+impl Default for MergeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            grants_trust: false,
+            grants_tenure: true,
+            notify: true,
+            tombstone: "anonymize".to_string(),
+        }
+    }
+}
+
+/// Trust — the ladder, and the elasticity beneath it (spec §14.4).
+#[derive(Debug, Clone)]
+pub struct TrustConfig {
+    /// The ladder's levels and their requirements. **Per site**: the shape arrives
+    /// with the trust ladder's own milestone, and this holds it without pretending
+    /// to know it.
+    pub levels: serde_json::Value,
+    /// The axes trust is earned along. **Per site**, for the same reason.
+    pub axes: serde_json::Value,
+    /// The fewest holders an elastic level needs before it holds.
+    pub elastic_min_holders: i64,
+    /// The floor an elastic level decays to.
+    pub floor_level: i64,
+    /// How long an elastic level takes to decay, in days.
+    pub elastic_decay_days: i64,
+    /// The level a guest holds.
+    pub guest_level: i64,
+    /// Whether a guest may earn trust. **False, always** (spec §14.1).
+    pub guest_earns: bool,
+}
+
+impl Default for TrustConfig {
+    fn default() -> Self {
+        Self {
+            levels: serde_json::Value::Null,
+            axes: serde_json::Value::Null,
+            elastic_min_holders: 1,
+            floor_level: 2,
+            elastic_decay_days: 30,
+            guest_level: 1,
+            guest_earns: false,
+        }
+    }
+}
+
+/// Self-governance — the jury and the appeals (spec §14.5).
+#[derive(Debug, Clone)]
+pub struct GovernanceConfig {
+    /// Whether the instance's self-governance surfaces are live.
+    pub enabled: bool,
+    /// How many people sit on a jury.
+    pub jury_size: i64,
+    /// The trust level a juror needs.
+    pub jury_min_level: i64,
+    /// The fewest holders an elastic juror pool needs.
+    pub jury_elastic_min: i64,
+    /// Whether an appeal is heard by a fresh jury.
+    pub appeal_fresh_jury: bool,
+    /// Whether administrators may act outside the jury.
+    pub admin_emergency_only: bool,
+    /// How many days before a ban is reviewed, in days.
+    pub ban_review_days: i64,
+}
+
+impl Default for GovernanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            jury_size: 5,
+            jury_min_level: 3,
+            jury_elastic_min: 3,
+            appeal_fresh_jury: true,
+            admin_emergency_only: true,
+            ban_review_days: 90,
+        }
+    }
+}
+
+/// The mood gate — who may create a mood, and how many (spec §12.3).
+#[derive(Debug, Clone)]
+pub struct MoodsConfig {
+    /// Whether moods may be created at all.
+    pub enabled: bool,
+    /// The trust level a reader needs to create one.
+    pub min_trust_level: i64,
+    /// Whether only supporters may create one.
+    pub supporter_only: bool,
+    /// The most moods one account may hold.
+    pub max_moods_per_account: i64,
+}
+
+impl Default for MoodsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_trust_level: 3,
+            supporter_only: false,
+            max_moods_per_account: 12,
+        }
+    }
+}
+
+/// The instance theme's signal weights — **the ordering is the design** (spec §12.1,
+/// D-11).
+///
+/// **Works indicate a theme better than authors, and authors better than tags.** A
+/// work is a complete statement of what an instance is about; an author is a
+/// statement about a body of work; a tag is a statement about a *category*, and a
+/// category is the most widely shared thing in a catalogue. So the seed tag is real
+/// input, and it is the **weakest** of the three signals.
+///
+/// The numbers are configuration. **The order is not.**
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct ThemeSignalWeights {
+    /// The weight of the chosen works.
+    pub works: f64,
+    /// The weight of the chosen authors.
+    pub authors: f64,
+    /// The weight of the chosen seed tags and their derived neighbours.
+    pub tags: f64,
+}
+
+impl Default for ThemeSignalWeights {
+    fn default() -> Self {
+        Self {
+            works: 0.60,
+            authors: 0.25,
+            tags: 0.15,
         }
     }
 }
@@ -604,6 +1020,17 @@ pub struct TasteConfig {
     pub diversity_injection_percent: f64,
     /// Taste dimensions (names only; vectors are computed at runtime).
     pub dimensions: Vec<String>,
+    /// Whether the taste engine runs **inside** the archive or as its own process
+    /// (spec §8.2).
+    ///
+    /// `embedded` is the default: for a small instance it is right, and there is
+    /// one binary to deploy. `service` is for a large instance, because the graph's
+    /// RSS is then the *service's* problem and the archive's RSS stays flat.
+    ///
+    /// **In one process the peak RSS is the sum of the phases, not the maximum**,
+    /// and the sum does not fit on the target hardware. That measurement is why
+    /// this is a setting rather than a decision.
+    pub mode: String,
 }
 
 impl Default for TasteConfig {
@@ -620,6 +1047,7 @@ impl Default for TasteConfig {
                 "canon_compliance".to_string(),
                 "trope_diversity".to_string(),
             ],
+            mode: "embedded".to_string(),
         }
     }
 }
@@ -2251,6 +2679,17 @@ impl Config {
                     boost_tags: t.boost_tags.unwrap_or_default(),
                     suppress_tags: t.suppress_tags.unwrap_or_default(),
                     tag_gravity_bp: t.tag_gravity_bp.unwrap_or_default(),
+                    published: t.published.unwrap_or(false),
+                    signal_weights: {
+                        let w = t.signal_weights.unwrap_or_default();
+                        let base = ThemeSignalWeights::default();
+                        ThemeSignalWeights {
+                            works: w.works.unwrap_or(base.works),
+                            authors: w.authors.unwrap_or(base.authors),
+                            tags: w.tags.unwrap_or(base.tags),
+                        }
+                    },
+                    opposition_weight: t.opposition_weight.unwrap_or(0.35),
                 }
             },
             // §16.1a names `rec.mode` an operator control, and until this was
@@ -2265,6 +2704,17 @@ impl Config {
             discovery: {
                 let d = file.discovery.unwrap_or_default();
                 let mut cfg = DiscoveryConfig::default();
+                if let Some(m) = d.moods {
+                    let base = MoodsConfig::default();
+                    cfg.moods = MoodsConfig {
+                        enabled: m.enabled.unwrap_or(base.enabled),
+                        min_trust_level: m.min_trust_level.unwrap_or(base.min_trust_level),
+                        supporter_only: m.supporter_only.unwrap_or(base.supporter_only),
+                        max_moods_per_account: m
+                            .max_moods_per_account
+                            .unwrap_or(base.max_moods_per_account),
+                    };
+                }
                 if let Some(mode) = d.mode {
                     cfg.rec_mode = RecMode::parse(&mode)?;
                 }
@@ -2338,6 +2788,10 @@ impl Config {
             taste: {
                 let t = file.taste.unwrap_or_default();
                 TasteConfig {
+                    // Parsed rather than defaulted: an unrecognised mode must be
+                    // refused here, where the operator can see it, rather than
+                    // reaching the runtime and meaning `embedded` by accident.
+                    mode: t.mode.unwrap_or_else(|| "embedded".to_string()),
                     gravity_strength: t.gravity_strength.unwrap_or(0.0),
                     signal_weight_mode: t
                         .signal_weight_mode
@@ -2476,6 +2930,123 @@ impl Config {
                     .and_then(|l| l.check_batch)
                     .unwrap_or_else(|| LibraryConfig::default().check_batch),
             },
+            // ---- The sections M1 added. Each one is a *merge* of the file's
+            // values over the documented default, so a file naming one key keeps
+            // every other key's documented value. The defaults live in the one
+            // `impl Default` per section, so a default that changes changes once.
+            tiers: {
+                let t = file.tiers.unwrap_or_default();
+                let base = TiersConfig::default();
+                TiersConfig {
+                    house: t.house.unwrap_or(base.house),
+                    personal_min_trust: t.personal_min_trust.unwrap_or(base.personal_min_trust),
+                    full_supporter: t.full_supporter.unwrap_or(base.full_supporter),
+                    full_min_trust: t.full_min_trust.unwrap_or(base.full_min_trust),
+                    full_min_resonance: t.full_min_resonance.unwrap_or(base.full_min_resonance),
+                }
+            },
+            channels: {
+                let c = file.channels.unwrap_or_default();
+                let base = ChannelsConfig::default();
+                let v = c.voting.unwrap_or_default();
+                ChannelsConfig {
+                    voting_enabled: v.enabled.unwrap_or(base.voting_enabled),
+                    min_trust_level: v.min_trust_level.unwrap_or(base.min_trust_level),
+                    min_resonance: v.min_resonance.unwrap_or(base.min_resonance),
+                    supporter_only: v.supporter_only.unwrap_or(base.supporter_only),
+                    period_days: v.period_days.unwrap_or(base.period_days),
+                    max_shift_per_period: v
+                        .max_shift_per_period
+                        .unwrap_or(base.max_shift_per_period),
+                    seed_floor: v.seed_floor.unwrap_or(base.seed_floor),
+                    tau: v.tau.unwrap_or(base.tau),
+                }
+            },
+            supporters: {
+                let s = file.supporters.unwrap_or_default();
+                let base = SupportersConfig::default();
+                let g = s.grants.unwrap_or_default();
+                let p = s.price.unwrap_or_default();
+                SupportersConfig {
+                    grants: SupportersGrantsConfig {
+                        self_hosted: g.self_hosted.unwrap_or(base.grants.self_hosted),
+                        payment_processor: g
+                            .payment_processor
+                            .unwrap_or(base.grants.payment_processor),
+                        federated: g.federated.unwrap_or(base.grants.federated),
+                        code_purchase: g.code_purchase.unwrap_or(base.grants.code_purchase),
+                    },
+                    price: SupportersPriceConfig {
+                        monthly: p.monthly.unwrap_or(base.price.monthly),
+                        annual: p.annual.unwrap_or(base.price.annual),
+                        currency: p.currency.unwrap_or(base.price.currency),
+                    },
+                }
+            },
+            consent: {
+                let c = file.consent.unwrap_or_default();
+                let base = ConsentConfig::default();
+                ConsentConfig {
+                    required_for_guest: c.required_for_guest.unwrap_or(base.required_for_guest),
+                    version: c.version.unwrap_or(base.version),
+                    categories: c.categories.unwrap_or(base.categories),
+                    age_gate: c.age_gate.unwrap_or(base.age_gate),
+                    reask_on_version_change: c
+                        .reask_on_version_change
+                        .unwrap_or(base.reask_on_version_change),
+                }
+            },
+            guest: {
+                let g = file.guest.unwrap_or_default();
+                let base = GuestConfig::default();
+                GuestConfig {
+                    enabled: g.enabled.unwrap_or(base.enabled),
+                    mau_limit: g.mau_limit.unwrap_or(base.mau_limit),
+                    mau_window_days: g.mau_window_days.unwrap_or(base.mau_window_days),
+                    on_cap: g.on_cap.unwrap_or(base.on_cap),
+                    grace_days: g.grace_days.unwrap_or(base.grace_days),
+                    parity_level: g.parity_level.unwrap_or(base.parity_level),
+                }
+            },
+            merge: {
+                let m = file.merge.unwrap_or_default();
+                let base = MergeConfig::default();
+                MergeConfig {
+                    enabled: m.enabled.unwrap_or(base.enabled),
+                    grants_trust: m.grants_trust.unwrap_or(base.grants_trust),
+                    grants_tenure: m.grants_tenure.unwrap_or(base.grants_tenure),
+                    notify: m.notify.unwrap_or(base.notify),
+                    tombstone: m.tombstone.unwrap_or(base.tombstone),
+                }
+            },
+            trust: {
+                let t = file.trust.unwrap_or_default();
+                let base = TrustConfig::default();
+                TrustConfig {
+                    levels: t.levels.unwrap_or(base.levels),
+                    axes: t.axes.unwrap_or(base.axes),
+                    elastic_min_holders: t.elastic_min_holders.unwrap_or(base.elastic_min_holders),
+                    floor_level: t.floor_level.unwrap_or(base.floor_level),
+                    elastic_decay_days: t.elastic_decay_days.unwrap_or(base.elastic_decay_days),
+                    guest_level: t.guest_level.unwrap_or(base.guest_level),
+                    guest_earns: t.guest_earns.unwrap_or(base.guest_earns),
+                }
+            },
+            governance: {
+                let g = file.governance.unwrap_or_default();
+                let base = GovernanceConfig::default();
+                GovernanceConfig {
+                    enabled: g.enabled.unwrap_or(base.enabled),
+                    jury_size: g.jury_size.unwrap_or(base.jury_size),
+                    jury_min_level: g.jury_min_level.unwrap_or(base.jury_min_level),
+                    jury_elastic_min: g.jury_elastic_min.unwrap_or(base.jury_elastic_min),
+                    appeal_fresh_jury: g.appeal_fresh_jury.unwrap_or(base.appeal_fresh_jury),
+                    admin_emergency_only: g
+                        .admin_emergency_only
+                        .unwrap_or(base.admin_emergency_only),
+                    ban_review_days: g.ban_review_days.unwrap_or(base.ban_review_days),
+                }
+            },
             config_path,
         };
 
@@ -2580,9 +3151,265 @@ impl Config {
             media_resilience: MediaResilienceConfig::default(),
             roadmap: RoadmapConfig::default(),
             retention_governance: RetentionGovernanceConfig::default(),
+            tiers: TiersConfig::default(),
+            channels: ChannelsConfig::default(),
+            supporters: SupportersConfig::default(),
+            consent: ConsentConfig::default(),
+            guest: GuestConfig::default(),
+            merge: MergeConfig::default(),
+            trust: TrustConfig::default(),
+            governance: GovernanceConfig::default(),
             library: LibraryConfig::default(),
             config_path: None,
         }
+    }
+
+    /// Reject the governance and policy settings that cannot be sane.
+    ///
+    /// **Validation at startup, not at use** (spec §19 rule 3): a misconfigured
+    /// instance refuses to start and names the setting. A setting that is checked
+    /// at the point of use is a setting whose failure lands on a reader, in the
+    /// middle of an ordinary request, with no way to name the cause.
+    ///
+    /// Every message names the key **as it appears in the file**, because the
+    /// operator is looking at a TOML file and not at a struct.
+    fn validate_governance_settings(&self) -> Result<()> {
+        /// The trust ladder runs 0 to 6 (spec §14.4).
+        const MAX_TRUST: i64 = 6;
+
+        let t = &self.tiers;
+        if t.house != "always" {
+            anyhow::bail!(
+                "tiers.house must be \"always\" (T0 is the house theme and is always                  available), got {:?}",
+                t.house
+            );
+        }
+        if !(0..=MAX_TRUST).contains(&t.personal_min_trust) {
+            anyhow::bail!(
+                "tiers.personal_min_trust must be between 0 and {MAX_TRUST}, got {}",
+                t.personal_min_trust
+            );
+        }
+        if !(0..=MAX_TRUST).contains(&t.full_min_trust) {
+            anyhow::bail!(
+                "tiers.full_min_trust must be between 0 and {MAX_TRUST}, got {}",
+                t.full_min_trust
+            );
+        }
+        if !(0.0..=1.0).contains(&t.full_min_resonance) {
+            anyhow::bail!(
+                "tiers.full_min_resonance must be between 0.0 and 1.0, got {}",
+                t.full_min_resonance
+            );
+        }
+
+        let c = &self.channels;
+        if !(0..=MAX_TRUST).contains(&c.min_trust_level) {
+            anyhow::bail!(
+                "channels.voting.min_trust_level must be between 0 and {MAX_TRUST}, got {}",
+                c.min_trust_level
+            );
+        }
+        for (key, value) in [
+            ("min_resonance", c.min_resonance),
+            ("max_shift_per_period", c.max_shift_per_period),
+            ("seed_floor", c.seed_floor),
+        ] {
+            if !(0.0..=1.0).contains(&value) {
+                anyhow::bail!("channels.voting.{key} must be between 0.0 and 1.0, got {value}");
+            }
+        }
+        if c.period_days < 1 {
+            anyhow::bail!(
+                "channels.voting.period_days must be at least 1, got {}",
+                c.period_days
+            );
+        }
+        if !(c.tau > 0.0) {
+            anyhow::bail!("channels.voting.tau must be greater than 0, got {}", c.tau);
+        }
+
+        let sp = &self.supporters.price;
+        if sp.monthly < 0 {
+            anyhow::bail!(
+                "supporters.price.monthly must not be negative, got {}",
+                sp.monthly
+            );
+        }
+        if sp.annual < 0 {
+            anyhow::bail!(
+                "supporters.price.annual must not be negative, got {}",
+                sp.annual
+            );
+        }
+        if sp.currency.trim().is_empty() {
+            anyhow::bail!("supporters.price.currency must not be empty");
+        }
+
+        let cs = &self.consent;
+        if cs.version < 1 {
+            anyhow::bail!("consent.version must be at least 1, got {}", cs.version);
+        }
+        if cs.age_gate != "required" && cs.age_gate != "optional" {
+            anyhow::bail!(
+                "consent.age_gate must be \"required\" or \"optional\", got {:?}",
+                cs.age_gate
+            );
+        }
+
+        let g = &self.guest;
+        if g.mau_limit < 0 {
+            anyhow::bail!("guest.mau_limit must not be negative, got {}", g.mau_limit);
+        }
+        if g.mau_window_days < 1 {
+            anyhow::bail!(
+                "guest.mau_window_days must be at least 1, got {}",
+                g.mau_window_days
+            );
+        }
+        if g.grace_days < 0 {
+            anyhow::bail!(
+                "guest.grace_days must not be negative, got {}",
+                g.grace_days
+            );
+        }
+        if !(0..=MAX_TRUST).contains(&g.parity_level) {
+            anyhow::bail!(
+                "guest.parity_level must be between 0 and {MAX_TRUST}, got {}",
+                g.parity_level
+            );
+        }
+        if g.on_cap != "close" && g.on_cap != "throttle" {
+            anyhow::bail!(
+                "guest.on_cap must be \"close\" or \"throttle\", got {:?}",
+                g.on_cap
+            );
+        }
+
+        let m = &self.merge;
+        if m.tombstone != "anonymize" && m.tombstone != "delete" {
+            anyhow::bail!(
+                "merge.tombstone must be \"anonymize\" or \"delete\", got {:?}",
+                m.tombstone
+            );
+        }
+
+        let tr = &self.trust;
+        if tr.elastic_min_holders < 0 {
+            anyhow::bail!(
+                "trust.elastic_min_holders must not be negative, got {}",
+                tr.elastic_min_holders
+            );
+        }
+        if !(0..=MAX_TRUST).contains(&tr.floor_level) {
+            anyhow::bail!(
+                "trust.floor_level must be between 0 and {MAX_TRUST}, got {}",
+                tr.floor_level
+            );
+        }
+        if !(0..=MAX_TRUST).contains(&tr.guest_level) {
+            anyhow::bail!(
+                "trust.guest_level must be between 0 and {MAX_TRUST}, got {}",
+                tr.guest_level
+            );
+        }
+        if tr.elastic_decay_days < 1 {
+            anyhow::bail!(
+                "trust.elastic_decay_days must be at least 1, got {}",
+                tr.elastic_decay_days
+            );
+        }
+        if tr.guest_earns {
+            // **False, always** (spec §14.1). A guest can never extend trust, so a
+            // configuration that says otherwise is refused rather than ignored.
+            anyhow::bail!(
+                "trust.guest_earns must be false: a guest can never extend trust (spec §14.1)"
+            );
+        }
+
+        let gov = &self.governance;
+        if gov.jury_size < 1 {
+            anyhow::bail!(
+                "governance.jury_size must be at least 1, got {}",
+                gov.jury_size
+            );
+        }
+        if !(0..=MAX_TRUST).contains(&gov.jury_min_level) {
+            anyhow::bail!(
+                "governance.jury_min_level must be between 0 and {MAX_TRUST}, got {}",
+                gov.jury_min_level
+            );
+        }
+        if gov.jury_elastic_min < 0 {
+            anyhow::bail!(
+                "governance.jury_elastic_min must not be negative, got {}",
+                gov.jury_elastic_min
+            );
+        }
+        if gov.ban_review_days < 1 {
+            anyhow::bail!(
+                "governance.ban_review_days must be at least 1, got {}",
+                gov.ban_review_days
+            );
+        }
+
+        let m = &self.discovery.moods;
+        if !(0..=MAX_TRUST).contains(&m.min_trust_level) {
+            anyhow::bail!(
+                "discovery.moods.min_trust_level must be between 0 and {MAX_TRUST}, got {}",
+                m.min_trust_level
+            );
+        }
+        if m.max_moods_per_account < 1 {
+            anyhow::bail!(
+                "discovery.moods.max_moods_per_account must be at least 1, got {}",
+                m.max_moods_per_account
+            );
+        }
+
+        let th = &self.theme;
+        if !(0.0..=1.0).contains(&th.opposition_weight) {
+            anyhow::bail!(
+                "theme.opposition_weight must be between 0.0 and 1.0, got {}",
+                th.opposition_weight
+            );
+        }
+        for (key, value) in [
+            ("works", th.signal_weights.works),
+            ("authors", th.signal_weights.authors),
+            ("tags", th.signal_weights.tags),
+        ] {
+            if value < 0.0 {
+                anyhow::bail!("theme.signal_weights.{key} must not be negative, got {value}");
+            }
+        }
+        let total = th.signal_weights.works + th.signal_weights.authors + th.signal_weights.tags;
+        if total <= 0.0 {
+            anyhow::bail!(
+                "theme.signal_weights must not sum to zero: the theme's blend would be                  undefined"
+            );
+        }
+        // **The ordering is the design** (D-11): works indicate a theme better than
+        // authors, and authors better than tags. A configuration that inverts it is
+        // refused, because the ordering is not a preference the operator may have.
+        if !(th.signal_weights.works > th.signal_weights.authors
+            && th.signal_weights.authors > th.signal_weights.tags)
+        {
+            anyhow::bail!(
+                "theme.signal_weights must satisfy works > authors > tags (D-11): works                  indicate a theme better than authors, and authors better than tags; got                  works={}, authors={}, tags={}",
+                th.signal_weights.works,
+                th.signal_weights.authors,
+                th.signal_weights.tags
+            );
+        }
+
+        if self.taste.mode != "embedded" && self.taste.mode != "service" {
+            anyhow::bail!(
+                "taste.mode must be \"embedded\" or \"service\", got {:?}",
+                self.taste.mode
+            );
+        }
+        Ok(())
     }
 
     /// Reject values that cannot be sane in any environment.
@@ -2593,6 +3420,7 @@ impl Config {
         if self.server.port == 0 {
             anyhow::bail!("server.port must not be 0");
         }
+        self.validate_governance_settings()?;
         if !(1024..=64 * 1024 * 1024).contains(&self.server.max_body_bytes) {
             anyhow::bail!(
                 "server.max_body_bytes must be between 1024 and 67108864, got {}",
@@ -2810,6 +3638,160 @@ struct FileConfig {
     retention_governance: Option<RetentionGovernanceSection>,
     /// Calibrated decision models (amendment `calibrated-decision-models.md`).
     decisions: Option<DecisionsSection>,
+    /// The compute tiers (spec §12.6).
+    tiers: Option<TiersSection>,
+    /// Channel voting (spec §12.10, §12.12).
+    channels: Option<ChannelsSection>,
+    /// The Supporter tier (spec §18).
+    supporters: Option<SupportersSection>,
+    /// Consent (spec §14.3).
+    consent: Option<ConsentSection>,
+    /// Guests (spec §14.1).
+    guest: Option<GuestSection>,
+    /// Merges (spec §9.5).
+    merge: Option<MergeSection>,
+    /// Trust (spec §14.4).
+    trust: Option<TrustSection>,
+    /// Self-governance (spec §14.5).
+    governance: Option<GovernanceSection>,
+}
+
+/// The `[tiers]` file section (spec §12.6).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TiersSection {
+    house: Option<String>,
+    personal_min_trust: Option<i64>,
+    full_supporter: Option<bool>,
+    full_min_trust: Option<i64>,
+    full_min_resonance: Option<f64>,
+}
+
+/// The `[channels.voting]` file section (spec §12.10, §12.12).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChannelsVotingSection {
+    enabled: Option<bool>,
+    min_trust_level: Option<i64>,
+    min_resonance: Option<f64>,
+    supporter_only: Option<bool>,
+    period_days: Option<i64>,
+    max_shift_per_period: Option<f64>,
+    seed_floor: Option<f64>,
+    tau: Option<f64>,
+}
+
+/// The `[channels]` file section (spec §12.10).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChannelsSection {
+    voting: Option<ChannelsVotingSection>,
+}
+
+/// The `[supporters.grants]` file section (spec §18).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SupportersGrantsSection {
+    self_hosted: Option<bool>,
+    payment_processor: Option<bool>,
+    federated: Option<bool>,
+    code_purchase: Option<bool>,
+}
+
+/// The `[supporters.price]` file section (spec §18).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SupportersPriceSection {
+    monthly: Option<i64>,
+    annual: Option<i64>,
+    currency: Option<String>,
+}
+
+/// The `[supporters]` file section (spec §18).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SupportersSection {
+    grants: Option<SupportersGrantsSection>,
+    price: Option<SupportersPriceSection>,
+}
+
+/// The `[consent]` file section (spec §14.3).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentSection {
+    required_for_guest: Option<bool>,
+    version: Option<i64>,
+    categories: Option<std::collections::HashMap<String, bool>>,
+    age_gate: Option<String>,
+    reask_on_version_change: Option<bool>,
+}
+
+/// The `[guest]` file section (spec §14.1).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GuestSection {
+    enabled: Option<bool>,
+    mau_limit: Option<i64>,
+    mau_window_days: Option<i64>,
+    on_cap: Option<String>,
+    grace_days: Option<i64>,
+    parity_level: Option<i64>,
+}
+
+/// The `[merge]` file section (spec §9.5).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MergeSection {
+    enabled: Option<bool>,
+    grants_trust: Option<bool>,
+    grants_tenure: Option<bool>,
+    notify: Option<bool>,
+    tombstone: Option<String>,
+}
+
+/// The `[trust]` file section (spec §14.4).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrustSection {
+    levels: Option<serde_json::Value>,
+    axes: Option<serde_json::Value>,
+    elastic_min_holders: Option<i64>,
+    floor_level: Option<i64>,
+    elastic_decay_days: Option<i64>,
+    guest_level: Option<i64>,
+    guest_earns: Option<bool>,
+}
+
+/// The `[governance]` file section (spec §14.5).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GovernanceSection {
+    enabled: Option<bool>,
+    jury_size: Option<i64>,
+    jury_min_level: Option<i64>,
+    jury_elastic_min: Option<i64>,
+    appeal_fresh_jury: Option<bool>,
+    admin_emergency_only: Option<bool>,
+    ban_review_days: Option<i64>,
+}
+
+/// The `[discovery.moods]` file section (spec §12.3).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MoodsSection {
+    enabled: Option<bool>,
+    min_trust_level: Option<i64>,
+    supporter_only: Option<bool>,
+    max_moods_per_account: Option<i64>,
+}
+
+/// The `[theme.signal_weights]` file section (spec §12.1, D-11).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThemeSignalWeightsSection {
+    works: Option<f64>,
+    authors: Option<f64>,
+    tags: Option<f64>,
 }
 
 /// The `[roadmap]` file section (spec §29.4).
@@ -2938,6 +3920,8 @@ struct DecisionsSection {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DiscoverySection {
+    /// The mood gate (spec §12.3).
+    moods: Option<MoodsSection>,
     /// `legacy`, `pluggable` or `shadow`. An unrecognised value is refused at
     /// load rather than falling back: the route dispatches on this, so a typo
     /// that fell back to `legacy` would be indistinguishable from a working
@@ -2953,6 +3937,12 @@ struct DiscoverySection {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ThemeSection {
+    /// Whether the instance theme is published (spec §12.1).
+    published: Option<bool>,
+    /// The three signal weights the house taste is blended from (spec §12.1, D-11).
+    signal_weights: Option<ThemeSignalWeightsSection>,
+    /// How strongly a work carrying an opposing tag is demoted (spec §12.1.1).
+    opposition_weight: Option<f64>,
     mode: Option<String>,
     allow_user_opt_out: Option<bool>,
     theme_dial_floor_bp: Option<i64>,
@@ -2967,6 +3957,8 @@ struct ThemeSection {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TasteSection {
+    /// `embedded` or `service` (spec §8.2).
+    mode: Option<String>,
     gravity_strength: Option<f64>,
     signal_weight_mode: Option<String>,
     admin_weight: Option<f64>,
