@@ -50,6 +50,12 @@ docs/spec/
 4. **The spec in this vault is the master until the split lands**, and after the split the vault
    copy is the index — the canonical text lives in the repo, under the same numbers.
 
+**And the split is made by a script, because it is a copy.** `scripts/split-spec.py` re-derives
+every file from the master, and `scripts/check-split-spec.py` asserts that each file's heading
+number matches its filename and that the split is in step with the master. **A split that is done
+by hand is a split that is done once** — and a section that changed in the master would show up as
+a divergence between two documents that both claim to be the specification.
+
 The point is not tidiness. It is that a citation like *"§12.12 means the voted cluster weights"*
 has to keep meaning that in three years, and a note in this vault that says *"§9.8 fixes the
 import"* has to keep pointing at the import.
@@ -140,9 +146,16 @@ are not deploying to.
    same 1,265 blobs, the same tip — by re-running the rewrite against the pre-rename bundle
    and comparing. **A rewrite that cannot be re-run is a rewrite that cannot be checked.**
    The evidence is the `## 2026-10-19 — M0` entry in `docs/verification.md`.
-2. **The triage (§24.1).** Produce the ledger: every source row mapped into §5's vocabulary, the
+2. **The skeleton (M1) — done.** The `taste` crate, the gate runner
+   (`scripts/gate.sh`), the configuration contract's new sections, the split specification
+   (`docs/spec/`, 41 files, made by a script), the health endpoints, `doctor`, the OpenAPI
+   document generated from the route table, the reachability probe, and **the archive's
+   measured RSS baseline** — 22.39 MiB, the median of six runs — from which the RSS cap is
+   derived (§22.3).
+
+3. **The triage (§24.1).** Produce the ledger: every source row mapped into §5's vocabulary, the
    duplicates merged, the statuses re-derived, the non-goals carried as `unsupported`.
-3. **The theme seed (§2.1 → M14).** The 54 works of §2.1 become the instance theme's seed:
+4. **The theme seed (§2.1 → M14).** The 54 works of §2.1 become the instance theme's seed:
    one merged profile, written and bookmarked at equal weight, with the tag vector derived and the
    six themes attached, each expanded by its PMI neighbours (§2.2). This is the smallest thing
    that makes the instance have a voice.

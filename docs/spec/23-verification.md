@@ -303,7 +303,43 @@ template check is repeated **under** the lock. The measurement, on the file that
 a branch nobody has run.** The clone path was correct code in a place that could never be
 reached, and the only reason it was found is that the gate had to be made green.
 
-### 23.10.5 The rate limiter's buckets are a process-global static
+### 23.10.5 A gate that reads a tally is not a gate
+
+`cargo clippy ... 2>/dev/null | grep -cE '^(warning|error)'` returned a confident **zero** from an
+empty stdout while the tree held 30 warnings — three of them real defects, including a test that
+had never run. `rustc`, `clippy` and `cargo test` report on **stderr**.
+
+So `scripts/gate.sh` reads **the exit code**, writes every gate's output to `target/gate/`, and
+prints the log's tail on failure. **No gate is ever piped through `grep -c`.** A tally of `test
+result:` lines is blind to a target that never ran, and the clippy case is worse: the tally was
+confident, green, and wrong.
+
+And three gates **refuse** rather than pass:
+
+- the **PostgreSQL** gate exits 3 when the cluster is not reachable, because a gate that quietly
+  does nothing is worse than no gate — the record would say it passed;
+- the **budget** gate exits 1 when the catalogue is unreadable, because **"measuring nothing is
+  not a pass"**;
+- `gate.sh taste-budget` exits **2** until M13-09 builds it, because **a gate that did not run
+  must never report success**.
+
+### 23.10.6 A gate that runs out of room has measured nothing
+
+The harness's scratch directories are **leaked**: `TestDb` has no `Drop` that removes the
+directory its SQLite file lives in, and `std::env::temp_dir()` is not swept. A measured run left
+**1,399 directories, 6.9 GB**.
+
+On the development host `/tmp` is a **16 GB tmpfs**, so the suite fills the filesystem and the
+failures arrive as **`(code: 13) database or disk is full`** — which reads like a storage problem
+and is a tmpfs problem. **Twelve suites failed that way** before the directories were swept.
+
+**A gate that fails because it ran out of room has measured nothing**, and a failure that reads
+as a disk problem sends the reader looking at the disk. The gate runner now points `TMPDIR` at
+the real filesystem and sweeps the stale directories before a run. That is a **workaround**: the
+directories are still created and still left behind, and the defect is recorded in
+`docs/known-gaps.md` (M1-D01) and pinned by a test, so a fix turns the pin red.
+
+### 23.10.7 The rate limiter's buckets are a process-global static
 
 The limiter's bucket map lives in a `static` so that every `AppState` clone shares it — a
 per-`AppState` map would let a credential-stuffing loop find a fresh bucket on every request.

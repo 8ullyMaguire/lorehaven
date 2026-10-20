@@ -34,6 +34,25 @@ archive figures are written *against* that measurement rather than in advance of
 reports **three** numbers — the baseline, the current figure, and the delta — so a regression
 is a delta and not a reading of an absolute.
 
+**And the baseline is measured (2026-10-20): 22.39 MiB.** The median of six runs of
+`scripts/measure-rss.sh` — three against an empty database (22.64, 22.77, 23.00) and three
+against a migrated one (22.14, 21.96, 21.96) — each reading **`VmHWM` from `/proc/<pid>/status`**
+on the **release** binary, after **`/health/ready`** answered and not after a guessed sleep.
+The cap is the baseline **plus 25 %**: **27.99 MiB**, written here as **28.0 MiB**.
+
+**What that number is, and what it is not.** It is the RSS of the archive **with no corpus**,
+because the corpus arrives at M9 and this instance does not have one yet. So the derived cap is
+the cap for an instance *without* a catalogue, and the **1 GiB** figure above is the cap for an
+instance *with* one — a different measurement of a different thing, and **it has to be re-derived
+at M9 against the measured corpus** rather than carried over. Two numbers for two instances, and
+the table says which is which.
+
+**The gate refuses to run without a catalogue.** `scripts/budget.sh` boots the real binary
+against the real catalogue and reads the kernel's high-water mark after each step; if the
+catalogue holds no works, it refuses, because **"measuring nothing is not a pass."** On this
+development host the instance's database is a migrated schema with **zero works** in it, so the
+gate refuses here — which is the gate working, not the gate failing.
+
 **The gate reads content, not status.** This is not a stylistic preference; it is a recorded
 failure. kindred's earlier gate accepted a `503` and reported **PASS** against a server with no
 index loaded, and a `200` whose body said `"returned": 0` was also a pass. The archive's gate:
@@ -51,7 +70,8 @@ and Postgres, alongside a general-purpose box. The develop-and-deploy host is `t
 
 | budget | cap | measured where |
 |---|---|---|
-| archive RSS | **≤ 1 GiB** | `darkhold doctor` and the budget gate |
+| archive RSS, **no corpus** | **≤ 28.0 MiB** — the measured baseline **22.39 MiB** plus 25 % | `scripts/measure-rss.sh` and `scripts/budget.sh`, `VmHWM` after each step |
+| archive RSS, **with the launch corpus** | **≤ 1 GiB**, to be re-derived at M9 against the measured corpus | the budget gate |
 | taste RSS, full mode (T2) | **220 MiB** | `make budget`, `VmHWM` after each step; `/healthz` 503 when over |
 | taste RSS, lite mode (T1) | **60 MiB** | same |
 | catalogue ingest | **≤ 180 MiB peak** | the ingest phase's own cap |

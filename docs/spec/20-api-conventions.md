@@ -58,4 +58,24 @@ address bucket only, so shared NAT absorbs more; zero is rejected at startup.
 - **The OpenAPI document is published** and the route inventory is asserted against it, so the
   document cannot drift.
 
+**And the document is GENERATED from the route table, not written out by hand.** The hand-written
+one described **four** paths while the instance served **a hundred and fifty** public ones, and
+the only thing that noticed was a client generator producing a client that did not work. **A
+document that is wrong in the direction of "less" is the one nobody checks**, because a client
+that only calls what the document mentions works perfectly — against an instance that has far
+more.
+
+So the route table lives in the **crate** (`crates/app/src/routes/inventory.rs`), not in a test,
+because two things need it: the route-inventory test asserts every registered route has an entry
+with the correct audience, and the OpenAPI test asserts every public route is in the document and
+every path in the document resolves to a registered route. **A table that exists in two places is
+a table that can be in one and not the other.**
+
+**The `paths` are relative to the `servers` entry, and that is not a detail.** OpenAPI 3.1 resolves
+`paths` against the server URL, and the document's `servers` entry carries the `/api/v1` prefix —
+so a path that carried the prefix itself would be `/api/v1/api/v1/works` for a client that
+resolves it. **The first generated document did exactly that**, and an existing test in
+`milestone_45.rs` caught it. The test was not written for this change and did not know the change
+was coming; **that is what a test that predates the change is for.**
+
 ---

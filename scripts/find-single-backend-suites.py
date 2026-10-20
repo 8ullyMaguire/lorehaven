@@ -60,6 +60,22 @@ HARD_SQLITE = re.compile(
 # script making the same mistake one level up, so the sentence is judged whole.
 ABOUT_THE_SCHEMA = re.compile(r"\bmigration\b|\btables?\b|\bcolumns?\b", re.IGNORECASE)
 
+# An EXPLICIT declaration that this suite is SQLite-only.
+#
+# `continue_reading_route.rs` heads itself "# Fixtures are SQLite-only,
+# deliberately" and then says "the route's SQL is already covered on both engines
+# by `crates/db/tests/continue_reading_t1.rs`". The first sentence is the
+# declaration; the second is a statement about the coverage elsewhere.
+#
+# **A declaration that this suite is SQLite-only is the opposite of a dual-backend
+# claim**, and a check that cannot read it is a check that reports a file for
+# mentioning a sibling's coverage. So the declaration exempts the file.
+SQLITE_ONLY = re.compile(
+    r"sqlite[- ]only|runs? on sqlite only|sqlite only, deliberately|"
+    r"fixtures are sqlite",
+    re.IGNORECASE,
+)
+
 
 def strip_comments(text: str) -> str:
     """Drop `//` and `/* */` so a prose mention is not mistaken for a call.
@@ -81,6 +97,11 @@ def claims_dual_backend(header: str) -> bool:
     exemption. A file that says its migration is cross-dialect has not claimed
     its tests are.
     """
+    # An explicit "SQLite only" declaration settles the whole file: it is the
+    # opposite of a dual-backend claim, and it is not cancelled by a later
+    # sentence that mentions a sibling's coverage.
+    if SQLITE_ONLY.search(header):
+        return False
     for sentence in re.split(r"(?<=[.!?])\s+|\n[\s>*+-]", header):
         if DUAL_CLAIM.search(sentence) and not ABOUT_THE_SCHEMA.search(sentence):
             return True

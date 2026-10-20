@@ -165,6 +165,12 @@ run_tests() {
 # checks the SQLite side of the same parity, and leaving it out of `all` would be a gap
 # in the one gate that is supposed to close gaps.
 run_dialects() {
+    # **Absolute paths, and a `cd` back to the repository root.** The frontend
+    # gate changes directory, and a `cd` in one gate that leaks into the next is
+    # a gate that runs in the wrong place -- which is how a dialect gate ends up
+    # looking for `scripts/check-*.py` inside `frontend/` and reporting a file
+    # that does not exist rather than the defect it was written to find.
+    cd "$REPO_ROOT"
     local failed=0
     local script
     for script in \
@@ -176,7 +182,7 @@ run_dialects() {
         scripts/check-sqlite-migration-syntax.py \
         scripts/find-single-backend-suites.py
     do
-        if ! python3 "$script"; then
+        if ! python3 "$REPO_ROOT/$script"; then
             failed=1
         fi
     done
@@ -191,15 +197,20 @@ run_dialects() {
 #   * the split-spec checker -- the specification's split is in step with its
 #     master, and every file's heading number matches its filename.
 run_repo() {
-    python3 scripts/reachability.py
-    python3 scripts/check-split-spec.py
+    cd "$REPO_ROOT"
+    python3 "$REPO_ROOT/scripts/reachability.py"
+    python3 "$REPO_ROOT/scripts/check-split-spec.py"
 }
 
 # The frontend gate: the type check and the unit tests.
 run_frontend() {
-    cd "$REPO_ROOT/frontend"
-    node ./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json
-    node ./node_modules/vitest/vitest.mjs run
+    # The `cd` is undone on the way out, so a gate that follows this one does
+    # not run in `frontend/`.
+    (
+        cd "$REPO_ROOT/frontend" || exit 1
+        node ./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json &&
+            node ./node_modules/vitest/vitest.mjs run
+    )
 }
 
 # One Playwright suite at a time, against the built release binary.
@@ -210,8 +221,10 @@ run_e2e() {
         ls "$REPO_ROOT/frontend/e2e"/*.spec.ts 2>/dev/null | sed 's#.*/##; s#\.spec\.ts$##' | sed 's/^/  /' >&2
         exit 2
     fi
-    cd "$REPO_ROOT/frontend"
-    node ./node_modules/@playwright/test/cli.js test "$suite"
+    (
+        cd "$REPO_ROOT/frontend" || exit 1
+        node ./node_modules/@playwright/test/cli.js test "$suite"
+    )
 }
 
 cmd="${1:-}"

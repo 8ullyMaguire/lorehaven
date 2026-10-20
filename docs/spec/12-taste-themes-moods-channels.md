@@ -603,7 +603,7 @@ visible — a channel page shows both the applied weight and the computed weight
 tier, but as a **separate configuration** so the two can be tuned apart:
 
 ```toml
-[themes.voting]
+[channels.voting]
 enabled = true
 min_trust_level = 3
 min_resonance = 0.55
@@ -613,6 +613,14 @@ max_shift_per_period = 0.25
 seed_floor = 0.2          # the owner's permanent share
 tau = 25                 # the community's convergence rate
 ```
+
+**The table is named `[channels.voting]`, not `[themes.voting]`.** §12.10 says a channel and a
+theme are the same object — *"Two kinds, and they are the same object: Theme channels… Author
+channels…"* — and §12.1's **instance** theme is a third thing again, the whole instance's
+editorial position. So "themes" names two different things, and the configuration names the one
+an operator actually sees: a **channel**. The distinction matters because the instance theme and
+a channel's weights are edited in different places, and a configuration section that served both
+would be a section whose meaning depends on which table it was read from.
 
 **Votes are per account, not per pseud.** Two pseuds on one account are one vote, because
 governance counts accounts (§6.1). A vote is recorded as a ballot, and the ballot's choices are
