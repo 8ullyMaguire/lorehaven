@@ -35,6 +35,7 @@
 #   scripts/gate.sh frontend                svelte-check and vitest
 #   scripts/gate.sh e2e <suite>             one Playwright suite at a time
 #   scripts/gate.sh dialects                the dialect-parity gates
+#   scripts/gate.sh repo                    the reachability probe and the split-spec check
 #   scripts/gate.sh budget                  the taste engine's RSS budget
 #   scripts/gate.sh all                     fmt, lint, build, test, doc, frontend, dialects
 #
@@ -154,6 +155,18 @@ run_dialects() {
     return "$failed"
 }
 
+# The repository-level checks: the things that are true of the TREE rather than
+# of one crate.
+#
+#   * the reachability probe -- every table has a reader and a writer, or is
+#     listed in the known-gaps file with the reason and the pinning test;
+#   * the split-spec checker -- the specification's split is in step with its
+#     master, and every file's heading number matches its filename.
+run_repo() {
+    python3 scripts/reachability.py
+    python3 scripts/check-split-spec.py
+}
+
 # The frontend gate: the type check and the unit tests.
 run_frontend() {
     cd "$REPO_ROOT/frontend"
@@ -208,6 +221,9 @@ case "$cmd" in
     dialects)
         run_gate dialects run_dialects
         ;;
+    repo)
+        run_gate repo run_repo
+        ;;
     budget)
         # NOT IMPLEMENTED YET — the taste engine's budget gate is T-M13-09.
         #
@@ -224,6 +240,7 @@ case "$cmd" in
         run_gate doc cargo test --workspace --doc
         run_gate frontend run_frontend
         run_gate dialects run_dialects
+        run_gate repo run_repo
         ;;
     --help | -h | help | "")
         usage

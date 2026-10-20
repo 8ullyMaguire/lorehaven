@@ -357,6 +357,51 @@ pub async fn run(config: &Config, args: &DoctorArgs) -> Report {
         ),
     }
 
+    // --- the compute tiers --------------------------------------------------
+    //
+    // The tier boundaries are configuration and they are published in
+    // `/api/v1/meta` (spec §12.6 rule 5), so an operator reading `doctor` is
+    // reading the same numbers a reader's page is built from.
+    //
+    // **The three T2 gates are evaluated in a fixed order — supporter, then
+    // trust, then resonance — and exactly one wins** (spec §12.6 rule 6), so
+    // the report names the order rather than three independent conditions.
+    report.ok(
+        "tiers",
+        format!(
+            "T0 house = {}; T1 at trust >= {}; T2 by supporter = {}, trust >= {}, \
+             resonance >= {}",
+            config.tiers.house,
+            config.tiers.personal_min_trust,
+            config.tiers.full_supporter,
+            config.tiers.full_min_trust,
+            config.tiers.full_min_resonance,
+        ),
+    );
+
+    // --- the taste engine ---------------------------------------------------
+    //
+    // The engine's mode decides **whose problem the graph's RSS is** (spec
+    // §8.2): in `embedded` mode the archive carries it, and in `service` mode
+    // the taste service does and the archive's RSS stays flat.
+    //
+    // The headroom is reported as the cap the process enforces on itself, not
+    // as a measurement: the measurement is the budget gate's job (T-M13-09),
+    // and a doctor run that reported a *current* RSS as if it were a headroom
+    // would be reporting a number that goes down when the instance is idle.
+    report.ok(
+        "taste",
+        format!(
+            "mode = {}; the graph's RSS budget belongs to the {}",
+            config.taste.mode,
+            if config.taste.mode == "service" {
+                "taste service"
+            } else {
+                "archive process"
+            },
+        ),
+    );
+
     // --- what this run could not check --------------------------------------
     //
     // Spec §38.7.3: the report ends with what was NOT checked. These four are

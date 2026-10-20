@@ -452,154 +452,15 @@ pub async fn get_ai_work(
     Ok(Json(json!({ "work_id": work_id, "request_id": requests })))
 }
 
-/// Public OpenAPI 3.1 specification for the supported API surface (spec §23.1).
-///
-/// Published at `/api/v1/openapi.json` so tooling (client generators, linters,
-/// Swagger UI) can consume the contract without scraping routes.
-pub async fn get_openapi_spec(
-    _maybe: MaybeSession,
-    State(_state): State<AppState>,
-) -> ApiResult<(
-    axum::http::StatusCode,
-    [(axum::http::header::HeaderName, &'static str); 1],
-    Json<serde_json::Value>,
-)> {
-    let spec = serde_json::json!({
-        "openapi": "3.1.0",
-        "info": {
-            "title": "Darkhold Public API",
-            "version": "v1",
-            "description": "Supported public interface for Darkhold. Administrative and experimental endpoints are marked separately and require additional scopes.",
-            "contact": { "name": "API Support", "url": "/docs" },
-        },
-        "servers": [{ "url": "/api/v1", "description": "Current instance" }],
-        "components": {
-            "securitySchemes": {
-                "bearer": { "type": "http", "scheme": "bearer", "bearerFormat": "UUID" },
-            },
-            "schemas": {
-                "Error": {
-                    "type": "object",
-                    "properties": {
-                        "error": { "type": "string" },
-                        "field": { "type": "string", "nullable": true },
-                        "code": { "type": "string", "nullable": true },
-                    },
-                },
-                "Work": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" },
-                        "title": { "type": "string" },
-                        "summary": { "type": "string" },
-                        "language": { "type": "string" },
-                        "rating": { "type": "string" },
-                        "lifecycle": { "type": "string" },
-                        "completion": { "type": "string" },
-                        "published_at": { "type": "string", "format": "date-time", "nullable": true },
-                    },
-                },
-                "Token": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" },
-                        "name": { "type": "string" },
-                        "kind": { "type": "string" },
-                        "scopes": { "type": "array", "items": { "type": "string" } },
-                        "created_at": { "type": "string", "format": "date-time" },
-                    },
-                },
-            },
-        },
-        "paths": {
-            "/public/works/{id}": {
-                "get": {
-                    "operationId": "getPublicWork",
-                    "summary": "Get public work metadata",
-                    "description": "Returns metadata for a published, age-eligible work. Returns 404 for drafts, unpublished, age-ineligible, or unknown ids — never leaks draft content.",
-                    "parameters": [
-                        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-                    ],
-                    "responses": {
-                        "200": {
-                            "description": "Public work metadata",
-                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Work" } } },
-                        },
-                        "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-                    },
-                },
-            },
-            "/public/search": {
-                "get": {
-                    "operationId": "publicSearch",
-                    "summary": "Search public works",
-                    "description": "Public full-text search over eligible works. Returns empty list (not 400) for blank queries.",
-                    "parameters": [
-                        { "name": "q", "in": "query", "required": false, "schema": { "type": "string" } },
-                    ],
-                    "responses": {
-                        "200": {
-                            "description": "Search results",
-                            "content": { "application/json": { "schema": { "type": "object", "properties": { "results": { "type": "array", "items": { "$ref": "#/components/schemas/Work" } } } } } },
-                        },
-                    },
-                },
-            },
-            "/me/tokens": {
-                "get": {
-                    "operationId": "listTokens",
-                    "summary": "List API tokens",
-                    "security": [{ "bearer": [] }],
-                    "responses": {
-                        "200": {
-                            "description": "Token list",
-                            "content": { "application/json": { "schema": { "type": "object", "properties": { "tokens": { "type": "array", "items": { "$ref": "#/components/schemas/Token" } } } } } },
-                        },
-                    },
-                },
-                "post": {
-                    "operationId": "issueToken",
-                    "summary": "Issue a scoped API token",
-                    "security": [{ "bearer": [] }],
-                    "requestBody": {
-                        "required": true,
-                        "content": { "application/json": { "schema": { "type": "object", "required": ["name", "scopes"], "properties": {
-                            "name": { "type": "string" },
-                            "kind": { "type": "string", "default": "personal" },
-                            "scopes": { "type": "array", "items": { "type": "string" } },
-                        } } } },
-                    },
-                    "responses": {
-                        "201": {
-                            "description": "Token issued (secret returned once)",
-                            "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "token": { "type": "string", "description": "Bearer secret — shown once at issuance." } } } } },
-                        },
-                    },
-                },
-            },
-            "/me/tokens/{id}": {
-                "post": {
-                    "operationId": "revokeToken",
-                    "summary": "Revoke a token",
-                    "security": [{ "bearer": [] }],
-                    "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-                    "responses": {
-                        "200": { "description": "Revoked", "content": { "application/json": { "schema": { "type": "object", "properties": { "revoked": { "type": "boolean" } } } } } },
-                    },
-                },
-            },
-        },
-        "security": [{ "bearer": [] }],
-    });
-    Ok((
-        axum::http::StatusCode::OK,
-        [(
-            axum::http::header::HeaderName::from_static("content-type"),
-            "application/json",
-        )],
-        Json(spec),
-    ))
-}
+// The OpenAPI document lives in `super::openapi`, and it is **generated from the
+// declared route table** rather than written out by hand. A hand-written document
+// drifts: a route is added, the document is not updated, and the two disagree in
+// the only way that matters — the document says a thing exists that does not, or
+// does not say a thing exists that does, and a client generator produces a
+// client that does not work.
+//
+// The route itself is registered there too, so the document and the door that
+// serves it are one thing.
 
 /// `GET /me/credential` — who am I, and what may this token do?
 ///
@@ -673,6 +534,4 @@ pub fn router() -> axum::Router<AppState> {
         .route("/me/push/subscribe", post(subscribe_push))
         // AI
         .route("/ai/works/{id}", get(get_ai_work))
-        // OpenAPI spec (spec §23.1)
-        .route("/openapi.json", get(get_openapi_spec))
 }

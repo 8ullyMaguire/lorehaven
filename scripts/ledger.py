@@ -181,6 +181,40 @@ def upsert_row(path: str, row: Dict[str, str]) -> bool:
     return False
 
 
+def add_columns(path: str, columns: Sequence[str]) -> bool:
+    """Add `columns` to the ledger's header, and to every row, empty.
+
+    This is the **deliberate migration** the module's rules defer to: a ledger that
+    has not yet grown a column does not grow one because a row was edited, so the
+    column arrives here, in its own command, with its own commit.
+
+    The new columns are appended in the order given, after the existing ones, and
+    every existing row gets an empty value for each. **The row count does not
+    change** — a migration that added or dropped a row would not be a migration.
+
+    Returns True if the ledger changed.
+    """
+    if not columns:
+        return False
+    unknown = [c for c in columns if c not in CANONICAL_FIELDS]
+    if unknown:
+        raise ValueError(
+            "unknown ledger column(s): %s — the columns are %s"
+            % (", ".join(unknown), ", ".join(CANONICAL_FIELDS))
+        )
+    header = _header_for(path)
+    added = [c for c in columns if c not in header]
+    if not added:
+        return False
+    new_header = list(header) + added
+    rows = read_rows(path)
+    for row in rows:
+        for column in added:
+            row.setdefault(column, "")
+    write_rows(path, rows, new_header)
+    return True
+
+
 def show_row(path: str, row_id: str) -> Dict[str, str]:
     """The row with this `id`, or a `KeyError`."""
     for row in read_rows(path):
@@ -198,6 +232,15 @@ def main(argv: Sequence[str] = None) -> int:
         p = sub.add_parser(verb, help="insert or replace a row, read as JSON on stdin")
         p.add_argument("--id", default=None, help="override the row's id")
 
+    migrate = sub.add_parser("migrate", help="add a column to the ledger, empty on every row")
+    migrate.add_argument(
+        "--add-column",
+        action="append",
+        default=[],
+        metavar="COLUMN",
+        help="a column to add; may be given more than once",
+    )
+
     p = sub.add_parser("show", help="print one row as JSON")
     p.add_argument("id")
 
@@ -210,6 +253,11 @@ def main(argv: Sequence[str] = None) -> int:
         if args.id:
             payload["id"] = args.id
         upsert_row(args.ledger, payload)
+        return 0
+
+    if args.command == "migrate":
+        changed = add_columns(args.ledger, args.add_column)
+        print("migrated" if changed else "already up to date")
         return 0
 
     if args.command == "show":

@@ -642,6 +642,108 @@ marked `KNOWN DEFECT`. They assert the **current** behaviour on purpose: a fix
 turns them red, which is the point. The fix deserves to be noticed rather than
 to happen in passing.
 
+## Unreachable tables
+
+**Seventy-five tables have one side and not the other.** A table that is written
+and never read is a write amplification with no reader: the instance pays for
+the row on every write and nobody ever looks at it. A table that is read and
+never written is usually the sign of a feature that was half-built and shipped
+without its other half. **A table that is neither is a table nothing uses** — a
+migration with a table.
+
+These are the inherited estate's tables, and they are listed here rather than
+fixed because fixing seventy-five tables is not one milestone's work and half of
+them are features that are still owed. **What matters is that they are named,
+so the count can only go down and every fix is visible.**
+
+| table | state | why |
+|---|---|---|
+| `admin_actions` | written, never read | the row is written on every event and read by nothing |
+| `ai_requests` | written, never read | the row is written on every event and read by nothing |
+| `ap_activities` | written, never read | the row is written on every event and read by nothing |
+| `ap_follows` | written, never read | the row is written on every event and read by nothing |
+| `bounty_contributions` | written, never read | the row is written on every event and read by nothing |
+| `challenge_entries` | written, never read | the row is written on every event and read by nothing |
+| `commissions` | written, never read | the row is written on every event and read by nothing |
+| `credit_holds` | written, never read | the row is written on every event and read by nothing |
+| `dmca_takedowns` | written, never read | the row is written on every event and read by nothing |
+| `encryption_keys` | written, never read | the row is written on every event and read by nothing |
+| `exchange_signal_entities` | written, never read | the row is written on every event and read by nothing |
+| `federation_inbound` | written, never read | the row is written on every event and read by nothing |
+| `feed_handles` | written, never read | the row is written on every event and read by nothing |
+| `forum_post_first_vote_notified` | written, never read | the row is written on every event and read by nothing |
+| `forum_search_misses` | written, never read | the row is written on every event and read by nothing |
+| `forum_topic_activity` | written, never read | the row is written on every event and read by nothing |
+| `lifecycle_events` | written, never read | the row is written on every event and read by nothing |
+| `media_edition_creators` | written, never read | the row is written on every event and read by nothing |
+| `mention_events` | written, never read | the row is written on every event and read by nothing |
+| `monetization_period_summaries` | written, never read | the row is written on every event and read by nothing |
+| `payment_events` | written, never read | the row is written on every event and read by nothing |
+| `pool_b_distributions` | written, never read | the row is written on every event and read by nothing |
+| `push_subscriptions` | written, never read | the row is written on every event and read by nothing |
+| `review_tasks` | written, never read | the row is written on every event and read by nothing |
+| `roadmap_suggestions` | written, never read | the row is written on every event and read by nothing |
+| `translation_glossaries` | written, never read | the row is written on every event and read by nothing |
+| `translation_publications` | written, never read | the row is written on every event and read by nothing |
+| `translation_reviews` | written, never read | the row is written on every event and read by nothing |
+| `webhook_deliveries` | written, never read | the row is written on every event and read by nothing |
+| `curator_standing_bounties` | read, never written | a reader with no writer: the feature's other half was never built |
+| `extension_manifests` | read, never written | a reader with no writer: the feature's other half was never built |
+| `forum_vote_types` | read, never written | a reader with no writer: the feature's other half was never built |
+| `identity_merge_history` | read, never written | a reader with no writer: the feature's other half was never built |
+| `identity_merge_proposals` | read, never written | a reader with no writer: the feature's other half was never built |
+| `mechanism_declarations` | read, never written | a reader with no writer: the feature's other half was never built |
+| `media_collection_items` | read, never written | a reader with no writer: the feature's other half was never built |
+| `media_rights` | read, never written | a reader with no writer: the feature's other half was never built |
+| `quality_signals` | read, never written | a reader with no writer: the feature's other half was never built |
+| `taxonomy_closure` | read, never written | a reader with no writer: the feature's other half was never built |
+| `work_moods` | read, never written | a reader with no writer: the feature's other half was never built |
+| `ai_consents` | neither | a migration with a table: nothing in the instance uses it |
+| `announcements` | neither | a migration with a table: nothing in the instance uses it |
+| `bodies` | neither | a migration with a table: nothing in the instance uses it |
+| `canon_works` | neither | a migration with a table: nothing in the instance uses it |
+| `canons` | neither | a migration with a table: nothing in the instance uses it |
+| `comment_threads` | neither | a migration with a table: nothing in the instance uses it |
+| `critique_participants` | neither | a migration with a table: nothing in the instance uses it |
+| `device_deliveries` | neither | a migration with a table: nothing in the instance uses it |
+| `device_deliveries_fixed` | neither | a migration with a table: nothing in the instance uses it |
+| `distributorships` | neither | a migration with a table: nothing in the instance uses it |
+| `feature_flags` | neither | a migration with a table: nothing in the instance uses it |
+| `federated_mirrors` | neither | a migration with a table: nothing in the instance uses it |
+| `federation_peers` | neither | a migration with a table: nothing in the instance uses it |
+| `forum_throttle_log` | neither | a migration with a table: nothing in the instance uses it |
+| `ip_policy` | neither | a migration with a table: nothing in the instance uses it |
+| `link_health_checks` | neither | a migration with a table: nothing in the instance uses it |
+| `media_creators` | neither | a migration with a table: nothing in the instance uses it |
+| `media_files` | neither | a migration with a table: nothing in the instance uses it |
+| `moods` | neither | a migration with a table: nothing in the instance uses it |
+| `preservation_batches` | neither | a migration with a table: nothing in the instance uses it |
+| `prompt_posts` | neither | a migration with a table: nothing in the instance uses it |
+| `signup_controls` | neither | a migration with a table: nothing in the instance uses it |
+| `snapshot_rekey_notes` | neither | a migration with a table: nothing in the instance uses it |
+| `space_works` | neither | a migration with a table: nothing in the instance uses it |
+| `spaces` | neither | a migration with a table: nothing in the instance uses it |
+| `stat_snapshots` | neither | a migration with a table: nothing in the instance uses it |
+| `streak_milestones` | neither | a migration with a table: nothing in the instance uses it |
+| `subscriptions` | neither | a migration with a table: nothing in the instance uses it |
+| `taxonomy_edges` | neither | a migration with a table: nothing in the instance uses it |
+| `taxonomy_node_scope` | neither | a migration with a table: nothing in the instance uses it |
+| `work_index_policy` | neither | a migration with a table: nothing in the instance uses it |
+| `work_orphans` | neither | a migration with a table: nothing in the instance uses it |
+| `work_passages` | neither | a migration with a table: nothing in the instance uses it |
+| `work_tag_votes` | neither | a migration with a table: nothing in the instance uses it |
+| `work_warnings` | neither | a migration with a table: nothing in the instance uses it |
+
+Pinned by `the_unreachable_tables_are_exactly_the_ones_the_known_gaps_file_claims`
+in `crates/app/tests/reachability.rs`, so the list fails **in both directions**: a
+listed table that has since been given the other side has to leave the list,
+and a table that has become one-sided has to join it. A pin that only ran one
+way would let the file rot in the direction nobody was looking at.
+
+**The scan is written twice** — once in that test, once in
+`scripts/reachability.py` — and the two are independent implementations of the
+same rule. That is deliberate: two scans that must agree are a cross-check.
+
 ## Fixed
 
 Listed because the pattern recurs and the fix is the reference for it.

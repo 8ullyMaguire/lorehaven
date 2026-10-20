@@ -817,9 +817,11 @@ dependencies = [
 name = "darkhold-taste"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "darkhold-domain",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

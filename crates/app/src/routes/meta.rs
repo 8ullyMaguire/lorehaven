@@ -43,6 +43,94 @@ struct MetaResponse {
     decisions: DecisionsSummary,
     topics: Vec<TopicSummary>,
     theme: ThemeSummary,
+    /// The instance theme's publication and its signal weights (spec §12.1, D-11).
+    instance_theme: InstanceThemeSummary,
+    /// The compute tiers — who gets which algorithm (spec §12.6).
+    ///
+    /// **Published, because the tier a reader is on has to be visible to them**
+    /// and because the boundaries are configuration a reader can see.
+    tiers: TiersSummary,
+    /// The mood gate (spec §12.3).
+    moods: MoodsSummary,
+    /// Channel voting (spec §12.10, §12.12).
+    channels: ChannelsSummary,
+    /// The content policy and its version (spec §15.7, D-9).
+    content_policy: ContentPolicySummary,
+}
+
+/// The instance theme's publication, its weights and its opposition weight
+/// (spec §12.1, D-11).
+#[derive(Debug, Serialize)]
+struct InstanceThemeSummary {
+    /// Whether the instance theme is published. **It is a public, versioned
+    /// editorial position**, so a client can say what the instance is for.
+    published: bool,
+    /// The three signal weights, in the order the specification fixes them:
+    /// **works ≫ authors > tags**. The ordering is the design (D-11) and the
+    /// numbers are configuration.
+    signal_weights: SignalWeightsSummary,
+    /// How strongly a work carrying a tag the theme is *against* is demoted.
+    opposition_weight: f64,
+}
+
+/// The three signal weights (spec §12.1, D-11).
+#[derive(Debug, Serialize)]
+struct SignalWeightsSummary {
+    works: f64,
+    authors: f64,
+    tags: f64,
+}
+
+/// The compute tiers (spec §12.6).
+#[derive(Debug, Serialize)]
+struct TiersSummary {
+    /// T0 is always available: the house theme is a real recommendation.
+    house: String,
+    /// The trust level T1 needs.
+    personal_min_trust: i64,
+    /// Whether the Supporter tier reaches T2.
+    full_supporter: bool,
+    /// The trust level that reaches T2.
+    full_min_trust: i64,
+    /// The resonance that reaches T2.
+    full_min_resonance: f64,
+}
+
+/// The mood gate (spec §12.3).
+#[derive(Debug, Serialize)]
+struct MoodsSummary {
+    enabled: bool,
+    min_trust_level: i64,
+    supporter_only: bool,
+    max_moods_per_account: i64,
+}
+
+/// Channel voting (spec §12.10, §12.12).
+#[derive(Debug, Serialize)]
+struct ChannelsSummary {
+    voting_enabled: bool,
+    min_trust_level: i64,
+    min_resonance: f64,
+    supporter_only: bool,
+    period_days: i64,
+    max_shift_per_period: f64,
+    seed_floor: f64,
+    tau: f64,
+}
+
+/// The instance's content policy and the version of it (spec §15.7, D-9).
+///
+/// **The version travels with the policy**, because a policy that changes
+/// without a version change cannot be reasoned about: a reader who agreed to
+/// version 2 has not agreed to version 3.
+#[derive(Debug, Serialize)]
+struct ContentPolicySummary {
+    /// The policy's version. Bumping it re-asks (spec §14.3).
+    version: i64,
+    /// The age gate's mode: `required` on an adult-content instance (D-9).
+    age_gate: String,
+    /// Whether a guest must accept consent before the instance creates one.
+    consent_required_for_guest: bool,
 }
 
 /// How this instance classifies, and with what (amendment §3.4).
@@ -151,6 +239,43 @@ async fn meta(
                 },
             })
             .collect(),
+        instance_theme: InstanceThemeSummary {
+            published: config.theme.published,
+            signal_weights: SignalWeightsSummary {
+                works: config.theme.signal_weights.works,
+                authors: config.theme.signal_weights.authors,
+                tags: config.theme.signal_weights.tags,
+            },
+            opposition_weight: config.theme.opposition_weight,
+        },
+        tiers: TiersSummary {
+            house: config.tiers.house.clone(),
+            personal_min_trust: config.tiers.personal_min_trust,
+            full_supporter: config.tiers.full_supporter,
+            full_min_trust: config.tiers.full_min_trust,
+            full_min_resonance: config.tiers.full_min_resonance,
+        },
+        moods: MoodsSummary {
+            enabled: config.discovery.moods.enabled,
+            min_trust_level: config.discovery.moods.min_trust_level,
+            supporter_only: config.discovery.moods.supporter_only,
+            max_moods_per_account: config.discovery.moods.max_moods_per_account,
+        },
+        channels: ChannelsSummary {
+            voting_enabled: config.channels.voting_enabled,
+            min_trust_level: config.channels.min_trust_level,
+            min_resonance: config.channels.min_resonance,
+            supporter_only: config.channels.supporter_only,
+            period_days: config.channels.period_days,
+            max_shift_per_period: config.channels.max_shift_per_period,
+            seed_floor: config.channels.seed_floor,
+            tau: config.channels.tau,
+        },
+        content_policy: ContentPolicySummary {
+            version: config.consent.version,
+            age_gate: config.consent.age_gate.clone(),
+            consent_required_for_guest: config.consent.required_for_guest,
+        },
         theme: ThemeSummary {
             mode: config.theme.mode.clone(),
             allow_user_opt_out: config.theme.allow_user_opt_out,

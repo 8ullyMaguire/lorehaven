@@ -277,6 +277,65 @@ async fn health_live_reports_the_running_build() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Readiness refuses when the database is unreachable, and it says which check
+/// failed.
+///
+/// **The point of the endpoint is that a supervisor can act on it**, and a
+/// supervisor acts on a 503. So the 503 has to be the *database's* fault and
+/// not the schema's, and the body has to name it — a reader of the body who
+/// cannot tell which dependency failed cannot act either.
+#[tokio::test]
+async fn health_ready_is_503_when_the_database_is_unreachable() {
+    let dir = scratch_dir("ready-unreachable");
+    let config = config_for(&dir);
+    let db = scratch_database(&dir).await;
+    db.migrate().await.expect("migrate");
+
+    // Close the pool under the app's feet. The handle is still there and the
+    // process is still up, which is exactly what an unreachable database looks
+    // like from the router's side: the check runs, and the check fails.
+    db.close().await;
+
+    let app = server::build_router(AppState::new(config, db.clone()));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/health/ready")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "an unreachable database must not report ready"
+    );
+
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("body");
+    let json: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+    assert_eq!(json["status"], "degraded");
+    assert_eq!(
+        json["checks"]["database"]["ok"], false,
+        "the database check is the one that failed"
+    );
+    assert!(
+        json["checks"]["database"]["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("unreachable")),
+        "the check names what went wrong: {}",
+        json["checks"]["database"]
+    );
+    assert!(
+        json["checks"]["database"]["re remedy"].is_null(),
+        "the check carries no remedy for an unreachable database, because there is \
+         nothing the operator can do about a database that is not there"
+    );
+}
+
 #[tokio::test]
 async fn health_ready_checks_the_database_and_the_schema() {
     let dir = scratch_dir("ready");

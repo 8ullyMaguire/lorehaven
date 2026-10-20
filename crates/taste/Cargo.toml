@@ -25,6 +25,11 @@ path = "src/main.rs"
 darkhold-domain = { path = "../domain" }
 serde.workspace = true
 serde_json.workspace = true
+# The service mode's HTTP surface: the `taste` binary serves `/healthz`, and it
+# has to be a real server because the health check has to be reachable by
+# something other than the process itself.
+axum.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 
 [lints]
 workspace = true

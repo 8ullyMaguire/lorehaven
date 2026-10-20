@@ -163,6 +163,58 @@ def test_an_edit_does_not_change_the_header_or_the_field_count(tmp):
     )
 
 
+def test_a_deliberate_migration_adds_a_column_without_touching_the_rows(tmp):
+    """The migration is the ONLY way a column arrives.
+
+    The writer preserves the file's header verbatim, so a ledger that has not yet
+    grown `verified_at` and `gates` does not grow them because a row was edited.
+    The column arrives here, in its own command, with its own commit — and the
+    migration adds the column, empties it on every row, and **does not change the
+    row count**. A migration that added or dropped a row would not be a migration.
+    """
+    path = os.path.join(tmp, "requirements.csv")
+    legacy = "id,area,requirement,milestone,status,evidence,notes\r\nM0-01,platform,a thing,M0,planned,,\r\nM0-02,platform,another,M0,planned,,\r\n"
+    with io.open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(legacy)
+
+    assert ledger.add_columns(path, ["verified_at", "gates"]) is True, "the ledger changed"
+    assert ledger.add_columns(path, ["verified_at"]) is False, "a second migration changes nothing"
+
+    raw = open(path, "rb").read()
+    check(
+        raw.count(b"\r\n") == 3 and raw.count(b"\n") == 3,
+        "the migrated file is still CRLF (got %d CRLF, %d LF)" % (raw.count(b"\r\n"), raw.count(b"\n")),
+    )
+    header = raw.split(b"\r\n")[0].decode()
+    check(
+        header == "id,area,requirement,milestone,status,evidence,notes,verified_at,gates",
+        "the new columns are appended in order (got %r)" % header,
+    )
+    rows = ledger.read_rows(path)
+    check(len(rows) == 2, "the row count did not change")
+    for row in rows:
+        check(row["verified_at"] == "", "the new column is empty on every row")
+        check(row["gates"] == "", "the new column is empty on every row")
+    check(rows[0]["id"] == "M0-01", "the first row survived")
+    check(rows[1]["requirement"] == "another", "the second row survived")
+
+
+def test_a_migration_refuses_a_column_that_is_not_one(tmp):
+    path = os.path.join(tmp, "requirements.csv")
+    ledger.write_rows(path, [row("M0-01")])
+    before = open(path, "rb").read()
+    raised = False
+    try:
+        ledger.add_columns(path, ["colour"])
+    except ValueError:
+        raised = True
+    check(raised, "an unknown column is refused by name")
+    check(
+        open(path, "rb").read() == before,
+        "the refused migration wrote nothing at all",
+    )
+
+
 def test_unknown_column_is_refused(tmp):
     path = os.path.join(tmp, "requirements.csv")
     ledger.write_rows(path, [row("M0-01")])

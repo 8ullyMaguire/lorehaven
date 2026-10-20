@@ -681,6 +681,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // The OpenAPI document, generated from the declared route table.
+        .merge(classified(
+            routes::openapi::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Administration — M19.
         .merge(classified(
             routes::admin::router(),
