@@ -836,8 +836,31 @@ fn capabilities_for(
 ) -> Capabilities {
     let policy = darkhold_domain::policy::AccessPolicy::default();
 
+    // **The age gate is separate from the consent gate** (spec §15.8), and this
+    // is where the separation is visible: the consent gate refuses a *mutating
+    // request* without consent, while the age gate decides what an account may
+    // *do* once it exists.
+    //
+    // `age_gate = "optional"` is the instance saying the declaration is
+    // optional — so an account that never declared may still write. The default
+    // is `"required"`, and D-9 makes the default instance an adult-content host,
+    // so **required is the safe default and the instance has to opt out of it
+    // deliberately.**
+    let age_gate_required = state.config().consent.age_gate == "required";
+
     let (can_write, can_message, can_be_listed, note) = match age_state {
         AgeState::DeclaredAdult | AgeState::AuthorizedUnderPolicy => (true, true, true, None),
+        AgeState::Unknown if !age_gate_required => (
+            true,
+            true,
+            true,
+            Some(
+                "This instance does not require an age declaration, so this account may \
+                 write. It is served within the rating ceiling for an account of unknown \
+                 age."
+                    .to_owned(),
+            ),
+        ),
         AgeState::Unknown => (
             false,
             false,

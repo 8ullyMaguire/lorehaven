@@ -328,6 +328,152 @@ pub struct AccountFacts {
     pub supporter_until: Option<String>,
 }
 
+/// Set an account's age-policy state.
+///
+/// **The one place the state changes** after registration, because the state is
+/// a claim about a person and two places that can set it are two places that
+/// can disagree. The registration path writes it through
+/// [`create_account`]; the guardian path writes it through
+/// [`grant_guardian_authorization`].
+pub async fn set_age_state(
+    db: &Database,
+    account_id: AccountId,
+    state: AgeState,
+) -> Result<(), sqlx::Error> {
+    let sql = db.sql(
+        "UPDATE accounts SET age_state = ?, updated_at = ? WHERE id = ?",
+        "UPDATE accounts SET age_state = ?, updated_at = ? WHERE id = ?::uuid",
+    );
+    let now = now_rfc3339();
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(age_state_string(state))
+                .bind(&now)
+                .bind(account_id.to_string())
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(age_state_string(state))
+                .bind(&now)
+                .bind(account_id.to_string())
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// A guardian's authorisation of a minor's account (spec §15.8).
+///
+/// **The grant is the point.** Before this, an account that declared itself
+/// below the age threshold landed in `authorization_required` and **stayed
+/// there forever**: the `guardian_authorizations` table existed, and nothing
+/// ever wrote to it, so the guardian workflow the instance advertised could
+/// not happen. A minor could never participate, whatever the operator set up.
+///
+/// The grant does two things, and the second is the one that is easy to forget:
+/// it records the authorisation, **and** it moves the account's age state to
+/// `authorized_under_policy` — because a recorded authorisation that does not
+/// change the state is a row nobody reads.
+pub async fn grant_guardian_authorization(
+    db: &Database,
+    account_id: AccountId,
+    verification_reference: &str,
+) -> Result<(), sqlx::Error> {
+    let now = now_rfc3339();
+    let id = uuid::Uuid::new_v4();
+    let insert = db.sql(
+        "INSERT INTO guardian_authorizations
+           (id, account_id, status, verification_reference, created_at, granted_at)
+         VALUES (?, ?, 'granted', ?, ?, ?)",
+        "INSERT INTO guardian_authorizations
+           (id, account_id, status, verification_reference, created_at, granted_at)
+         VALUES (?::uuid, ?::uuid, 'granted', ?, ?, ?)",
+    );
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(&insert)
+                .bind(id.to_string())
+                .bind(account_id.to_string())
+                .bind(verification_reference)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(&insert)
+                .bind(id.to_string())
+                .bind(account_id.to_string())
+                .bind(verification_reference)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    set_age_state(db, account_id, AgeState::AuthorizedUnderPolicy).await
+}
+
+/// The account's live guardian authorisation, if it has one.
+///
+/// **The audit trail, and the thing a takedown reads.** A takedown asks "who
+/// was allowed to see this", and the answer is the audience's age state — which
+/// is on the account because the state is what the policy consults.
+pub async fn guardian_authorization(
+    db: &Database,
+    account_id: AccountId,
+) -> Result<Option<GuardianAuthorization>, sqlx::Error> {
+    let sql = db.sql(
+        "SELECT id, status, verification_reference, granted_at
+           FROM guardian_authorizations
+          WHERE account_id = ? AND status = 'granted'
+          ORDER BY granted_at DESC LIMIT 1",
+        "SELECT id::text, status, verification_reference, granted_at
+           FROM guardian_authorizations
+          WHERE account_id = ?::uuid AND status = 'granted'
+          ORDER BY granted_at DESC LIMIT 1",
+    );
+    let row: Option<(String, String, Option<String>, Option<String>)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(account_id.to_string())
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(account_id.to_string())
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.map(
+        |(id, status, reference, granted_at)| GuardianAuthorization {
+            id,
+            status,
+            verification_reference: reference,
+            granted_at,
+        },
+    ))
+}
+
+/// A guardian's authorisation, as the audit reads it.
+#[derive(Debug, Clone)]
+pub struct GuardianAuthorization {
+    /// The authorisation's own id.
+    pub id: String,
+    /// Its status. Only `granted` is read.
+    pub status: String,
+    /// Whatever the guardian's verification produced.
+    pub verification_reference: Option<String>,
+    /// When it was granted.
+    pub granted_at: Option<String>,
+}
+
 /// Fold an account: its contents move elsewhere, and this row becomes a
 /// tombstone (spec §14.2, M2-05).
 ///
