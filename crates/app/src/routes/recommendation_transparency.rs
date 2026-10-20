@@ -25,7 +25,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use darkhold_db::recommendation_slots as slots;
-use darkhold_domain::governance::{TL_REGULAR, TL_STEWARD};
 use darkhold_domain::recommendation_transparency::{
     validate_proposal, AttentionReport, SlotExplanation, WranglingKind,
 };
@@ -62,14 +61,24 @@ pub fn router() -> Router<AppState> {
         .route("/tag-wrangling/log", get(public_wrangling_log))
 }
 
-/// The caller's trust level, defaulting to `TL_NEW` when it cannot be read.
+/// Whether the caller holds this privilege.
 ///
-/// Defaulting down rather than up: an unreadable trust row must not be a
-/// standing to rewrite the taxonomy.
-async fn caller_trust(state: &AppState, account: &str) -> i64 {
-    darkhold_db::governance::trust_for(state.db(), account)
+/// **Defaulting down rather than up**: a privilege whose row cannot be read
+/// must not be a standing to rewrite the taxonomy. The route asks for the
+/// *privilege* and does not know what level that is — the ladder is
+/// configuration (spec §14.4).
+async fn caller_holds(
+    state: &AppState,
+    account: &str,
+    privilege: darkhold_domain::trust::Privilege,
+) -> (i64, bool) {
+    let trust = darkhold_db::governance::trust_for(state.db(), account)
         .await
-        .unwrap_or(0)
+        .unwrap_or(0);
+    let holds = crate::auth::holds_privilege(state, account, privilege)
+        .await
+        .unwrap_or(false);
+    (trust, holds)
 }
 
 // ---------------------------------------------------------------------------
@@ -205,9 +214,14 @@ async fn propose_wrangling(
     RequireSession(user): RequireSession,
     Json(body): Json<WranglingProposalBody>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    // §19.1: proposing a taxonomy rewrite takes TL_REGULAR or better.
-    let trust = caller_trust(&state, &user.account_id.to_string()).await;
-    if trust < TL_REGULAR {
+    // Spec §14.4: a **tag proposal** is a member's privilege — level 2.
+    let (trust, holds) = caller_holds(
+        &state,
+        &user.account_id.to_string(),
+        darkhold_domain::trust::Privilege::TagProposals,
+    )
+    .await;
+    if !holds {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
 
@@ -272,8 +286,13 @@ async fn list_wrangling_proposals(
     RequireSession(user): RequireSession,
     Query(q): Query<PageQuery>,
 ) -> ApiResult<Json<Value>> {
-    let trust = caller_trust(&state, &user.account_id.to_string()).await;
-    if trust < TL_STEWARD {
+    let (_trust, holds) = caller_holds(
+        &state,
+        &user.account_id.to_string(),
+        darkhold_domain::trust::Privilege::SetTopicTags,
+    )
+    .await;
+    if !holds {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
 
@@ -294,8 +313,13 @@ async fn approve_wrangling(
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let trust = caller_trust(&state, &user.account_id.to_string()).await;
-    if trust < TL_STEWARD {
+    let (trust, holds) = caller_holds(
+        &state,
+        &user.account_id.to_string(),
+        darkhold_domain::trust::Privilege::SetTopicTags,
+    )
+    .await;
+    if !holds {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
     let pseud = user
@@ -326,8 +350,13 @@ async fn reject_wrangling(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    let trust = caller_trust(&state, &user.account_id.to_string()).await;
-    if trust < TL_STEWARD {
+    let (trust, holds) = caller_holds(
+        &state,
+        &user.account_id.to_string(),
+        darkhold_domain::trust::Privilege::SetTopicTags,
+    )
+    .await;
+    if !holds {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
     let pseud = user
@@ -359,8 +388,13 @@ async fn revert_wrangling(
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let trust = caller_trust(&state, &user.account_id.to_string()).await;
-    if trust < TL_STEWARD {
+    let (trust, holds) = caller_holds(
+        &state,
+        &user.account_id.to_string(),
+        darkhold_domain::trust::Privilege::SetTopicTags,
+    )
+    .await;
+    if !holds {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
     let pseud = user

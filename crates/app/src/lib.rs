@@ -16,6 +16,7 @@ pub mod bulk_export;
 pub mod cli;
 pub mod config;
 pub mod crypto;
+pub mod cursor;
 pub mod derivative;
 pub mod doctor;
 pub mod exports;

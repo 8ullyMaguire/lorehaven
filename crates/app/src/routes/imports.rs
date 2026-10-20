@@ -46,8 +46,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64;
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use darkhold_db::imports::CredentialEvent;
@@ -2133,28 +2131,17 @@ fn parse_pseud(raw: &str) -> ApiResult<PseudId> {
 }
 
 /// Decode `created_at|id`, the pair the next page starts after.
+/// Decode a cursor into the row it points at.
+///
+/// **The shared codec**, because a cursor is a promise and the promise has to
+/// be the same promise everywhere (spec §20.1's cursor pagination).
 fn decode_cursor(raw: &str) -> ApiResult<(String, String)> {
-    let decoded = BASE64
-        .decode(raw)
-        .ok()
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .ok_or_else(|| {
-            ApiError(AppError::field(
-                "cursor",
-                "is not one this collection issued",
-            ))
-        })?;
-    let (created_at, id) = decoded.split_once('|').ok_or_else(|| {
-        ApiError(AppError::field(
-            "cursor",
-            "is not one this collection issued",
-        ))
-    })?;
-    Ok((created_at.to_owned(), id.to_owned()))
+    crate::cursor::decode(raw)
 }
 
+/// Encode a cursor from the row it points at.
 fn encode_cursor(created_at: &str, id: &str) -> String {
-    BASE64.encode(format!("{created_at}|{id}"))
+    crate::cursor::encode(created_at, id)
 }
 
 /// The clock, in one place, so this module has a single dependency on "now".

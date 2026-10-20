@@ -267,11 +267,15 @@ async fn respond(
 
     let _ = darkhold_db::governance::audit_append(
         state.db(),
-        &user.account_id.to_string(),
-        "retention.proposal.respond",
-        "retention_proposal",
-        &proposal.id,
-        &json!({ "decision": body.decision }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &user.account_id.to_string(),
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: Some(&body.decision),
+            action: "retention.proposal.respond",
+            subject_type: "retention_proposal",
+            subject_id: &proposal.id,
+            document: &json!({ "decision": body.decision }).to_string(),
+        },
     )
     .await;
 
@@ -345,11 +349,15 @@ async fn override_setting(
 
     let _ = darkhold_db::governance::audit_append(
         state.db(),
-        &user.account_id.to_string(),
-        "retention.proposal.override",
-        "retention_proposal",
-        &proposal.id,
-        &json!({ "body_mode": mode.as_str(), "reason": reason }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &user.account_id.to_string(),
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: Some(&reason),
+            action: "retention.proposal.override",
+            subject_type: "retention_proposal",
+            subject_id: &proposal.id,
+            document: &json!({ "body_mode": mode.as_str(), "reason": reason }).to_string(),
+        },
     )
     .await;
 

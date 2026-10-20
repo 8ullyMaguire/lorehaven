@@ -515,32 +515,39 @@ async fn a_tl1_account_may_submit() {
 }
 
 #[tokio::test]
-async fn a_brand_new_account_at_tl0_may_not_submit() {
-    // Found while building this suite: a freshly registered account is `TL0`
-    // (`TL_NEW`), and §19.14's submit bar is TL1. So a new account is refused
-    // until it has some standing — which is the spec working, not a defect, and
-    // is worth pinning because "a TL1 account may submit" on its own would pass
-    // against a build where *every* account could submit.
+async fn the_submit_bar_is_level_one_and_an_account_below_it_may_not_submit() {
+    // **The numbering changed, and the bar did not.**
+    //
+    // Under lorehaven's ladder, level 0 meant "a registered account with no
+    // trust row" and level 1 meant "established". Under the Darkhold ladder
+    // (spec §14.4) level 0 is the **anonymous** reader and level 1 is **"an
+    // account, or a guest"** — so a brand-new account is at level 1, and
+    // §15.2's "low bar to submit, high bar to curate: level 1 to submit, level
+    // 3 plus quorum to curate" admits it.
+    //
+    // The *bar* is the same bar: level 1. And it is still a bar — a reader
+    // below it is refused, which is what "neither bar is configurable" has to
+    // mean in practice.
     let mut h = Harness::new("trust-tl0").await;
     h.signed_in("newcomer@example.test", "newcomer").await;
     h.enable().await;
-    assert_eq!(
-        darkhold_db::governance::trust_for(
-            h.db(),
-            // Not `LIMIT 1`: see the note above. The system account is the
-            // only row that exists before this harness registers, so a bare
-            // `LIMIT 1` returns it.
-            &sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE id != ?1 LIMIT 1",)
-                .bind(darkhold_db::SYSTEM_ACCOUNT.to_string())
-                .fetch_one(h.db().sqlite_pool().expect("sqlite"))
-                .await
-                .expect("an account")
-        )
+    let account = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE id != ?1 LIMIT 1")
+        .bind(darkhold_db::SYSTEM_ACCOUNT.to_string())
+        .fetch_one(h.db().sqlite_pool().expect("sqlite"))
         .await
-        .expect("trust"),
-        0,
-        "a new account starts at TL0"
+        .expect("an account");
+    assert_eq!(
+        darkhold_db::governance::trust_for(h.db(), &account)
+            .await
+            .expect("trust"),
+        1,
+        "a new account is at level 1 -- 'an account, or a guest' (spec §14.4)"
     );
+
+    // And a reader **below** the bar is refused.
+    darkhold_db::governance::set_trust(h.db(), &account, 0, "test")
+        .await
+        .expect("lower the reader below the bar");
     let (status, body) = h
         .request(
             "POST",

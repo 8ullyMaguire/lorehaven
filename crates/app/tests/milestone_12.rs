@@ -894,23 +894,13 @@ async fn a_trust_gate_rejects_underleveled_posters() {
     assert_eq!(body["error"]["code"], "ACCESS_DENIED", "{body}");
 
     // Promote the user to editor level.
-    let sql = harness.tdb.db().sql("INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 5, datetime('now'), 'test')", "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES ($1::uuid, 5, now(), 'test')");
-    match harness.tdb.db().backend() {
-        Backend::Sqlite => {
-            sqlx::query(sql.as_ref())
-                .bind(&account_id)
-                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
-                .await
-                .unwrap();
-        }
-        Backend::Postgres => {
-            sqlx::query(sql.as_ref())
-                .bind(&account_id)
-                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
-                .await
-                .unwrap();
-        }
-    }
+    //
+    // **The store's writer**, not a raw INSERT: registration now computes the
+    // account's level, so the row already exists and a bare INSERT would
+    // collide with it.
+    darkhold_db::governance::set_trust(harness.tdb.db(), &account_id, 5, "test")
+        .await
+        .expect("promote the user");
 
     // Now the same user can create a topic.
     let (status, body) = user

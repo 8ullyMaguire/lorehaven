@@ -159,15 +159,19 @@ async fn patch_policy(
     // and a failure to record is logged rather than swallowed silently.
     if let Err(error) = darkhold_db::governance::audit_append(
         state.db(),
-        &user.account_id.to_string(),
-        "retention.policy.set",
-        "instance_retention_policy",
-        "default",
-        &serde_json::json!({
-            "from": before.as_str(),
-            "to": policy.body_mode.as_str(),
-        })
-        .to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &user.account_id.to_string(),
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: None,
+            action: "retention.policy.set",
+            subject_type: "instance_retention_policy",
+            subject_id: "default",
+            document: &serde_json::json!({
+                "from": before.as_str(),
+                "to": policy.body_mode.as_str(),
+            })
+            .to_string(),
+        },
     )
     .await
     {
@@ -245,11 +249,16 @@ async fn put_source_override(
         Ok(row) => {
             let _ = darkhold_db::governance::audit_append(
                 state.db(),
-                &user.account_id.to_string(),
-                "retention.source.set",
-                "instance_retention_source_override",
-                &source_key,
-                &serde_json::json!({ "body_mode": row.body_mode.as_str() }).to_string(),
+                &darkhold_db::governance::AuditEntry {
+                    actor: &user.account_id.to_string(),
+                    actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+                    reason: None,
+                    action: "retention.source.set",
+                    subject_type: "instance_retention_source_override",
+                    subject_id: &source_key,
+                    document: &serde_json::json!({ "body_mode": row.body_mode.as_str() })
+                        .to_string(),
+                },
             )
             .await;
             Ok(Json(serde_json::json!({
@@ -318,11 +327,15 @@ async fn delete_source_override(
 
     let _ = darkhold_db::governance::audit_append(
         state.db(),
-        &user.account_id.to_string(),
-        "retention.source.clear",
-        "instance_retention_source_override",
-        &source_key,
-        "{}",
+        &darkhold_db::governance::AuditEntry {
+            actor: &user.account_id.to_string(),
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: None,
+            action: "retention.source.clear",
+            subject_type: "instance_retention_source_override",
+            subject_id: &source_key,
+            document: "{}",
+        },
     )
     .await;
 

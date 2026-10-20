@@ -20,7 +20,6 @@ use darkhold_db::category_governance as cg_db;
 use darkhold_db::directory as db;
 use darkhold_domain::category_governance as cg;
 use darkhold_domain::directory as domain;
-use darkhold_domain::governance::TL_STEWARD;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -605,10 +604,14 @@ async fn create_proposal(
     }
 
     let account_id = session.account_id.to_string();
-    let level = darkhold_db::governance::trust_for(state.db(), &account_id)
-        .await
-        .map_err(anyhow::Error::from)?;
-    if level < TL_STEWARD {
+    if !crate::auth::holds_privilege(
+        &state,
+        &account_id,
+        darkhold_domain::trust::Privilege::CategoryGovernance,
+    )
+    .await
+    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?
+    {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
 
@@ -741,10 +744,14 @@ async fn vote_proposal(
     }
 
     let account_id = session.account_id.to_string();
-    let level = darkhold_db::governance::trust_for(state.db(), &account_id)
-        .await
-        .map_err(anyhow::Error::from)?;
-    if level < TL_STEWARD {
+    if !crate::auth::holds_privilege(
+        &state,
+        &account_id,
+        darkhold_domain::trust::Privilege::CategoryGovernance,
+    )
+    .await
+    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?
+    {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
 
@@ -927,10 +934,14 @@ async fn propose_entry_mod(
     }
 
     let account_id = session.account_id.to_string();
-    let level = darkhold_db::governance::trust_for(state.db(), &account_id)
-        .await
-        .map_err(anyhow::Error::from)?;
-    if level < TL_STEWARD {
+    if !crate::auth::holds_privilege(
+        &state,
+        &account_id,
+        darkhold_domain::trust::Privilege::EntryModeration,
+    )
+    .await
+    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?
+    {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
 
@@ -982,10 +993,14 @@ async fn vote_entry_mod(
     }
 
     let account_id = session.account_id.to_string();
-    let level = darkhold_db::governance::trust_for(state.db(), &account_id)
-        .await
-        .map_err(anyhow::Error::from)?;
-    if level < TL_STEWARD {
+    if !crate::auth::holds_privilege(
+        &state,
+        &account_id,
+        darkhold_domain::trust::Privilege::EntryModeration,
+    )
+    .await
+    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?
+    {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
 

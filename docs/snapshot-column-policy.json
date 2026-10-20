@@ -1286,6 +1286,16 @@
       "treatment": "drop_column",
       "why": "The end of a paying entitlement, and the only column here that says **a person paid money**. A snapshot is a public dataset; a list of who was a supporter, with a date, is a purchasing record about identified-by-pseudonym people, and it buys the dataset nothing: the tier buys compute (D-10, N-1), so the tier is not in the taste the snapshot is about. Dropped rather than kept-gated, because a gate that can be opened by a query is a column that leaks.",
       "reviewed_by": "alvaro, 2026-10-20, against spec 11.16 and the Darkhold identity model (M2-01)"
+    },
+    "trust_events.account_id": {
+      "treatment": "rekey_account",
+      "why": "The account the trust event is about, and the anchor of the account's trust history. Re-keyed on the same mapping as `accounts.id`, so the history stays attached to a pseudonymised account and points at no real one. The levels themselves (from_level, to_level) are governance facts about standing and not about a person.",
+      "reviewed_by": "alvaro, 2026-10-20, against spec 11.16 and the Darkhold trust ladder (M3-03)"
+    },
+    "trust_events.actor_account_id": {
+      "treatment": "rekey_account",
+      "why": "Who caused the event, when a person did: the operator who granted a level, the moderator who lifted a sanction. Re-keyed on the same mapping as `accounts.id` -- and **no foreign key**, because an operator's account can be erased and the action they took should not vanish with them.",
+      "reviewed_by": "alvaro, 2026-10-20, against spec 11.16 and the Darkhold trust ladder (M3-03)"
     }
   }
 }

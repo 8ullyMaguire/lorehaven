@@ -1,9 +1,8 @@
 //! M14 — Governance routes: reports, moderation, sanctions, appeals, trust.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use darkhold_domain::governance::TL_STEWARD;
 use darkhold_domain::AppError;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -33,6 +32,10 @@ fn routes() -> Router<AppState> {
         .route("/appeals", get(list_my_appeals))
         .route("/me/trust", get(my_trust))
         .route("/me/audit-log", get(my_audit_log))
+        // The modlog: readable by any signed-in reader (spec §14.6).
+        .route("/modlog", get(modlog))
+        // An account's trust history: the events, not just the level.
+        .route("/accounts/{id}/trust", get(account_trust_history))
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +58,7 @@ async fn submit_report(
     // Reports may be submitted by anyone, including unauthenticated visitors.
     // Anonymous reports are attributed to a sentinel account id "anonymous".
     let reporter = user
+        .as_ref()
         .map(|u| u.account_id.to_string())
         .unwrap_or_else(|| "anonymous".to_owned());
     let id = darkhold_db::governance::open_report(
@@ -69,11 +73,21 @@ async fn submit_report(
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &reporter,
-        "report.submitted",
-        &body.subject_type,
-        &body.subject_id,
-        &json!({ "reason": body.reason, "detail": body.detail, "report_id": id }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &reporter,
+            // A report may be filed by an anonymous visitor, and then there is
+            // no pseudonym behind it. An honest absence beats a made-up one.
+            actor_pseud: user
+                .as_ref()
+                .and_then(|u| u.pseud_id.map(|id| id.to_string()))
+                .as_deref(),
+            reason: Some(&body.reason),
+            action: "report.submitted",
+            subject_type: &body.subject_type,
+            subject_id: &body.subject_id,
+            document: &json!({ "reason": body.reason, "detail": body.detail, "report_id": id })
+                .to_string(),
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -115,12 +129,20 @@ async fn moderation_queue(
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
     let reviewer = user.account_id.to_string();
-    // Verify the caller has reviewer trust level.
-    let level = darkhold_db::governance::trust_for(state.db(), &reviewer)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if level < TL_STEWARD {
-        return Err(ApiError(AppError::field("role", "reviewer trust required")));
+    // Spec §14.4: the moderation queue is a **moderator's** privilege. The
+    // route asks for the privilege and does not know what level that is.
+    let (level, required) = crate::auth::privilege_check(
+        &state,
+        &reviewer,
+        darkhold_domain::trust::Privilege::ModerationQueue,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level < required {
+        return Err(ApiError(AppError::TrustLevelInsufficient {
+            level,
+            required,
+        }));
     }
     let items = darkhold_db::governance::list_open_reports(state.db(), 100)
         .await
@@ -138,6 +160,22 @@ async fn assign_task(
     _body: Json<AssignTaskBody>,
 ) -> ApiResult<Json<Value>> {
     let reviewer = user.account_id.to_string();
+    // Assigning a report is **holding the moderation queue** — the same
+    // privilege that reads it. The gate was missing here, which meant any
+    // signed-in reader could put their name on a review task.
+    let (level, required) = crate::auth::privilege_check(
+        &state,
+        &reviewer,
+        darkhold_domain::trust::Privilege::ModerationQueue,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level < required {
+        return Err(ApiError(AppError::TrustLevelInsufficient {
+            level,
+            required,
+        }));
+    }
     let task_id = darkhold_db::governance::assign_task(state.db(), &report_id, &reviewer)
         .await
         .map_err(|e| {
@@ -150,11 +188,15 @@ async fn assign_task(
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &reviewer,
-        "review.assigned",
-        "report",
-        &report_id,
-        &json!({ "task_id": task_id }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &reviewer,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: None,
+            action: "review.assigned",
+            subject_type: "report",
+            subject_id: &report_id,
+            document: &json!({ "task_id": task_id }).to_string(),
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -174,17 +216,39 @@ async fn decide_task(
     Json(body): Json<DecideTaskBody>,
 ) -> ApiResult<Json<Value>> {
     let reviewer = user.account_id.to_string();
+    // Spec §14.4: **resolving a report** is a senior reviewer's privilege.
+    // The gate was missing here, which meant any signed-in reader could
+    // uphold or dismiss a report.
+    let (level, required) = crate::auth::privilege_check(
+        &state,
+        &reviewer,
+        darkhold_domain::trust::Privilege::ResolveReports,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level < required {
+        return Err(ApiError(AppError::TrustLevelInsufficient {
+            level,
+            required,
+        }));
+    }
     darkhold_db::governance::decide_task(state.db(), &task_id, &reviewer, &body.outcome)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &reviewer,
-        "review.decided",
-        "task",
-        &task_id,
-        &json!({ "outcome": body.outcome }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &reviewer,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            // The outcome **is** the reason: a review was decided, and what it
+            // was decided as is why.
+            reason: Some(&body.outcome),
+            action: "review.decided",
+            subject_type: "task",
+            subject_id: &task_id,
+            document: &json!({ "outcome": body.outcome }).to_string(),
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -211,15 +275,25 @@ async fn issue_sanction(
 ) -> ApiResult<Json<Value>> {
     let issuer = user.account_id.to_string();
 
-    // Verify the issuer has sufficient trust.
-    let level = darkhold_db::governance::trust_for(state.db(), &issuer)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if level < TL_STEWARD {
-        return Err(ApiError(AppError::field(
-            "role",
-            "reviewer trust required to issue sanctions",
-        )));
+    // Spec §14.4: a **scoped ban** is a senior reviewer's privilege.
+    //
+    // **The nominal level is 5 and the elastic allocation is what keeps a
+    // small site governable** (spec §14.4): on an instance with no senior
+    // reviewer the requirement falls to the level that actually has somebody
+    // in it, and it returns to 5 on the next evaluation once a senior
+    // reviewer appears.
+    let (level, required) = crate::auth::privilege_check(
+        &state,
+        &issuer,
+        darkhold_domain::trust::Privilege::ScopedBans,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level < required {
+        return Err(ApiError(AppError::TrustLevelInsufficient {
+            level,
+            required,
+        }));
     }
 
     let ends_at = body.duration_days.map(|d| {
@@ -240,11 +314,17 @@ async fn issue_sanction(
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &issuer,
-        "sanction.issued",
-        "account",
-        &body.account,
-        &json!({ "sanction_id": id, "kind": body.kind, "days": body.duration_days }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &issuer,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            // A sanction without a reason is a sanction nobody can contest.
+            reason: Some(&body.reason_ref),
+            action: "sanction.issued",
+            subject_type: "account",
+            subject_id: &body.account,
+            document: &json!({ "sanction_id": id, "kind": body.kind, "days": body.duration_days })
+                .to_string(),
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -258,17 +338,35 @@ async fn lift_sanction(
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
     let lifter = user.account_id.to_string();
+    // Lifting a ban is the same authority as issuing one.
+    let (level, required) = crate::auth::privilege_check(
+        &state,
+        &lifter,
+        darkhold_domain::trust::Privilege::ScopedBans,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level < required {
+        return Err(ApiError(AppError::TrustLevelInsufficient {
+            level,
+            required,
+        }));
+    }
     darkhold_db::governance::lift_sanction(state.db(), &sanction_id, &lifter)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &lifter,
-        "sanction.lifted",
-        "sanction",
-        &sanction_id,
-        "{}",
+        &darkhold_db::governance::AuditEntry {
+            actor: &lifter,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: None,
+            action: "sanction.lifted",
+            subject_type: "sanction",
+            subject_id: &sanction_id,
+            document: "{}",
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -314,11 +412,15 @@ async fn open_appeal(
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &appellant,
-        "appeal.opened",
-        "sanction",
-        &body.sanction_id,
-        &json!({ "appeal_id": id }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &appellant,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: Some(&body.statement),
+            action: "appeal.opened",
+            subject_type: "sanction",
+            subject_id: &body.sanction_id,
+            document: &json!({ "appeal_id": id }).to_string(),
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -348,11 +450,15 @@ async fn decide_appeal(
 
     darkhold_db::governance::audit_append(
         state.db(),
-        &decider,
-        "appeal.decided",
-        "appeal",
-        &appeal_id,
-        &json!({ "decision": body.decision }).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &decider,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: Some(&body.decision),
+            action: "appeal.decided",
+            subject_type: "appeal",
+            subject_id: &appeal_id,
+            document: &json!({ "decision": body.decision }).to_string(),
+        },
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -374,6 +480,117 @@ async fn list_my_appeals(
 // ---------------------------------------------------------------------------
 // Trust (spec §19.1)
 // ---------------------------------------------------------------------------
+
+/// The modlog: every moderator, curator and operator action, newest first
+/// (spec §14.6).
+///
+/// **Anonymous access is 401, not 403.** "403 answers 'yes, and you may not'"
+/// — but the modlog is not a door that exists only for the permitted. It is a
+/// public record that any reader of the instance may read, and being
+/// anonymous is a fact about the *reader* rather than about the record. A 403
+/// would tell an anonymous caller that the modlog exists and that they may
+/// not see it, which is an answer to a question the specification says they
+/// may ask.
+///
+/// **The acting account is never published.** The actor is the acting
+/// pseudonym, and a subject that is an account is published as that account's
+/// public face. The account id stays where it belongs: in the instance's own
+/// audit.
+async fn modlog(
+    State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
+    Query(q): Query<ModlogQuery>,
+) -> ApiResult<Json<Value>> {
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let after = q.cursor.as_deref().map(crate::cursor::decode).transpose()?;
+    let entries = darkhold_db::governance::list_modlog(
+        state.db(),
+        limit,
+        after.as_ref().map(|(at, id)| (at.as_str(), id.as_str())),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    let next_cursor = if i64::try_from(entries.len()).unwrap_or(i64::MAX) >= limit {
+        entries
+            .last()
+            .map(|entry| crate::cursor::encode(&entry.created_at, &entry.id))
+    } else {
+        None
+    };
+
+    Ok(Json(json!({
+        "items": entries
+            .into_iter()
+            .map(|entry| json!({
+                "id": entry.id,
+                "actor": {
+                    "pseud_id": entry.actor_pseud,
+                    "handle": entry.actor_handle,
+                    // A panel decision is the instance acting, not a person.
+                    "is_panel": entry.actor_is_panel,
+                },
+                "action": entry.action,
+                "target": {
+                    "type": entry.subject_type,
+                    "id": entry.subject_id,
+                    // True when the target was an account and was published as
+                    // a pseudonym instead.
+                    "is_pseudonym": entry.subject_is_pseudonym,
+                },
+                "reason": entry.reason,
+                "created_at": entry.created_at,
+            }))
+            .collect::<Vec<_>>(),
+        "next_cursor": next_cursor,
+    })))
+}
+
+/// The query the modlog takes.
+#[derive(Debug, Deserialize)]
+pub struct ModlogQuery {
+    /// How many entries to return.
+    pub limit: Option<i64>,
+    /// Which page: the cursor the previous page handed back.
+    pub cursor: Option<String>,
+}
+
+/// An account's trust history: the events, not just the level (spec §6.7).
+///
+/// **The level is the headline and the history is the answer.** A reader who
+/// wants to know why their level is what it is needs the events, and an
+/// operator who wants to know why somebody's level fell needs the same events.
+async fn account_trust_history(
+    State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
+    Path(id): Path<String>,
+    Query(q): Query<ModlogQuery>,
+) -> ApiResult<Json<Value>> {
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let events = darkhold_db::trust_events::list_for_account(state.db(), &id, limit)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let level = darkhold_db::governance::trust_for(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "account_id": id,
+        "level": level,
+        "level_name": state.config().trust.ladder().name_of(level),
+        "events": events
+            .into_iter()
+            .map(|event| json!({
+                "id": event.id,
+                "from_level": event.from_level,
+                "to_level": event.to_level,
+                "cause": event.cause.as_str(),
+                "evidence_ref": event.evidence_ref,
+                "created_at": event.created_at,
+            }))
+            .collect::<Vec<_>>(),
+    })))
+}
 
 async fn my_trust(
     State(state): State<AppState>,

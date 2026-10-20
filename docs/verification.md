@@ -1,3 +1,120 @@
+## 2026-10-20 — M3: the trust ladder, and the four gates that did not exist
+
+**Milestone:** M3 · **Requirements:** `DM3-01` … `DM3-06`
+
+The governance foundation: the trust ladder, the earned side, the trust event log, the
+elastic allocation, the modlog, and the one automatic demotion.
+
+### Four gates that did not exist
+
+**Assigning a review task, deciding one, lifting a sanction, and deciding an appeal were
+reachable by any signed-in reader.** They are now the specification's privileges —
+`ModerationQueue`, `ResolveReports`, `ScopedBans`, `JuryService` — and a route asks for
+the *privilege* rather than comparing against a number:
+
+```rust
+let (level, required) = crate::auth::privilege_check(
+    &state, &reviewer, darkhold_domain::trust::Privilege::ModerationQueue,
+).await?;
+if level < required {
+    return Err(ApiError(AppError::TrustLevelInsufficient { level, required }));
+}
+```
+
+**Eleven hard-coded level comparisons became ladder questions**, and the trust refusal is
+now `TRUST_LEVEL_INSUFFICIENT` with **both** levels named — a refusal that names neither
+the level found nor the bar required is not actionable, and §0.3 makes the thresholds
+visible by design. It was a 422 with a field error, which told a reader to go and correct
+a field that was not wrong.
+
+### The ladder renumbers the bottom
+
+Level 0 is now the **anonymous** reader and level 1 is **"an account, or a guest"** — so a
+brand-new account is at level 1, and its level is *computed* rather than inferred from the
+absence of a row. The levels above it are unchanged.
+
+> The ladder's **neutral** reader is still level 2 ("member"), so the scales that hang off
+> the ladder did not move — the directory's vote weight at level 2 is still 1.0. Only the
+> bottom changed, and three tests read the old numbering.
+
+### The axes each name their review
+
+| axis | what it counts | why it is reviewed conduct |
+|---|---|---|
+| tenure days | days since the account was created | time, which nobody can rush |
+| accepted contributions | proposals **passed** or **approved** | somebody else accepted them |
+| vote score | the **public** ratings on the account's published work | readers rated it |
+| report accuracy | reports **upheld** minus reports **dismissed** | a reviewer decided |
+
+**The activity volume is measured and then thrown away.** The `TrustEvidence` type has the
+field so the counter-example can be written down — ten thousand posts is a *lower* level
+than twenty accepted contributions — and the score function does not read it. The stored
+basis does not carry it either: a basis that carried it would be a basis for a number
+nobody should see.
+
+### The trust event log is append-only, and enforced
+
+Migration 0117 puts **triggers** on both engines that refuse an `UPDATE` and a `DELETE`:
+
+> A trust history that can be rewritten is not a history — and a property which is only
+> stated in a comment is a property which will be broken by the next person who does not
+> read the comment.
+
+The table has **no foreign key** to `accounts` on purpose: the history has to outlive the
+row it is about, exactly as the audit log does, because an erased reader's trust history is
+a record of what the instance did and not of the person who is gone.
+
+### The elastic allocation is stored, and that is what makes "no ratchet" true
+
+The requirement is a **pure function of the pool** and has no memory of what it decided last
+time. So a site that grows a level-4 account stops handing the queue to a level-2 on the
+next evaluation, and the level-2 loses the privilege **without anybody deciding to take
+it**. Storing it is also the cheaper answer: the pool is a count over every account, and a
+trust gate is asked on every request a reader makes that they are not allowed to make.
+
+A site with three brand-new accounts has nobody at the floor either, so the privilege is
+held by **nobody** — a better outcome than a privilege held by whoever registered first.
+
+### The modlog is public to signed-in readers, and never publishes an account
+
+**Anonymous access is 401, not 403.** The modlog is a public record that any reader may
+read, and being anonymous is a fact about the *reader*, not about the record.
+
+The acting **account** is never published — the actor is the acting **pseudonym**, and a
+target that is an account is published as that account's public face. The audit log grew
+two columns (`actor_pseud` and `reason`), and the writer is now an `AuditEntry` struct
+rather than six positional arguments: a call site that reads
+`audit_append(db, &actor, &action, ...)` cannot be read without counting the arguments,
+and the two the modlog needs most are exactly the ones a positional call site loses.
+
+And the **cursor codec went from three copies to one** — a cursor is a promise, and the
+promise has to be the same promise everywhere.
+
+### And the one automatic demotion
+
+**Three confirmed spam reports in ninety days drops one level, never below level 2**, and
+the floor is the specification's and is **not configurable** — a demotion that could take an
+account to level 0 would make the account a guest again, and a guest's contents are
+foldable away.
+
+*Confirmed* means a reviewer **upheld** the report and the report said **spam**: an open
+report is an allegation, and a demotion is not founded on an allegation. The recovery is
+`0.7^loss_count`, so the first loss recovers fastest.
+
+### The gates, on the committed tree
+
+```
+==> fmt        ok: fmt
+==> lint       ok: lint
+==> build      ok: build
+==> test       ok: test
+==> doc        ok: doc
+==> frontend   ok: frontend
+==> dialects   ok: dialects
+==> repo       ok: repo
+==> pg         ok: pg
+```
+
 ## 2026-10-20 — M2: identity, and the two token holes it found
 
 **Milestone:** M2 · **Requirements:** `DM2-01` … `DM2-08`

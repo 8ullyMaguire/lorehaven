@@ -342,7 +342,14 @@ async fn my_trust_returns_a_trust_level() {
     let (status, body) = user.get("/api/v1/me/trust").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let trust = body["level"].as_i64().unwrap_or(0);
-    assert_eq!(trust, 0, "new account should be TL_NEW");
+    // **Level 1, not level 0.** The Darkhold ladder (spec §14.4) has level 0
+    // as the *anonymous* reader and level 1 as "an account, or a guest" — so a
+    // registered account is at level 1 from the moment it exists, and its level
+    // is computed rather than inferred from the absence of a row.
+    assert_eq!(
+        trust, 1,
+        "a new account is at level 1 -- 'an account, or a guest' (spec §14.4)"
+    );
 
     harness.cleanup().await;
 }
@@ -444,11 +451,15 @@ async fn my_audit_log_filters_by_account() {
     // Seed a foreign audit entry for a different account.
     darkhold_db::governance::audit_append(
         harness.tdb.db(),
-        "foreign-account-id",
-        "foreign.action",
-        "work",
-        "foreign-work-id",
-        &serde_json::json!({"detail": "FOREIGN MODERATION DETAIL"}).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: "foreign-account-id",
+            actor_pseud: None,
+            reason: None,
+            action: "foreign.action",
+            subject_type: "work",
+            subject_id: "foreign-work-id",
+            document: &serde_json::json!({"detail": "FOREIGN MODERATION DETAIL"}).to_string(),
+        },
     )
     .await
     .expect("seed foreign audit entry");
@@ -456,11 +467,15 @@ async fn my_audit_log_filters_by_account() {
     // Seed an own audit entry so the caller has something to see.
     darkhold_db::governance::audit_append(
         harness.tdb.db(),
-        &account,
-        "own.action",
-        "work",
-        "own-work-id",
-        &serde_json::json!({"detail": "OWN DETAIL"}).to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &account,
+            actor_pseud: None,
+            reason: None,
+            action: "own.action",
+            subject_type: "work",
+            subject_id: "own-work-id",
+            document: &serde_json::json!({"detail": "OWN DETAIL"}).to_string(),
+        },
     )
     .await
     .expect("seed own audit entry");

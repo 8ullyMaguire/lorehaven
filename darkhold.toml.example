@@ -506,6 +506,80 @@ tombstone = "anonymize"
 
 # Trust — the ladder, and the elasticity beneath it (spec §14.4).
 [trust]
+# The ladder: the seven levels, their names, and what each unlocks
+# (spec §14.4). **Configuration**, so an instance that wants a different ladder
+# writes one — and the code holds no hard-coded level numbers: a route asks for
+# the *privilege* it needs and the ladder says which level holds it.
+#
+# The unlocks are **cumulative**: a level holds everything the levels below it
+# hold, so level 1 does not repeat level 0's reading privileges.
+#
+# The `min_score` of a level is the weighted score it needs, out of the four
+# axes below. **A level with no `min_score` is designated**: it is granted by
+# an operator and never computed from evidence.
+#
+# The defaults are the specification's table. The scores are a defensible
+# reading of its prose ("tenure + accepted contributions + report accuracy"),
+# and they are the operator's to change.
+#
+# [[trust.levels]]
+# level = 0
+# name = "anonymous"
+# min_score = 0.0
+# unlocks = ["read_public", "search", "public_catalogue", "house_stream"]
+#
+# [[trust.levels]]
+# level = 1
+# name = "new"
+# min_score = 0.0
+# unlocks = ["post", "comment", "vote", "report", "personal_stream"]
+#
+# [[trust.levels]]
+# level = 2
+# name = "member"
+# min_score = 40.0
+# unlocks = ["publish_shared_galleries", "merge_proposals", "tag_proposals", "create_mood"]
+#
+# [[trust.levels]]
+# level = 3
+# name = "trusted"
+# min_score = 120.0
+# unlocks = ["propose_merges", "vote_on_content", "set_topic_tags", "create_channel"]
+#
+# [[trust.levels]]
+# level = 4
+# name = "moderator"
+# min_score = 240.0
+# unlocks = ["moderation_queue", "fast_hide", "lock_pin", "full_engine", "category_governance", "entry_moderation"]
+#
+# [[trust.levels]]
+# level = 5
+# name = "senior reviewer"
+# unlocks = ["resolve_reports", "scoped_bans", "jury_service"]
+#
+# [[trust.levels]]
+# level = 6
+# name = "trustee"
+# unlocks = []
+#
+# The four axes trust is earned along, and their weights (spec §14.4).
+# **Trust is earned through reviewed conduct** — not post count, not word
+# count, not kudos, not credits, not any activity-volume metric — and these
+# are the four the specification names and no more.
+#
+# [trust.axes]
+# tenure_days = 1.0
+# accepted_contributions = 4.0
+# vote_score = 1.0
+# report_accuracy = 2.0
+#
+# The operator's per-privilege requirement. **A tightening, never a
+# loosening**: an override may raise a privilege's level above the ladder's
+# and may not lower it, and one that tries is refused at startup.
+#
+# [trust.require]
+# moderation_queue = 5
+#
 # The fewest holders an elastic level needs before it holds.
 elastic_min_holders = 1
 # The floor an elastic level decays to.

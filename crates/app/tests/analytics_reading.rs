@@ -786,23 +786,13 @@ async fn the_status_door_requires_a_session() {
 /// the promotion ladder is its own subject and this test is about the gate
 /// accepting a reader who qualifies.
 async fn at_tl1(db: &darkhold_db::Database, account: &str) {
-    let sql = db.sql(
-        "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 1, datetime('now'), 'test')",
-        "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES ($1::uuid, 1, now(), 'test')",
-    );
-    let result = match db.backend() {
-        darkhold_db::Backend::Sqlite => sqlx::query(sql.as_ref())
-            .bind(account)
-            .execute(db.sqlite_pool().expect("sqlite handle"))
-            .await
-            .map(|_| ()),
-        darkhold_db::Backend::Postgres => sqlx::query(sql.as_ref())
-            .bind(account)
-            .execute(db.postgres_pool().expect("postgres handle"))
-            .await
-            .map(|_| ()),
-    };
-    result.expect("raise the reader to TL1");
+    // **The store's writer**, not a raw INSERT: registration now computes the
+    // account's level, so the row exists and a bare INSERT would collide with
+    // it. `set_trust` is the one writer, and it keeps the cache the tier gate
+    // reads in step with the level.
+    darkhold_db::governance::set_trust(db, account, 1, "test")
+        .await
+        .expect("raise the reader to TL1");
 }
 
 /// A reader at TL1 with a session, on a fresh scratch database.
@@ -961,9 +951,16 @@ async fn a_reader_with_no_reads_is_given_weeks_rather_than_a_gap() {
 #[tokio::test]
 async fn a_below_trust_reader_is_refused_rather_than_shown_a_trend() {
     let mut subject = reader("trend-below-floor").await;
-    // Not raised to TL1. The gate is the subject of this test, and a suite that
-    // only ever exercises the permitted case cannot tell a working gate from a
-    // missing one.
+    // **Explicitly below the floor.** Under the Darkhold ladder (spec §14.4)
+    // level 0 is the *anonymous* reader and level 1 is "an account, or a
+    // guest" — so a registered account is at level 1 by default and the floor
+    // of 1 admits it. A reader *below* the floor is one whose level was
+    // lowered, and that is what this test needs: the gate is the subject of
+    // this test, and a suite that only ever exercises the permitted case
+    // cannot tell a working gate from a missing one.
+    darkhold_db::governance::set_trust(subject.db(), &subject.account, 0, "test")
+        .await
+        .expect("lower the reader below the floor");
     let (status, body) = subject
         .client
         .get("/api/v1/me/analytics/own.reading.trend")

@@ -41,6 +41,56 @@ pub const CSRF_COOKIE: &str = "darkhold_csrf";
 /// Header the client must echo the CSRF token in.
 pub const CSRF_HEADER: &str = "x-csrf-token";
 
+/// Whether this account holds this privilege on this instance.
+///
+/// **The one trust gate.** A route asks for the *privilege* it needs and does
+/// not know what number that is — the level is the ladder's business and the
+/// ladder is configuration (spec §14.4). A route that compared against a
+/// constant would be a route whose gate could only be changed by changing the
+/// code.
+///
+/// **The effective requirement, not the nominal one.** The stored requirement
+/// is the one the elastic allocation produced: when nobody holds a privilege,
+/// the requirement falls (spec §14.4), and a route that used the nominal
+/// level would refuse the level-2 account a small site relies on. The stored
+/// requirement is what the instance actually decided, and it is read here.
+///
+/// The stored requirement is used when there is one, and the **configured**
+/// requirement when there is not — an instance that has never evaluated its
+/// requirements falls back to the ladder rather than refusing everything.
+pub async fn holds_privilege(
+    state: &AppState,
+    account: &str,
+    privilege: darkhold_domain::trust::Privilege,
+) -> Result<bool, sqlx::Error> {
+    let (level, required) = privilege_check(state, account, privilege).await?;
+    Ok(level >= required)
+}
+
+/// The account's level and the level this privilege requires.
+///
+/// **Both numbers, because a refusal that names neither the level found nor
+/// the bar required is not actionable** — and spec §0.3 makes the thresholds
+/// visible by design. A reader told "trust level 2; this account is at 1"
+/// knows what to work toward; a reader told "access denied" knows nothing.
+pub async fn privilege_check(
+    state: &AppState,
+    account: &str,
+    privilege: darkhold_domain::trust::Privilege,
+) -> Result<(i64, i64), sqlx::Error> {
+    let level = darkhold_db::governance::trust_for(state.db(), account).await?;
+    let config = state.config();
+    let requirement = darkhold_db::governance::effective_requirement(
+        state.db(),
+        config.trust.ladder(),
+        &config.trust.require,
+        &config.trust.elastic_policy(),
+        privilege,
+    )
+    .await?;
+    Ok((level, requirement.level))
+}
+
 /// The authenticated actor behind a request.
 #[derive(Debug, Clone)]
 pub struct SessionUser {

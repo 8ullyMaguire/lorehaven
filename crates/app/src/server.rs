@@ -74,6 +74,38 @@ impl MigrationPolicy {
 pub const SERVER_NAME: &str = concat!("darkhold/", env!("CARGO_PKG_VERSION"));
 
 /// Bind, serve, and shut down cleanly.
+/// Evaluate every privilege's requirement and store it.
+///
+/// **A failure here is a warning, not a refusal to start.** The gates fall
+/// back to the configured levels when there is no stored requirement, so an
+/// instance whose evaluation failed is *stricter* than it should be and never
+/// looser — and refusing to start would turn a bookkeeping failure into an
+/// outage.
+async fn evaluate_privilege_requirements(config: &Config, db: &Database) -> Result<()> {
+    let decided = darkhold_db::governance::evaluate_requirements(
+        db,
+        config.trust.ladder(),
+        &config.trust.require,
+        &config.trust.elastic_policy(),
+    )
+    .await?;
+    let elastic: Vec<&str> = decided
+        .iter()
+        .filter(|(_, requirement)| {
+            requirement.basis == darkhold_domain::trust::RequirementBasis::Elastic
+        })
+        .map(|(privilege, _)| privilege.as_str())
+        .collect();
+    if !elastic.is_empty() {
+        tracing::info!(
+            privileges = ?elastic,
+            "the elastic allocation lowered a privilege's requirement because \
+             nobody held it (spec §14.4)"
+        );
+    }
+    Ok(())
+}
+
 pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()> {
     safety::validate_for_startup(&config)?;
     ensure_dir(&config.storage.root)?;
@@ -83,6 +115,20 @@ pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()>
     set_trust_proxy(config.security.trust_proxy);
 
     apply_migration_policy(&config, &db, MigrationPolicy::for_config(&config, args)).await?;
+
+    // **Evaluate the privilege requirements before serving.** Spec §14.4's
+    // elastic allocation depends on the requirement being *stored*, so that it
+    // is re-evaluated when a trust level changes rather than on every request.
+    // The ladder is configuration, so a restart with a different ladder
+    // re-evaluates it — and the evaluation is a pure function of the pool, so
+    // it cannot ratchet (spec §14.4's "no ratchet").
+    if let Err(error) = evaluate_privilege_requirements(&config, &db).await {
+        tracing::error!(
+            %error,
+            "the privilege requirements could not be evaluated; the gates will use \
+             the configured levels until they can be"
+        );
+    }
 
     let state = AppState::new(config.clone(), db);
     let backend = state.db().backend().as_str();

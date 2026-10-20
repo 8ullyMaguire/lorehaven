@@ -192,6 +192,19 @@ async fn register(
     // method string says which it is.
     record_age_assessment(&state, account_id, age_state).await?;
 
+    // **Compute the account's trust level now**, so the level, its basis and
+    // the account's place in the privilege pools exist from the moment the
+    // account does. Spec §14.4's ladder starts at level 1 — "an account, or a
+    // guest" — and a level that only appears when somebody asks for it is a
+    // level the elastic allocation cannot count.
+    darkhold_db::governance::recompute_trust(
+        state.db(),
+        &account_id.to_string(),
+        &state.config().trust.trust_settings(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
     let account = identity::find_account(state.db(), account_id)
         .await?
         .ok_or_else(|| {

@@ -31,8 +31,6 @@
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64;
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use darkhold_db::jobs::{self, Job};
@@ -208,28 +206,12 @@ const PAGE: i64 = 50;
 /// A malformed cursor is refused rather than treated as "start from the
 /// beginning": silently rewinding a reader to page one looks like it worked.
 fn decode_cursor(raw: &str) -> ApiResult<(String, String)> {
-    let decoded = BASE64
-        .decode(raw)
-        .ok()
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .ok_or_else(|| {
-            ApiError(AppError::Validation {
-                message: "the cursor is not one this collection issued".to_owned(),
-                field_errors: Default::default(),
-            })
-        })?;
-    let (created_at, id) = decoded.split_once('|').ok_or_else(|| {
-        ApiError(AppError::Validation {
-            message: "the cursor is not one this collection issued".to_owned(),
-            field_errors: Default::default(),
-        })
-    })?;
-    Ok((created_at.to_owned(), id.to_owned()))
+    crate::cursor::decode(raw)
 }
 
 /// Encode the last row of a page as the cursor for the next one.
 fn encode_cursor(job: &Job) -> String {
-    BASE64.encode(format!("{}|{}", job.created_at, job.id))
+    crate::cursor::encode(&job.created_at, &job.id)
 }
 
 /// Turn one page of rows into the envelope the API contract requires.

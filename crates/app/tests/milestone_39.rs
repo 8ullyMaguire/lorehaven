@@ -632,8 +632,16 @@ async fn voting_up_down_refresh_flip_and_weighted_score() {
     // Another member upvotes.
     let mut voter = harness.client();
     let (_v_account, _v_pseud) = register(&mut voter, "voter@example.com", "voter").await;
-    // A fresh member votes at TL0 (0.5) with no taste profile (floor 0.75):
-    // weight 0.375 — the default trust_and_taste mode.
+    // A fresh member votes at TL1 (0.75) with no taste profile (floor 0.75):
+    // weight 0.5625 — the default trust_and_taste mode.
+    //
+    // **Level 1, not level 0.** The Darkhold ladder (spec §14.4) has level 0 as
+    // the *anonymous* reader and level 1 as "an account, or a guest" — so a
+    // brand-new account votes at level 1's weight. The ladder's *neutral*
+    // reader is still level 2 ("member"), so the scale did not move.
+    //
+    // Hmm — and the level-0 weight is now unreachable for votes, because an
+    // anonymous visitor cannot vote at all.
     let (status, body) = voter
         .post(
             &format!("/api/v1/directory/entries/{entry_id}/vote"),
@@ -641,7 +649,7 @@ async fn voting_up_down_refresh_flip_and_weighted_score() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["score"], json!(0.375), "{body}");
+    assert_eq!(body["score"], json!(0.5625), "{body}");
     assert_eq!(body["my_vote"], json!(1), "{body}");
 
     // Repeating the same vote refreshes it rather than undoing it. This
@@ -659,7 +667,7 @@ async fn voting_up_down_refresh_flip_and_weighted_score() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["score"],
-        json!(0.375),
+        json!(0.5625),
         "a refresh must not change the score: {body}"
     );
     assert_eq!(body["my_vote"], json!(1), "{body}");
@@ -679,7 +687,7 @@ async fn voting_up_down_refresh_flip_and_weighted_score() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["score"], json!(-0.375), "{body}");
+    assert_eq!(body["score"], json!(-0.5625), "{body}");
     assert_eq!(body["my_vote"], json!(-1), "{body}");
 
     // Withdraw with an explicit 0. Voting the same way twice now refreshes,

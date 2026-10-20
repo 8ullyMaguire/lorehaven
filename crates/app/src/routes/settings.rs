@@ -461,11 +461,19 @@ async fn audit_settings_write(
 ) {
     let _ = darkhold_db::governance::audit_append(
         db,
-        &account_id.to_string(),
-        action,
-        "settings",
-        subject_id,
-        &document.to_string(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &account_id.to_string(),
+            // The settings surface is reached by an operator's session, and
+            // the operator's pseudonym is recorded by the caller that knows
+            // it. This helper does not, so it says nothing rather than
+            // guessing.
+            actor_pseud: None,
+            reason: None,
+            action,
+            subject_type: "settings",
+            subject_id,
+            document: &document.to_string(),
+        },
     )
     .await;
 }

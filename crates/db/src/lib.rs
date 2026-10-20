@@ -101,6 +101,7 @@ pub mod tasting;
 pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
+pub mod trust_events;
 pub mod typed_votes;
 pub mod work_backlink;
 pub mod work_characters;

@@ -5,52 +5,34 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 // Trust levels (spec §19.1)
 // ---------------------------------------------------------------------------
+//
+// **The ladder itself lives in [`crate::trust`]**, where the names and the
+// unlock table are configuration (spec §14.4). What is left here is the
+// *vocabulary of the numbers* — the seven levels, named — because a number
+// with no name is a magic constant and a magic constant is how a ladder stops
+// being a ladder.
+//
+// The names are **the default ladder's** names. An instance that renames a
+// level has not renumbered it, and the code below still refers to the level
+// *number* while the route asks the ladder which *privilege* it needs.
 
+/// The lowest level: a brand-new account.
 pub const TL_NEW: i64 = 0;
+/// The level of a reader with some standing.
 pub const TL_ESTABLISHED: i64 = 1;
+/// The level of an established member.
 pub const TL_REGULAR: i64 = 2;
+/// The level of a reviewed contributor.
 pub const TL_REVIEWED: i64 = 3;
+/// The level of a moderator.
 pub const TL_STEWARD: i64 = 4;
+/// The level of a senior reviewer.
 pub const TL_SENIOR: i64 = 5;
+/// The level of a trustee.
 pub const TL_TRUSTEE: i64 = 6;
 
+/// The highest level on the ladder.
 pub const TRUST_MAX: i64 = 6;
-
-/// Trust level progression. Behaviour-record-driven, never purchase-driven.
-/// Criteria are documented per level; this function encodes the floor.
-pub fn trust_from_behaviour(
-    account_age_days: i64,
-    good_standing_days: i64,
-    prior_sanctions: i64,
-    active_sanctions: i64,
-    reviewer_nominations: i64,
-    quorum_approvals: i64,
-) -> i64 {
-    if active_sanctions > 0 {
-        // Active sanctions cap at TL1 regardless of other signals.
-        return TL_ESTABLISHED;
-    }
-    if account_age_days < 7 {
-        return TL_NEW;
-    }
-    if good_standing_days < 30 || prior_sanctions > 0 {
-        return TL_ESTABLISHED;
-    }
-    if good_standing_days < 90 {
-        return TL_REGULAR;
-    }
-    // TL3 and above require reviewer nomination + quorum approval.
-    if reviewer_nominations < 1 || quorum_approvals < 1 {
-        return TL_REGULAR;
-    }
-    if reviewer_nominations >= 1 && quorum_approvals >= 1 && good_standing_days < 365 {
-        return TL_REVIEWED;
-    }
-    if reviewer_nominations >= 2 && quorum_approvals >= 2 {
-        return TL_STEWARD;
-    }
-    TL_REGULAR
-}
 
 /// Whether a trust level is permitted to perform an action that requires a
 /// minimum level. Trust raises ceilings; it does not grant permissions that
@@ -182,44 +164,6 @@ pub enum TaskOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn trust_new_account_floor() {
-        let level = trust_from_behaviour(1, 0, 0, 0, 0, 0);
-        assert_eq!(level, TL_NEW);
-    }
-
-    #[test]
-    fn trust_active_sanctions_cap() {
-        let level = trust_from_behaviour(500, 500, 0, 1, 10, 10);
-        assert_eq!(level, TL_ESTABLISHED);
-    }
-
-    #[test]
-    fn trust_established_standing() {
-        // 30 days in good standing is the floor for TL1; the 30-day check
-        // is `< 30`, so day 30 itself still advances toward TL2.
-        let level = trust_from_behaviour(30, 29, 0, 0, 0, 0);
-        assert_eq!(level, TL_ESTABLISHED);
-    }
-
-    #[test]
-    fn trust_regular_without_nominations() {
-        let level = trust_from_behaviour(180, 180, 0, 0, 0, 0);
-        assert_eq!(level, TL_REGULAR);
-    }
-
-    #[test]
-    fn trust_reviewed_with_nominations() {
-        let level = trust_from_behaviour(200, 200, 0, 0, 1, 1);
-        assert_eq!(level, TL_REVIEWED);
-    }
-
-    #[test]
-    fn trust_steward_with_multiple_nominations() {
-        let level = trust_from_behaviour(500, 500, 0, 0, 2, 2);
-        assert_eq!(level, TL_STEWARD);
-    }
 
     #[test]
     fn meets_trust_floor_works() {

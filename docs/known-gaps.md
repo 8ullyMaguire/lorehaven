@@ -712,7 +712,6 @@ so the count can only go down and every fix is visible.**
 | `payment_events` | written, never read | the row is written on every event and read by nothing |
 | `pool_b_distributions` | written, never read | the row is written on every event and read by nothing |
 | `push_subscriptions` | written, never read | the row is written on every event and read by nothing |
-| `review_tasks` | written, never read | the row is written on every event and read by nothing |
 | `roadmap_suggestions` | written, never read | the row is written on every event and read by nothing |
 | `translation_glossaries` | written, never read | the row is written on every event and read by nothing |
 | `translation_publications` | written, never read | the row is written on every event and read by nothing |

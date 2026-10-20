@@ -815,12 +815,23 @@ impl Default for MergeConfig {
 /// Trust — the ladder, and the elasticity beneath it (spec §14.4).
 #[derive(Debug, Clone)]
 pub struct TrustConfig {
-    /// The ladder's levels and their requirements. **Per site**: the shape arrives
-    /// with the trust ladder's own milestone, and this holds it without pretending
-    /// to know it.
-    pub levels: serde_json::Value,
-    /// The axes trust is earned along. **Per site**, for the same reason.
-    pub axes: serde_json::Value,
+    /// The ladder: the levels, their names, and what each unlocks.
+    ///
+    /// **The specification's table is the default** (spec §14.4), and an
+    /// instance that wants a different ladder writes one. The code holds no
+    /// hard-coded level numbers: a route asks the ladder which *privilege* it
+    /// needs, and the ladder says which level holds it.
+    pub levels: darkhold_domain::trust::TrustLadder,
+    /// The axes trust is earned along, and their weights (spec §14.4).
+    pub axes: darkhold_domain::trust::TrustAxes,
+    /// The operator's per-privilege requirement (spec §14.4's
+    /// `trust.require.<privilege>`).
+    ///
+    /// **A tightening, never a loosening.** The ladder is what the instance's
+    /// readers are told they are working towards, so an override may raise a
+    /// privilege's level and may not lower it — and an override that tries is
+    /// refused at startup rather than quietly ignored.
+    pub require: darkhold_domain::trust::TrustRequirements,
     /// The fewest holders an elastic level needs before it holds.
     pub elastic_min_holders: i64,
     /// The floor an elastic level decays to.
@@ -836,13 +847,64 @@ pub struct TrustConfig {
 impl Default for TrustConfig {
     fn default() -> Self {
         Self {
-            levels: serde_json::Value::Null,
-            axes: serde_json::Value::Null,
+            levels: darkhold_domain::trust::TrustLadder::default_ladder(),
+            axes: darkhold_domain::trust::TrustAxes::default(),
+            require: darkhold_domain::trust::TrustRequirements::default(),
             elastic_min_holders: 1,
             floor_level: 2,
             elastic_decay_days: 30,
             guest_level: 1,
             guest_earns: false,
+        }
+    }
+}
+
+impl TrustConfig {
+    /// The instance's ladder.
+    #[must_use]
+    pub fn ladder(&self) -> &darkhold_domain::trust::TrustLadder {
+        &self.levels
+    }
+
+    /// The elastic policy, from the two numbers that make it.
+    #[must_use]
+    pub fn elastic_policy(&self) -> darkhold_domain::trust::ElasticPolicy {
+        darkhold_domain::trust::ElasticPolicy {
+            min_holders: self.elastic_min_holders,
+            floor_level: self.floor_level,
+        }
+    }
+
+    /// Whether a level holds a privilege, given the ladder and the operator's
+    /// requirement.
+    ///
+    /// **The one call every trust gate makes.** A route that wants the
+    /// moderation queue asks for [`darkhold_domain::trust::Privilege::ModerationQueue`]
+    /// and does not know what number that is.
+    #[must_use]
+    pub fn holds(&self, level: i64, privilege: darkhold_domain::trust::Privilege) -> bool {
+        self.require.holds(&self.levels, level, privilege)
+    }
+
+    /// The level a privilege requires, given the ladder and the operator's
+    /// requirement.
+    #[must_use]
+    pub fn required_level(&self, privilege: darkhold_domain::trust::Privilege) -> i64 {
+        self.require.level_for(&self.levels, privilege)
+    }
+
+    /// The trust computation's settings, in one bundle.
+    ///
+    /// **The application maps its configuration onto the store's copy**, so
+    /// the store never reads a file and the two cannot drift.
+    #[must_use]
+    pub fn trust_settings(&self) -> darkhold_db::governance::TrustSettings<'_> {
+        darkhold_db::governance::TrustSettings {
+            ladder: &self.levels,
+            axes: &self.axes,
+            requirements: &self.require,
+            policy: self.elastic_policy(),
+            guest_level: self.guest_level,
         }
     }
 }
@@ -2949,8 +3011,18 @@ impl Config {
             // values over the documented default, so a file naming one key keeps
             // every other key's documented value. The defaults live in the one
             // `impl Default` per section, so a default that changes changes once.
+            //
+            // The tier threshold is read here, before the tier section takes
+            // its own copy, because the trust ladder's **full engine follows
+            // it** (spec §14.4: "the full engine (T2) if `full_min_trust` is
+            // 4"). Moving the privilege rather than *checking* it is what
+            // makes the two one fact: there is no second configuration key to
+            // keep in step, and no way for them to disagree.
             tiers: {
-                let t = file.tiers.unwrap_or_default();
+                // Cloned rather than moved, because the trust section below
+                // reads the same file section: the ladder's **full engine
+                // follows the tier threshold** (spec §14.4).
+                let t = file.tiers.clone().unwrap_or_default();
                 let base = TiersConfig::default();
                 TiersConfig {
                     house: t.house.unwrap_or(base.house),
@@ -3037,9 +3109,28 @@ impl Config {
             trust: {
                 let t = file.trust.unwrap_or_default();
                 let base = TrustConfig::default();
+                // The tier threshold, read from the file section the tier
+                // block above has already taken a copy of.
+                let full_min_trust = file
+                    .tiers
+                    .as_ref()
+                    .and_then(|tiers| tiers.full_min_trust)
+                    .unwrap_or(TiersConfig::default().full_min_trust);
+                // **The full engine follows the tier configuration.** Spec
+                // §14.4's row for level 4 says "the full engine (T2) **if
+                // `full_min_trust` is 4**" — so the tier threshold decides
+                // where the full engine sits, and the ladder's row follows it.
+                // Moving the privilege rather than *checking* it is what makes
+                // the two one fact: there is no second configuration key to
+                // keep in step, and no way for them to disagree.
+                let levels = t.levels.unwrap_or(base.levels).with_privilege_at(
+                    darkhold_domain::trust::Privilege::FullEngine,
+                    full_min_trust,
+                );
                 TrustConfig {
-                    levels: t.levels.unwrap_or(base.levels),
+                    levels,
                     axes: t.axes.unwrap_or(base.axes),
+                    require: t.require.unwrap_or(base.require),
                     elastic_min_holders: t.elastic_min_holders.unwrap_or(base.elastic_min_holders),
                     floor_level: t.floor_level.unwrap_or(base.floor_level),
                     elastic_decay_days: t.elastic_decay_days.unwrap_or(base.elastic_decay_days),
@@ -3342,6 +3433,75 @@ impl Config {
             // configuration that says otherwise is refused rather than ignored.
             anyhow::bail!(
                 "trust.guest_earns must be false: a guest can never extend trust (spec §14.1)"
+            );
+        }
+
+        // --- the ladder -------------------------------------------------------
+        //
+        // The ladder is **configuration** (spec §14.4), so these checks are about
+        // the ladder being *usable* rather than about it being the default: the
+        // levels have to be the seven the specification names, in order, with a
+        // name each, because a level with no name is a number nobody can read
+        // and a ladder with a gap in it is a ladder with a hole in it.
+        let ladder = &tr.levels;
+        let sorted = ladder.sorted();
+        if sorted.is_empty() {
+            anyhow::bail!("trust.levels must name at least one level");
+        }
+        for (index, spec) in sorted.iter().enumerate() {
+            if spec.name.trim().is_empty() {
+                anyhow::bail!("trust.levels: the level {} has no name", spec.level);
+            }
+            let expected = index as i64;
+            if spec.level != expected {
+                anyhow::bail!(
+                    "trust.levels: the levels must run 0..{} with no gap and no \
+                     duplicate; found {} where {} was expected",
+                    sorted.len().saturating_sub(1),
+                    spec.level,
+                    expected
+                );
+            }
+            if spec.level > MAX_TRUST {
+                anyhow::bail!(
+                    "trust.levels: the level {} is above the maximum of {MAX_TRUST}",
+                    spec.level
+                );
+            }
+        }
+        if sorted.len() as i64 - 1 != MAX_TRUST {
+            anyhow::bail!(
+                "trust.levels must carry the {} levels 0..{MAX_TRUST} (spec §14.4); found {}",
+                MAX_TRUST + 1,
+                sorted.len()
+            );
+        }
+
+        // --- the operator's requirement ----------------------------------------
+        //
+        // Two refusals, and both are refusals of a **mistake the operator
+        // believes they did not make**.
+        for (name, level) in &tr.require.require {
+            let known = darkhold_domain::trust::Privilege::all();
+            if !known.iter().any(|p| p.as_str() == name) {
+                anyhow::bail!(
+                    "trust.require.{name} names a privilege this build does not know; \
+                     a requirement nobody holds is a requirement that unlocks nothing"
+                );
+            }
+            if *level < 0 || *level > MAX_TRUST {
+                anyhow::bail!(
+                    "trust.require.{name} must be between 0 and {MAX_TRUST}, got {level}"
+                );
+            }
+        }
+        for (privilege, asked, ladder_level) in tr.require.loosening(ladder) {
+            anyhow::bail!(
+                "trust.require.{} asks for level {asked}, which is below the ladder's \
+                 {ladder_level}: a requirement may be tightened but not loosened, because \
+                 the ladder is what this instance's readers are told they are working \
+                 towards",
+                privilege.as_str()
             );
         }
 
@@ -3675,7 +3835,7 @@ struct FileConfig {
 }
 
 /// The `[tiers]` file section (spec §12.6).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TiersSection {
     house: Option<String>,
@@ -3771,8 +3931,9 @@ struct MergeSection {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TrustSection {
-    levels: Option<serde_json::Value>,
-    axes: Option<serde_json::Value>,
+    levels: Option<darkhold_domain::trust::TrustLadder>,
+    axes: Option<darkhold_domain::trust::TrustAxes>,
+    require: Option<darkhold_domain::trust::TrustRequirements>,
     elastic_min_holders: Option<i64>,
     floor_level: Option<i64>,
     elastic_decay_days: Option<i64>,

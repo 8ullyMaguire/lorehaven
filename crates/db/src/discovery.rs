@@ -913,11 +913,18 @@ pub async fn set_operator_affinity(
     });
     crate::governance::audit_append(
         db,
-        operator,
-        "operator.set_affinity",
-        "work",
-        work_id,
-        &audit_doc.to_string(),
+        &crate::governance::AuditEntry {
+            actor: operator,
+            // This is an **operator** action on a work, made by the server on
+            // the operator's behalf, and there is no pseudonym behind it here.
+            // An honest absence beats a made-up one.
+            actor_pseud: None,
+            reason: None,
+            action: "operator.set_affinity",
+            subject_type: "work",
+            subject_id: work_id,
+            document: &audit_doc.to_string(),
+        },
     )
     .await?;
     Ok(())

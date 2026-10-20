@@ -1270,23 +1270,29 @@ async fn opening_a_proposal_grants_no_trust_credit_badge_or_placement() {
     assert_eq!(status, StatusCode::CREATED, "register newcomer: {status}");
     let account = account_of(&harness.db, "newcomer").await.to_string();
 
-    // A fresh account sits at 0 — which is *below* the default
-    // `proposal_min_trust` of 1, so this reader is refused at the gate. That is
-    // correct, and it is why the test raises them: "governance activity grants
-    // no credit" needs a reader who can actually act, since a reader refused at
-    // the gate cannot demonstrate that the gate grants nothing.
+    // A fresh account sits at 1 — which is *at* the default
+    // `proposal_min_trust` of 1, so this reader is allowed through the gate.
+    // That is correct under the Darkhold ladder (spec §14.4), where level 1 is
+    // "an account, or a guest" and level 0 is the *anonymous* reader.
+    //
+    // The test still raises them, because "governance activity grants no
+    // credit" is about what happens *after* the gate: a reader who is refused
+    // at the gate cannot demonstrate that the gate grants nothing.
     let fresh = darkhold_db::governance::trust_for(&harness.db, &account)
         .await
         .expect("trust before");
-    assert_eq!(fresh, 0, "a new reader starts at 0, below the bar of 1");
+    assert_eq!(
+        fresh, 1,
+        "a new account is at level 1 -- 'an account, or a guest' (spec §14.4)"
+    );
 
-    darkhold_db::governance::set_trust(&harness.db, &account, 1, "test")
+    darkhold_db::governance::set_trust(&harness.db, &account, 2, "test")
         .await
-        .expect("raise to the bar");
+        .expect("raise above the bar");
     let before = darkhold_db::governance::trust_for(&harness.db, &account)
         .await
-        .expect("trust at the bar");
-    assert_eq!(before, 1, "the reader is now exactly at the bar");
+        .expect("trust above the bar");
+    assert_eq!(before, 2, "the reader is now above the bar");
 
     // Open a proposal, and vote on somebody else's.
     let (status, body) = client

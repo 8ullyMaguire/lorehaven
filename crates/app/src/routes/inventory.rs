@@ -2102,6 +2102,23 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/reports",
         audience: Audience::Public,
     },
+    // The modlog: readable by any signed-in reader (spec §14.6). **Not
+    // `Public`** — an anonymous reader gets 401, not the record.
+    RouteEntry {
+        file: "governance.rs",
+        handler: "modlog",
+        method: "GET",
+        path: "/modlog",
+        audience: Audience::Authenticated,
+    },
+    // An account's trust history: the events, not just the level.
+    RouteEntry {
+        file: "governance.rs",
+        handler: "account_trust_history",
+        method: "GET",
+        path: "/accounts/{id}/trust",
+        audience: Audience::Authenticated,
+    },
     RouteEntry {
         file: "governance.rs",
         handler: "list_reports",
