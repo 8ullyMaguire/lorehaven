@@ -156,9 +156,24 @@ async fn resolve_token_sqlite(
     pool: &sqlx::SqlitePool,
     token_hash: &str,
 ) -> Result<Option<TokenIdentity>, sqlx::Error> {
+    // **The account's state is part of the token's validity.**
+    //
+    // A token is a credential *an account holds*, so it stops working when the
+    // account stops: suspended, closed, or **folded** (spec §14.2 — the fold
+    // leaves a tombstone, and a tombstone must not act).
+    //
+    // The join is what makes that true. Without it the resolver asked only
+    // about the token, so a **suspended account's token still opened every
+    // door** — and a folded guest's token would have done the same, which is
+    // the one case the fold exists to prevent.
+    //
+    // The filter is `status = 'active'` rather than `status <> 'folded'`, so a
+    // status nobody has thought about is *not* treated as active. **The default
+    // has to be the closed one.**
     let sql = format!(
-        "SELECT id, account_id, scopes, acting_pseud_id FROM api_tokens
-         WHERE token_hash = ? AND revoked_at IS NULL{EXPIRY_ARM}?)"
+        "SELECT t.id, t.account_id, t.scopes, t.acting_pseud_id FROM api_tokens t
+         JOIN accounts a ON a.id = t.account_id
+         WHERE t.token_hash = ? AND t.revoked_at IS NULL AND a.status = 'active'{EXPIRY_ARM}?)"
     );
     let row = sqlx::query(&sql)
         .bind(token_hash)
@@ -184,9 +199,12 @@ async fn resolve_token_postgres(
     pool: &sqlx::postgres::PgPool,
     token_hash: &str,
 ) -> Result<Option<TokenIdentity>, sqlx::Error> {
+    // The same join, and the same reason: a token stops working when the
+    // account that holds it stops. See the SQLite arm above.
     let sql = format!(
-        "SELECT id::text, account_id::text, scopes, acting_pseud_id::text FROM api_tokens
-         WHERE token_hash = $1 AND revoked_at IS NULL{EXPIRY_ARM}$2)"
+        "SELECT t.id::text, t.account_id::text, t.scopes, t.acting_pseud_id::text
+         FROM api_tokens t JOIN accounts a ON a.id = t.account_id
+         WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND a.status = 'active'{EXPIRY_ARM}$2)"
     );
     let row = sqlx::query(&sql)
         .bind(token_hash)

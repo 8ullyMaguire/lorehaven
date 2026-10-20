@@ -70,7 +70,51 @@ impl SessionUser {
             trusted_reviewer: false,
         }
     }
+
+    /// Build the **identity** actor: who this request is, in one type.
+    ///
+    /// This is the Darkhold actor model (spec §6.1, §12.6), and it is a
+    /// different thing from [`SessionUser::actor`], which is the *content
+    /// check's* actor. The identity actor says **who is asking** — anonymous, a
+    /// guest, or a reader acting as a pseudonym — and carries the tier the
+    /// request is served on.
+    ///
+    /// **The tier is computed here, once, from the instance's own
+    /// configuration.** The account's trust level and resonance are read from
+    /// the account row, and the supporter state from the entitlement; the
+    /// boundaries come from `[tiers]`. The result is put on the actor, and
+    /// **the reader of the field never computes one** — a second computation
+    /// would be a second opinion, and a tier and an explanation that disagree
+    /// is the failure spec §12.6 rule 6 exists to prevent.
+    #[must_use]
+    pub fn identity_actor(
+        &self,
+        account: &AccountFacts,
+        tier_config: &darkhold_domain::actor::TierConfig,
+    ) -> darkhold_domain::actor::Actor {
+        let kind = if account.is_guest {
+            darkhold_domain::actor::ActorKind::Guest
+        } else {
+            darkhold_domain::actor::ActorKind::Pseud
+        };
+        let mut actor = darkhold_domain::actor::Actor {
+            kind,
+            account_id: Some(self.account_id),
+            pseud_id: self.pseud_id,
+            age_state: self.age_state,
+            trust_level: account.trust_level,
+            tier: darkhold_domain::actor::Tier::House,
+        };
+        actor.tier = darkhold_domain::actor::tier_for(&actor, tier_config);
+        actor
+    }
 }
+
+/// The account facts the identity actor needs.
+///
+/// They live in the store, because they are the instance's copy of them and not
+/// a request's claim: [`darkhold_db::identity::AccountFacts`].
+pub use darkhold_db::identity::AccountFacts;
 
 /// Resolve a session from the request's cookies, if there is one.
 ///

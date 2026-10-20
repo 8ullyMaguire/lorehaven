@@ -547,6 +547,27 @@ impl Default for DiscoveryConfig {
     }
 }
 
+impl TiersConfig {
+    /// The domain's own copy of the tier boundaries.
+    ///
+    /// **The domain does not read files**, so the application's configuration is
+    /// mapped onto it here — one place, so the boundaries the application
+    /// publishes and the boundaries the domain evaluates cannot drift apart.
+    #[must_use]
+    pub fn to_domain(&self) -> darkhold_domain::actor::TierConfig {
+        darkhold_domain::actor::TierConfig {
+            house_always: self.house == "always",
+            personal_min_trust: self.personal_min_trust,
+            full_supporter: self.full_supporter,
+            full_min_trust: self.full_min_trust,
+            full_min_resonance: self.full_min_resonance,
+            // The reader's own facts, not the instance's; the caller supplies them.
+            resonance: 0.0,
+            supporter: false,
+        }
+    }
+}
+
 /// The compute tiers — who gets which algorithm (spec §12.6).
 ///
 /// **A tier buys compute, and never rank** (D-10, N-1). Every field here decides

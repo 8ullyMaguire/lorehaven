@@ -1,0 +1,92 @@
+-- 0116: the account columns the Darkhold identity model needs (M2-01).
+--
+-- Spec §6.1, §14.1, §14.3, §12.6, §18. The `accounts` table already carries the
+-- estate's identity facts -- an id, a status, an email, an age state, a version --
+-- and Darkhold's identity model adds eight more.
+--
+-- EVERY COLUMN IS ADDED, NOT BACKFILLED FROM A GUESS. An account that existed
+-- before this migration is a real account of a real instance, and every one of
+-- these columns says something about it that the old schema did not record. The
+-- defaults are the conservative ones -- not a guest, no trust, no consent, no
+-- resonance -- because a default that overstates a reader's standing is a
+-- privilege nobody granted.
+--
+-- THE TYPES FOLLOW THE SCHEMA'S OWN RULES, NOT THE COLUMN NAMES.
+--
+--   * `is_guest` and `trust_level` are BIGINT here and INTEGER on SQLite, and
+--     **not** BOOLEAN, for the reason migration 0006 states: "the repository
+--     decodes i64 on both engines and compares to zero, so a native BOOLEAN here
+--     would be the one column with a second decode path." A BOOLEAN on
+--     PostgreSQL costs a `::int::bigint` cast in every query that reads it --
+--     `crates/db/src/library.rs` says so about the flags it already has. **One
+--     decode path is worth more than a type that reads like the word.**
+--
+--   * `resonance` is DOUBLE PRECISION here and REAL on SQLite, because the
+--     repository decodes these as f64 and SQLite's REAL is already 8 bytes --
+--     so REAL (4 bytes) on this side would be the one column the shared decode
+--     cannot read (ADR 0004).
+--
+--   * `folded_from_account_id` is UUID here and TEXT on SQLite, following the
+--     type of the column it references. The same rule, and the same reason: a
+--     foreign key to a column that is TEXT in one dialect and UUID in the other
+--     cannot be declared with one type.
+--
+--   * `consented_at`, `registration_mode_at_signup` and `supporter_until` are
+--     TEXT, like every other timestamp and free-form value in this schema.
+--
+-- WHAT EACH COLUMN IS FOR, AND WHO OWNS IT.
+--
+--   * `is_guest` -- a guest is **a row in `accounts` with an empty credential
+--     and `is_guest = true`** (spec §14.1, D-6). Not a shadow table, not a
+--     cookie-only identity. So the flag belongs here, on the account it
+--     describes.
+--
+--   * `trust_level` -- a **cache** of `trust_levels.level`, which stays the
+--     authority because it carries `computed_at` and `basis`: the level and the
+--     reason it is what it is. This column exists so the tier gate can read a
+--     reader's standing without a second query, and it is written by the same
+--     statement that writes `trust_levels`. **A cache that a second query could
+--     disagree with is not a cache, it is a second source of truth** -- so the
+--     single-writer rule is part of the contract, and a test asserts the two
+--     agree.
+--
+--   * `consented_at` and `consent_version` -- the consent record (spec §14.3).
+--     The cookie carries the acceptance; the account carries the version, so a
+--     bump re-asks everybody rather than everybody who happens to have a cookie
+--     still valid.
+--
+--   * `registration_mode_at_signup` -- whether the instance was open, invite-only
+--     or closed **when this account was made**. The instance's mode is
+--     configuration and can change; what a reader agreed to cannot.
+--
+--   * `folded_from_account_id` -- where a folded guest's data came from
+--     (spec §14.2, the fold). The link is what makes the fold auditable: the
+--     guest row survives, and the account it became points back at it.
+--
+--   * `resonance` -- how strongly this reader's learned taste agrees with the
+--     instance theme, discounted by the strength of their evidence (spec §12.6
+--     rule 4). **It is derived, recomputed, and never trusted from a request**:
+--     a reader with no evidence has resonance 0 regardless of agreement,
+--     because agreement without evidence is a coincidence. It is stored because
+--     computing it needs the reader's taste vector, and the tier gate reads it
+--     on every request.
+--
+--   * `supporter_until` -- the end of the supporter entitlement (spec §18). The
+--     entitlement itself lives in `supporter_subscriptions` and `entitlements`;
+--     this is the cache the tier gate reads, and it is **not** a purchase of
+--     rank: a tier buys compute, and nothing else (D-10, N-1).
+--
+-- NO INDEX IS ADDED, and that is deliberate. Nothing reads these columns in a
+-- WHERE clause yet: `is_guest` and `trust_level` are read by the tier gate for
+-- one account, `resonance` and `supporter_until` likewise. An index on a column
+-- no query filters by is a write amplification with no reader, and the
+-- reachability probe (M1-08) would name it.
+
+ALTER TABLE accounts ADD COLUMN is_guest BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN trust_level BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN consented_at TEXT;
+ALTER TABLE accounts ADD COLUMN consent_version BIGINT;
+ALTER TABLE accounts ADD COLUMN registration_mode_at_signup TEXT NOT NULL DEFAULT 'open';
+ALTER TABLE accounts ADD COLUMN folded_from_account_id UUID;
+ALTER TABLE accounts ADD COLUMN resonance DOUBLE PRECISION NOT NULL DEFAULT 0.0;
+ALTER TABLE accounts ADD COLUMN supporter_until TEXT;

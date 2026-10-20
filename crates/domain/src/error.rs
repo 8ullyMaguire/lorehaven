@@ -251,6 +251,41 @@ pub enum AppError {
     NotImplemented,
 }
 
+/// The 404-not-403 doctrine, in one place (spec §20.1, N-13).
+///
+/// **"403 answers 'yes, and you may not'."** So anything the caller may not
+/// know about is **404**, and there are three kinds of it:
+///
+///   * an **inaccessible private object** — a work that is not published, a
+///     library item belonging to somebody else, a draft;
+///   * a **malformed id** — because a malformed id and a private id must be
+///     indistinguishable from the outside, and a caller that can tell them apart
+///     is an oracle for what exists;
+///   * an **operator surface** — the door exists, but its existence is not
+///     disclosed to somebody who may not use it.
+///
+/// **A capability check is NOT one of them.** "You may not moderate" is a
+/// 403: the door is public knowledge, the permission is not, and hiding the door
+/// would make the instance's own structure undiscoverable to the people who
+/// administer it. The two are different questions — *"may I do this?"* and *"may
+/// I know this exists?"* — and only the second one is answered with 404.
+///
+/// The parameter is the **accessibility**, not the actor, because accessibility
+/// is a property of the resource and the actor's question about it is asked
+/// elsewhere; what this function answers is only ever "and what do I say when
+/// the answer is no".
+#[must_use]
+pub fn not_found_if_inaccessible(
+    resource: &'static str,
+    accessible: bool,
+) -> Result<(), crate::AppError> {
+    if accessible {
+        Ok(())
+    } else {
+        Err(crate::AppError::NotFound { resource })
+    }
+}
+
 impl AppError {
     /// The stable code for this error.
     #[must_use]

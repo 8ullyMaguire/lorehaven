@@ -712,10 +712,29 @@ mod tests {
     /// and a scan that did not bound itself by table would return both sets and
     /// compare them as one.
     fn added_columns_for_table(backend: Backend, table: &str) -> BTreeSet<String> {
+        added_columns_for_table_in(backend, "0093", table)
+    }
+
+    /// The columns a migration adds to a table with `ALTER TABLE ... ADD COLUMN`.
+    ///
+    /// **The generic form**, because the gap is generic: the parity test above
+    /// reads `CREATE TABLE` and `CREATE INDEX` only, so a column brought in by
+    /// an `ALTER TABLE` is invisible to it — one migration can add a column the
+    /// other does not, every existing test passes, and the two engines then
+    /// disagree at runtime. Migration 0093 does it that way, and the test that
+    /// caught it was written for 0093 alone.
+    ///
+    /// So the helper takes the migration's version prefix, and every table that
+    /// gains columns by `ALTER TABLE` can be checked the same way.
+    fn added_columns_for_table_in(
+        backend: Backend,
+        version: &str,
+        table: &str,
+    ) -> BTreeSet<String> {
         let migration = catalogue(backend)
             .iter()
-            .find(|m| m.id().starts_with("0093"))
-            .expect("migration 0093 exists in both dialects");
+            .find(|m| m.id().starts_with(version))
+            .unwrap_or_else(|| panic!("migration {version} exists in both dialects"));
         let mut found = BTreeSet::new();
         for line in strip_comments(migration.sql).lines() {
             let trimmed = line.trim();
@@ -740,6 +759,97 @@ mod tests {
             }
         }
         found
+    }
+
+    /// The columns migration 0116 adds to `accounts`, in BOTH dialects.
+    ///
+    /// The gap the generic helper above exists for, applied to the Darkhold
+    /// identity columns. **The parity test cannot see these columns** -- it reads
+    /// `CREATE TABLE` and `CREATE INDEX` only -- so without this test a column
+    /// added here on one engine and not the other passes every existing check
+    /// and then fails at runtime on the engine no test exercises.
+    #[test]
+    fn the_account_carries_the_darkhold_columns_in_both_dialects() {
+        const EXPECTED: &[&str] = &[
+            "is_guest",
+            "trust_level",
+            "consented_at",
+            "consent_version",
+            "registration_mode_at_signup",
+            "folded_from_account_id",
+            "resonance",
+            "supporter_until",
+        ];
+        for backend in [Backend::Sqlite, Backend::Postgres] {
+            let declared = added_columns_for_table_in(backend, "0116", "accounts");
+            let expected: BTreeSet<String> =
+                EXPECTED.iter().map(|name| (*name).to_owned()).collect();
+            assert_eq!(
+                declared, expected,
+                "{backend:?}: the accounts table does not carry the Darkhold identity \
+                 columns, or carries one the other dialect does not"
+            );
+        }
+    }
+
+    /// The same check for the *presence* of the columns, not just their names.
+    ///
+    /// A migration that declares a column and a dialect that silently ignores
+    /// it is the other half of the gap: `ALTER TABLE` on a table that does not
+    /// exist is an error the migration reports, and a column that is added with
+    /// a different name than the Rust code reads is a runtime failure. So the
+    /// columns are read back **through the store**, on both engines.
+    #[tokio::test]
+    async fn the_account_row_carries_the_darkhold_columns() {
+        use crate::Database;
+        use crate::DatabaseConfig;
+
+        let dir = std::env::temp_dir().join(format!(
+            "darkhold-0116-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let url = format!("sqlite://{}/darkhold.sqlite?mode=rwc", dir.display());
+        let db = Database::connect(&DatabaseConfig::new(url))
+            .await
+            .expect("connect");
+        db.migrate().await.expect("migrate");
+
+        let row: (
+            i64,
+            i64,
+            Option<String>,
+            Option<i64>,
+            String,
+            Option<String>,
+            f64,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT is_guest, trust_level, consented_at, consent_version, \
+                        registration_mode_at_signup, folded_from_account_id, resonance, \
+                        supporter_until FROM accounts LIMIT 1",
+        )
+        .fetch_optional(db.sqlite_pool().expect("sqlite"))
+        .await
+        .expect("query")
+        .expect("no accounts to read");
+
+        assert_eq!(row.0, 0, "is_guest defaults to false");
+        assert_eq!(row.1, 0, "trust_level defaults to 0");
+        assert_eq!(row.2, None, "consented_at defaults to null");
+        assert_eq!(row.3, None, "consent_version defaults to null");
+        assert_eq!(
+            row.4, "open",
+            "registration_mode_at_signup defaults to open"
+        );
+        assert_eq!(row.5, None, "folded_from_account_id defaults to null");
+        assert_eq!(row.6, 0.0, "resonance defaults to 0");
+        assert_eq!(row.7, None, "supporter_until defaults to null");
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

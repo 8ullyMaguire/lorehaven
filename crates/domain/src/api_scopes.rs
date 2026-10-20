@@ -51,6 +51,85 @@ pub fn scopes_are_subset(requested: &[Scope], provided: &[Scope]) -> bool {
     provided.iter().all(|s| requested.contains(s))
 }
 
+/// What an account may grant a token (spec §20.2, M2-05).
+///
+/// **A token can never exceed its account.** The scopes a token carries are
+/// chosen by the account that issues it, and nothing else — so the question
+/// "may this account hold this scope at all" has to be answered before the
+/// question "which scopes did it ask for".
+///
+/// Without this, **any account could mint a token with `admin.write`**, and the
+/// token would work: the resolver checks the token's scope set, and the scope
+/// set would say `admin.write`. The check that saved it was the one at the
+/// *door* rather than the one at the *mint*, and a door check asks "does this
+/// token have the scope" — which it would.
+///
+/// The facts here are **facts about the account, not a score**: each one is
+/// either a role the instance granted, a capability the age policy gave, or a
+/// standing the reader earned. A reader cannot move any of them by reading
+/// more, which is the same rule the trust ladder follows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Grantable {
+    /// The account may write content of its own.
+    pub can_write: bool,
+    /// The account may comment and message.
+    pub can_message: bool,
+    /// The account is an operator of this instance.
+    pub is_operator: bool,
+    /// The account may translate.
+    pub can_translate: bool,
+}
+
+impl Grantable {
+    /// The scopes this account may grant.
+    ///
+    /// **Derived from one list**, so a scope added to the enum and a scope this
+    /// function refuses cannot drift apart — the same reason [`all`] exists.
+    #[must_use]
+    pub fn scopes(&self) -> Vec<Scope> {
+        let mut scopes = vec![
+            Scope::ContentRead,
+            Scope::LibraryRead,
+            Scope::TranslationRead,
+        ];
+        if self.can_write {
+            scopes.push(Scope::ContentWrite);
+            scopes.push(Scope::TranslationWrite);
+        }
+        if self.can_message {
+            scopes.push(Scope::CommentsWrite);
+        }
+        if self.can_translate {
+            scopes.push(Scope::TranslationWrite);
+        }
+        if self.is_operator {
+            scopes.push(Scope::AdminRead);
+            scopes.push(Scope::AdminWrite);
+        }
+        scopes
+    }
+
+    /// Whether this account may hold `scope` at all.
+    #[must_use]
+    pub fn may_grant(&self, scope: &Scope) -> bool {
+        self.scopes().contains(scope)
+    }
+}
+
+/// The scopes of `requested` that this account may not hold.
+///
+/// **The refusal names the scope**, because a caller who asked for something they
+/// cannot have is owed the difference between "that scope does not exist" and
+/// "that scope is not yours".
+#[must_use]
+pub fn ungrantable_scopes(grants: &Grantable, requested: &[Scope]) -> Vec<Scope> {
+    requested
+        .iter()
+        .filter(|scope| !grants.may_grant(scope))
+        .cloned()
+        .collect()
+}
+
 /// Check if a token has a specific scope.
 pub fn has_scope(scopes: &[Scope], required: &Scope) -> bool {
     scopes.contains(required)
@@ -104,6 +183,72 @@ pub fn grant_is_within_offer(granted: &[Scope], offered: &[Scope]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ordinary_account_may_not_mint_an_admin_token() {
+        // **The hole M2-05 closed.** Before it, the token route parsed the
+        // requested scopes and stored them, and the resolver trusted the stored
+        // set. So any account could mint a token with `admin.write` and the
+        // token would open every admin door.
+        let grants = Grantable {
+            can_write: true,
+            can_message: true,
+            ..Grantable::default()
+        };
+        assert!(!grants.may_grant(&Scope::AdminWrite));
+        assert!(!grants.may_grant(&Scope::AdminRead));
+        assert!(grants.may_grant(&Scope::ContentWrite));
+        assert!(grants.may_grant(&Scope::CommentsWrite));
+
+        let refused = ungrantable_scopes(&grants, &[Scope::ContentRead, Scope::AdminWrite]);
+        assert_eq!(refused, vec![Scope::AdminWrite]);
+    }
+
+    #[test]
+    fn an_operator_may_mint_an_admin_token() {
+        let grants = Grantable {
+            is_operator: true,
+            ..Grantable::default()
+        };
+        assert!(grants.may_grant(&Scope::AdminWrite));
+        assert!(grants.may_grant(&Scope::AdminRead));
+        assert!(ungrantable_scopes(&grants, &[Scope::AdminWrite]).is_empty());
+    }
+
+    #[test]
+    fn a_reader_who_cannot_write_may_not_grant_a_write_scope() {
+        // The age policy's `Restricted` state: the account may read and may not
+        // write, and a token it mints may not write either.
+        let grants = Grantable::default();
+        assert!(grants.may_grant(&Scope::ContentRead));
+        assert!(!grants.may_grant(&Scope::ContentWrite));
+        assert!(!grants.may_grant(&Scope::CommentsWrite));
+    }
+
+    #[test]
+    fn every_scope_is_refused_by_somebody() {
+        // The coverage check: a scope that EVERY account may hold is a scope
+        // that was not thought about, and a scope that NOBODY may hold is one
+        // that can never be granted at all.
+        let ordinary = Grantable {
+            can_write: true,
+            can_message: true,
+            can_translate: true,
+            is_operator: false,
+        };
+        let operator = Grantable {
+            can_write: true,
+            can_message: true,
+            can_translate: true,
+            is_operator: true,
+        };
+        for scope in all() {
+            assert!(
+                ordinary.may_grant(&scope) || operator.may_grant(&scope),
+                "{scope:?} is grantable by nobody"
+            );
+        }
+    }
+
     use super::*;
     use std::str::FromStr;
 

@@ -65,6 +65,17 @@ pub enum AccountStatus {
     Suspended,
     /// Closed by the owner or by deletion.
     Closed,
+    /// **Folded**: the account's contents were re-parented to another account
+    /// (spec §14.2, the fold), and this row is the tombstone that remains.
+    ///
+    /// A distinct state rather than `Closed`, because the two are different
+    /// facts: a closed account is an account that will never act again, and a
+    /// folded account is an account whose *contents* live somewhere else and
+    /// whose *identity* is a tombstone pointing at where they went. The fold's
+    /// job is to make the second indistinguishable from the first to anything
+    /// that acts as the account — and **anything that acts as a folded account
+    /// must not act at all.**
+    Folded,
 }
 
 impl AccountStatus {
@@ -75,6 +86,7 @@ impl AccountStatus {
             Self::Active => "active",
             Self::Suspended => "suspended",
             Self::Closed => "closed",
+            Self::Folded => "folded",
         }
     }
 
@@ -85,6 +97,7 @@ impl AccountStatus {
             "active" => Some(Self::Active),
             "suspended" => Some(Self::Suspended),
             "closed" => Some(Self::Closed),
+            "folded" => Some(Self::Folded),
             _ => None,
         }
     }
@@ -290,6 +303,108 @@ pub async fn find_account(db: &Database, id: AccountId) -> Result<Option<Account
     };
 
     Ok(row.map(decode_account))
+}
+
+/// The account facts the identity actor needs, read once from the account row.
+///
+/// **This is a read, not a claim.** The trust level is a cache of
+/// `trust_levels.level` and the resonance is a derived value that is recomputed
+/// (spec §12.6 rule 4); neither is trusted from the request, and the account row
+/// is where the instance's own copy of both lives.
+///
+/// **The supporter state is a date, not a boolean**, because a lapsed
+/// entitlement must not read as an active one: the tier gate compares the date
+/// with the clock, so a reader whose entitlement ended at midnight is on T1 from
+/// midnight, and not a moment before.
+#[derive(Debug, Clone, Default)]
+pub struct AccountFacts {
+    /// Whether the account is a guest (spec §14.1, D-6).
+    pub is_guest: bool,
+    /// The account's trust level, 0..6.
+    pub trust_level: i64,
+    /// The account's resonance: how strongly its taste agrees with the theme.
+    pub resonance: f64,
+    /// The end of the supporter entitlement, if there is one.
+    pub supporter_until: Option<String>,
+}
+
+/// Fold an account: its contents move elsewhere, and this row becomes a
+/// tombstone (spec §14.2, M2-05).
+///
+/// **The fold itself is M20's** — the re-parenting of every row a guest
+/// authored, in one transaction, with the schema-driven completeness check. What
+/// lives here is the **marker** and the **refusal**: the state that says "this
+/// identity is a tombstone", so that anything acting as the account can refuse
+/// it.
+///
+/// The account is closed to a token and to a session in the same way, and
+/// **neither is told which**: a folded account that answered 403 would say
+/// "there was something here".
+pub async fn fold_account(
+    db: &Database,
+    account_id: AccountId,
+    folded_into: &str,
+) -> Result<(), sqlx::Error> {
+    let sql = db.sql(
+        "UPDATE accounts SET status = 'folded', folded_from_account_id = ?
+           WHERE id = ?",
+        "UPDATE accounts SET status = 'folded', folded_from_account_id = ?::uuid
+           WHERE id = ?::uuid",
+    );
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(folded_into)
+                .bind(account_id.to_string())
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(folded_into)
+                .bind(account_id.to_string())
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Read the identity facts for one account.
+///
+/// `None` when there is no such account — which is different from an account
+/// with no facts, and the caller has to tell them apart: the first is "this
+/// request names something that does not exist" and the second is "this request
+/// names a reader with nothing yet".
+pub async fn account_facts(db: &Database, id: AccountId) -> Result<Option<AccountFacts>> {
+    let sql = db.sql(
+        "SELECT is_guest, trust_level, resonance, supporter_until
+           FROM accounts WHERE id = ?",
+        "SELECT is_guest::int::bigint, trust_level, resonance, supporter_until
+           FROM accounts WHERE id::text = ?",
+    );
+
+    let row: Option<(i64, i64, f64, Option<String>)> = match db.backend() {
+        crate::Backend::Sqlite => sqlx::query_as(&sql)
+            .bind(id.to_string())
+            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+            .await
+            .context("looking up account facts")?,
+        crate::Backend::Postgres => sqlx::query_as(&sql)
+            .bind(id.to_string())
+            .fetch_optional(db.postgres_pool().expect("postgres handle"))
+            .await
+            .context("looking up account facts")?,
+    };
+
+    Ok(row.map(
+        |(is_guest, trust_level, resonance, supporter_until)| AccountFacts {
+            is_guest: is_guest != 0,
+            trust_level,
+            resonance,
+            supporter_until,
+        },
+    ))
 }
 
 /// Store (or replace) an account's password hash.

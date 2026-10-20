@@ -98,7 +98,10 @@ pub async fn list_tokens(
     State(state): State<AppState>,
     MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    let account = user
+        .as_ref()
+        .map(|u| u.account_id.to_string())
+        .unwrap_or_default();
     if account.is_empty() {
         return Err(ApiError(darkhold_domain::AppError::field(
             "session",
@@ -144,7 +147,10 @@ pub async fn issue_token(
     MaybeSession(user): MaybeSession,
     Json(body): Json<IssueTokenBody>,
 ) -> ApiResult<Json<Value>> {
-    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    let account = user
+        .as_ref()
+        .map(|u| u.account_id.to_string())
+        .unwrap_or_default();
     if account.is_empty() {
         return Err(ApiError(darkhold_domain::AppError::field(
             "session",
@@ -158,6 +164,33 @@ pub async fn issue_token(
         .map(|c| darkhold_domain::api_scopes::Scope::from_str(c))
         .collect::<Result<_, _>>()
         .map_err(|e| ApiError(darkhold_domain::AppError::field("scopes", &e)))?;
+
+    // **A token can never exceed its account** (spec §20.2, M2-05).
+    //
+    // The scopes a token carries are chosen by the account that issues it, and
+    // nothing else. Without this check **any account could mint a token with
+    // `admin.write`**: the route parsed the requested scopes, stored them, and
+    // the resolver trusted the stored set — so the token opened every admin door.
+    // The check that would have caught it was at the *door* ("does this token
+    // have the scope"), and the token did have it.
+    //
+    // So the check is here, at the *mint*, and it asks the account's own
+    // privileges rather than the request's wishes.
+    let grants = grantable_for(state.db(), &account, &user)
+        .await
+        .map_err(|error| ApiError(darkhold_domain::AppError::Internal(error.into())))?;
+    let refused = darkhold_domain::api_scopes::ungrantable_scopes(&grants, &scopes);
+    if !refused.is_empty() {
+        let names: Vec<&str> = refused.iter().map(|scope| scope.as_str()).collect();
+        return Err(ApiError(darkhold_domain::AppError::field(
+            "scopes",
+            format!(
+                "this account may not hold {}; an account cannot grant a token that \
+                 exceeds its own privileges",
+                names.join(", ")
+            ),
+        )));
+    }
 
     // D2. The refusal names the accepted range rather than clamping, for the
     // same reason M52-09 refuses an unavailable engine "with the accepted
@@ -513,6 +546,34 @@ pub async fn describe_credential(
         "via": via,
         "scopes": scopes,
     })))
+}
+
+/// What this account may grant a token.
+///
+/// **Read from the account, not from the request.** The age policy's
+/// capabilities come from the account's `age_state`, and the operator role from
+/// the instance's own grant — the same two facts `trust_for` and the
+/// body-audience rule consult, so a token's authority and the reader's
+/// authority are computed from one place.
+async fn grantable_for(
+    db: &darkhold_db::Database,
+    account: &str,
+    user: &Option<crate::auth::SessionUser>,
+) -> Result<darkhold_domain::api_scopes::Grantable, sqlx::Error> {
+    let Some(user) = user else {
+        return Ok(darkhold_domain::api_scopes::Grantable::default());
+    };
+    let is_operator = darkhold_db::governance::has_operator_role(db, account).await?;
+    // The age policy's own answer: `may_participate` is the domain's rule and
+    // this is its call site, so a token cannot be more permissive than the
+    // account that minted it.
+    let can_write = user.age_state.may_participate();
+    Ok(darkhold_domain::api_scopes::Grantable {
+        can_write,
+        can_message: can_write,
+        is_operator,
+        can_translate: false,
+    })
 }
 
 pub fn router() -> axum::Router<AppState> {
