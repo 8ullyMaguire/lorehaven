@@ -306,6 +306,9 @@ a private preference.
 | types | `node ./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json` | **0 errors**, 2 warnings |
 | the ledger | `python3 scripts/ledger_test.py` | **30 assertions · exit 0** |
 
+**Every one of these was run on the committed tree, at the tree's final path** — the
+PostgreSQL arm last, after the directory rename and the rebuild it forced.
+
 **And one thing that happened once and did not reproduce.** An earlier PostgreSQL run
 reported `error: 1 target failed: -p darkhold-app --test m57_metadata_exchange` — **with the
 suite itself reporting `test result: ok. 41 passed`**, and with no `error: test failed` line
