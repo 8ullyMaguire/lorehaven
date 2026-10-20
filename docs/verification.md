@@ -70,6 +70,42 @@ and the cap is about the instance.
 | `DM1-09` | the OpenAPI document, **generated from the route table**: 145 paths, where there were four |
 | `DM1-10` | the ledger's two columns, added by a deliberate migration that changed no row |
 
+### The gates, on the committed tree
+
+```
+==> fmt        ok: fmt
+==> lint       ok: lint
+==> build      ok: build
+==> test       ok: test
+==> doc        ok: doc
+==> frontend   ok: frontend
+==> dialects   ok: dialects
+==> repo       ok: repo
+==> pg         ok: pg
+```
+
+**4,192 tests · 219 suites · 0 failed**, on **both** engines. The frontend: **564 tests · 77
+files**, and `svelte-check` **0 errors**.
+
+### What the gates found that a person would not have
+
+- **The dialect gate** flagged `continue_reading_route.rs`, which heads itself *"SQLite-only,
+  deliberately"* and then mentions a sibling's coverage. The check now reads an explicit
+  SQLite-only declaration, and the exemption settles the whole file rather than one sentence.
+- **The split-spec check** found the split out of step with its master — **because the master
+  was edited after the split was generated.** That is the check working: the split is a copy,
+  and a copy that is done by hand is a copy that is done once.
+- **The lint gate** caught two of M1's own mistakes: a `Default` that could be derived, and a
+  negated comparison on a partially ordered type that hid the NaN case.
+- **The first generated OpenAPI document was wrong**, and an **existing** test caught it: the
+  paths carried the `/api/v1` prefix, but OpenAPI 3.1 resolves `paths` against the `servers`
+  entry, which already carries it — so a client would have called `/api/v1/api/v1/works`. That
+  test was not written for this change and did not know the change was coming.
+- **The suite filled the filesystem.** The harness leaks its scratch directories, `/tmp` is a
+  16 GB tmpfs, and the failures arrived as `(code: 13) database or disk is full` — twelve suites
+  of the gate run. The gate runner now points `TMPDIR` at the real filesystem and sweeps the
+  stale directories; the defect itself is recorded as M1-D01 and pinned.
+
 ## 2026-10-19 — M0: the rename, and the six traps it exposed
 
 **Milestone:** M0 · **Requirements:** `DM0-01` … `DM0-07` · **ADRs:** 0027, 0028
