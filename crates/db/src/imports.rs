@@ -1476,10 +1476,7 @@ pub async fn upsert_import_unit(
 }
 
 /// The units of one import, in order.
-pub async fn list_import_units(
-    db: &Database,
-    import_job_id: &str,
-) -> Result<Vec<ImportUnit>> {
+pub async fn list_import_units(db: &Database, import_job_id: &str) -> Result<Vec<ImportUnit>> {
     let sql = sql_owned(
         db,
         format!(

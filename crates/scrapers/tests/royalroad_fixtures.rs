@@ -214,10 +214,7 @@ fn every_chapter_has_a_key_and_a_title() {
             chapter.ordinal
         );
         assert!(
-            chapter
-                .source_unit_key
-                .chars()
-                .all(|c| c.is_ascii_digit()),
+            chapter.source_unit_key.chars().all(|c| c.is_ascii_digit()),
             "chapter {} has a key that is not the site's numeric id: {:?}",
             chapter.ordinal,
             chapter.source_unit_key

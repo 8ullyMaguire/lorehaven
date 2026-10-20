@@ -71,7 +71,7 @@
 use crate::{Backend, Database};
 use anyhow::Result;
 use darkhold_domain::coordinates::{
-    coordinates, UnitText, Coordinates, Corpus, Unmeasurable, WorkCoordinates,
+    coordinates, Coordinates, Corpus, UnitText, Unmeasurable, WorkCoordinates,
 };
 
 /// A stored coordinate row, exactly as the table holds it.

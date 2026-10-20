@@ -25,7 +25,7 @@
 
 use darkhold_db::work_coordinates as wc;
 use darkhold_domain::coordinates::{
-    UnitText, Coordinates, Corpus, Unmeasurable, WorkCoordinates, MIN_MEASURABLE_WORDS,
+    Coordinates, Corpus, UnitText, Unmeasurable, WorkCoordinates, MIN_MEASURABLE_WORDS,
 };
 use test_support::{id, scratch_dir, TestDb};
 

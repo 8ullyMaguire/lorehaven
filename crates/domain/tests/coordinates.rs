@@ -16,9 +16,9 @@
 //! §49.8's wording is about bytes rather than about approximate numbers.
 
 use darkhold_domain::coordinates::{
-    coordinates, UnitText, Coordinates, Corpus, Unmeasurable, WorkCoordinates,
-    DIM_UNIT_LENGTH_SPREAD, DIM_DIALOGUE_RATIO, DIM_SENTENCE_LENGTH_VARIANCE,
-    DIM_VOCABULARY_RICHNESS, MIN_MEASURABLE_WORDS,
+    coordinates, Coordinates, Corpus, UnitText, Unmeasurable, WorkCoordinates, DIM_DIALOGUE_RATIO,
+    DIM_SENTENCE_LENGTH_VARIANCE, DIM_UNIT_LENGTH_SPREAD, DIM_VOCABULARY_RICHNESS,
+    MIN_MEASURABLE_WORDS,
 };
 
 /// The measured coordinates for a corpus, as an owned value.
@@ -307,21 +307,11 @@ fn each_measure_separates_what_it_claims_to() {
     // Unit-length spread: even units against uneven ones, and a
     // single-unit work has no distribution at all.
     let even = Corpus {
-        units: vec![
-            unit(40, 20),
-            unit(40, 20),
-            unit(40, 20),
-            unit(40, 20),
-        ],
+        units: vec![unit(40, 20), unit(40, 20), unit(40, 20), unit(40, 20)],
         dialogue_words: 0,
     };
     let uneven = Corpus {
-        units: vec![
-            unit(40, 20),
-            unit(40, 20),
-            unit(4, 20),
-            unit(5, 20),
-        ],
+        units: vec![unit(40, 20), unit(40, 20), unit(4, 20), unit(5, 20)],
         dialogue_words: 0,
     };
     let e = coords_of(&even);

@@ -375,10 +375,7 @@ async fn the_creator_dashboard_reports_banded_aggregates() {
     assert_eq!(body["works"]["total"].as_i64(), Some(2), "{body}");
     assert_eq!(body["works"]["published"].as_i64(), Some(1), "{body}");
     assert_eq!(body["works"]["unpublished"].as_i64(), Some(1), "{body}");
-    assert!(
-        body["works"]["units"].as_i64().unwrap_or(0) >= 1,
-        "{body}"
-    );
+    assert!(body["works"]["units"].as_i64().unwrap_or(0) >= 1, "{body}");
     assert!(body["works"]["words"].as_i64().unwrap_or(0) > 0, "{body}");
 
     // Reader-facing counts are below the floor here, so they are bands — a

@@ -127,9 +127,8 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    collapse_whitespace, strip_tags, UnitRef, Credentials, Fetcher, SourceAdapter,
-    SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult, SourceWork,
-    WorkStatus,
+    collapse_whitespace, strip_tags, Credentials, Fetcher, SourceAdapter, SourceCapabilities,
+    SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef, WorkStatus,
 };
 
 /// The key every archive in this family is stored under.
@@ -445,11 +444,7 @@ impl Efiction {
         // ordinal it was given, or zero, and the caller sees an empty key.
         let reference = ordinal
             .and_then(|ordinal| work.units.iter().find(|c| c.ordinal == ordinal))
-            .or_else(|| {
-                work.units
-                    .iter()
-                    .find(|candidate| candidate.title == title)
-            });
+            .or_else(|| work.units.iter().find(|candidate| candidate.title == title));
 
         let Some(reference) = reference else {
             // Two different faults, and they send a reader to different places:
@@ -644,11 +639,7 @@ impl SourceAdapter for Efiction {
         self.parse_work(html, url)
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // A chapter page holds one chapter, so this returns a list of one. The
         // ordinal is recovered by matching the page's own heading against the
         // work's chapter list, which is what lets the fixture test assert a
@@ -1300,10 +1291,7 @@ fn chapter_refs(document: &Html, labels: &[Label]) -> SourceResult<Vec<UnitRef>>
         // A duplicate is the same chapter linked twice — a jump menu above the
         // list, most often. The first occurrence wins, because it is the one in
         // the list's own order.
-        if refs
-            .iter()
-            .any(|existing| existing.source_unit_key == key)
-        {
+        if refs.iter().any(|existing| existing.source_unit_key == key) {
             continue;
         }
 

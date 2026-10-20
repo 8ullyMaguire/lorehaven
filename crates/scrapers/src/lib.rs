@@ -926,11 +926,7 @@ pub trait SourceAdapter: Send + Sync {
     }
 
     /// Parse units from a page that has already been retrieved.
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         let _ = (html, work);
         Err(SourceError::Unsupported(format!(
             "{} has no fixture entry point",

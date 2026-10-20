@@ -110,9 +110,9 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, text_of, texts_of, AuthKind, UnitRef, Credentials,
-    Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey,
-    SourceResult, SourceWork, WorkStatus,
+    attr_of, collapse_whitespace, html_of, text_of, texts_of, AuthKind, Credentials, Fetcher,
+    SourceAdapter, SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit,
+    SourceWork, UnitRef, WorkStatus,
 };
 
 /// The host, without `www.`.
@@ -449,11 +449,7 @@ impl SourceAdapter for Ficbook {
         self.parse_work(html, &work)
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // A part page states its own address, so the ordinal comes from the
         // page rather than from the caller — see the module documentation.
         let document = Html::parse_document(html);

@@ -25,8 +25,8 @@
 
 use async_trait::async_trait;
 use darkhold_scrapers::{
-    UnitRef, Credentials, Fetcher, Registry, SourceAdapter, SourceCapabilities, SourceUnit,
-    SourceKey, SourceResult, SourceWork, VerificationStatus, Wall, WorkStatus,
+    Credentials, Fetcher, Registry, SourceAdapter, SourceCapabilities, SourceKey, SourceResult,
+    SourceUnit, SourceWork, UnitRef, VerificationStatus, Wall, WorkStatus,
 };
 use url::Url;
 

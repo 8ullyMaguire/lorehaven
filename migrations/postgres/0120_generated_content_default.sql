@@ -39,17 +39,22 @@
 -- cannot be given a new default without rebuilding `works`, and that rebuild
 -- is not worth a default nothing reaches.
 
+-- The new table's columns are the OLD table's columns, exactly, with one
+-- change: the default. A rebuild that changes a column's type alongside its
+-- default is a rebuild that has to convert the data, and this one copies the
+-- rows verbatim.
+--
+-- (`id` is TEXT here and `updated_by` is a UUID, because that is what
+-- migration 0109 declared: the policy's key is the constant 'default' and the
+-- actor is an account.)
 CREATE TABLE generated_content_policy_new (
-    -- The id columns are UUIDs on PostgreSQL and TEXT on SQLite, because
-    -- `accounts.id` is: a foreign key to a column that is TEXT in one dialect
-    -- and UUID in the other cannot be declared with one type.
-    id          UUID    PRIMARY KEY,
+    id          TEXT    PRIMARY KEY,
     posture     TEXT    NOT NULL DEFAULT 'allow'
         CHECK (posture IN ('forbid', 'disclose', 'allow')),
     updated_by  UUID    REFERENCES accounts (id) ON DELETE SET NULL,
     created_at  TEXT    NOT NULL,
     updated_at  TEXT    NOT NULL,
-    version     BIGINT  NOT NULL DEFAULT 1
+    version     INTEGER NOT NULL DEFAULT 1
 );
 
 INSERT INTO generated_content_policy_new

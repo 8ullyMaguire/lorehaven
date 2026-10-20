@@ -427,16 +427,9 @@ async fn a_unit_scoped_link_records_the_unit() {
     ))
     .await;
 
-    let link = wd::link_topic(
-        h.db(),
-        &work,
-        Some(&unit),
-        &category,
-        &author,
-        "Ch thread",
-    )
-    .await
-    .unwrap();
+    let link = wd::link_topic(h.db(), &work, Some(&unit), &category, &author, "Ch thread")
+        .await
+        .unwrap();
     assert_eq!(link.unit_id.as_deref(), Some(unit.as_str()));
     assert_eq!(
         wd::linked_topic(h.db(), &work)

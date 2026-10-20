@@ -24,9 +24,8 @@ use url::Url;
 use crate::sanitize::sanitize_fragment;
 use crate::source_manifest::CompiledSource;
 use crate::{
-    AuthKind, UnitRef, Credentials, Fetched, Fetcher, SourceAdapter, SourceCapabilities,
-    SourceUnit, SourceError, SourceKey, SourceResult, SourceWork, VerificationStatus, Wall,
-    WorkStatus,
+    AuthKind, Credentials, Fetched, Fetcher, SourceAdapter, SourceCapabilities, SourceError,
+    SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef, VerificationStatus, Wall, WorkStatus,
 };
 
 /// An adapter built from a §55.3 manifest.

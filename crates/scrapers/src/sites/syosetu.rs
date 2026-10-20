@@ -83,8 +83,8 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    collapse_whitespace, strip_tags, text_of, UnitRef, Credentials, Fetcher, SourceAdapter,
-    SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult, SourceWork,
+    collapse_whitespace, strip_tags, text_of, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef,
     WorkStatus,
 };
 
@@ -957,11 +957,7 @@ impl SourceAdapter for Syosetu {
         })
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // A one-shot's work page holds its single chapter's prose; an episode page
         // holds one episode's. The ordinal is taken from the caller's list by
         // matching the chapter key, and a page that matches nothing is reported

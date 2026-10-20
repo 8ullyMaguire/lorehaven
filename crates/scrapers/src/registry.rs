@@ -329,7 +329,7 @@ pub struct CatalogueEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{UnitRef, Credentials, Fetcher, SourceCapabilities, SourceUnit, SourceWork};
+    use crate::{Credentials, Fetcher, SourceCapabilities, SourceUnit, SourceWork, UnitRef};
     use async_trait::async_trait;
 
     /// A stand-in adapter that claims one host and does nothing else.

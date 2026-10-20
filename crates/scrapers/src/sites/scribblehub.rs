@@ -73,9 +73,8 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, html_of, AuthKind, UnitRef, Credentials, Fetcher, SourceAdapter,
-    SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult, SourceWork, Wall,
-    WorkStatus,
+    attr_of, html_of, AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities,
+    SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef, Wall, WorkStatus,
 };
 
 /// The host, without `www.`.
@@ -339,11 +338,8 @@ impl ScribbleHub {
 
     /// The chapter a reading page states as its own address.
     fn chapter_of(&self, work: &SourceWork, document: &Html) -> Option<String> {
-        canonical_chapter(document).filter(|id| {
-            work.units
-                .iter()
-                .any(|entry| &entry.source_unit_key == id)
-        })
+        canonical_chapter(document)
+            .filter(|id| work.units.iter().any(|entry| &entry.source_unit_key == id))
     }
 }
 
@@ -482,11 +478,7 @@ impl SourceAdapter for ScribbleHub {
         Ok(story.into_work(self.key.clone(), self.story_url(&story_id), Vec::new()))
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         let document = Html::parse_document(html);
         let chapter_id = self.chapter_of(work, &document).ok_or_else(|| {
             SourceError::Parse(format!(
@@ -914,9 +906,7 @@ mod tests {
         assert!(format!("{error}").contains("113"), "{error}");
 
         // An exact list of the stated size is fine.
-        assert!(adapter()
-            .assemble_chapters(&[units], "2357420", 3)
-            .is_ok());
+        assert!(adapter().assemble_chapters(&[units], "2357420", 3).is_ok());
     }
 
     #[test]

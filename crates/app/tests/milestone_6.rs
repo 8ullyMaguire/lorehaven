@@ -41,8 +41,8 @@ use darkhold_scrapers::async_trait;
 use darkhold_scrapers::registry::Registry;
 use darkhold_scrapers::sites::ao3::ArchiveSoftware;
 use darkhold_scrapers::{
-    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError,
-    SourceKey, SourceResult, SourceWork, Wall,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceError, SourceKey,
+    SourceResult, SourceUnit, SourceWork, Wall,
 };
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -285,11 +285,7 @@ impl SourceAdapter for FixtureArchive {
         self.inner.preview_from_html(html, url)
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         self.inner.units_from_html(html, work)
     }
 }
@@ -722,11 +718,7 @@ async fn an_import_stores_a_works_units() {
             .await
             .expect("read blob")
             .expect("the blob exists");
-        assert!(
-            !bytes.is_empty(),
-            "unit {:?} stored nothing",
-            unit.ordinal
-        );
+        assert!(!bytes.is_empty(), "unit {:?} stored nothing", unit.ordinal);
         assert!(
             !String::from_utf8_lossy(&bytes).contains("<script"),
             "unit {:?} stored a script tag",
@@ -2074,10 +2066,7 @@ async fn a_failed_unit_is_retried_without_refetching_the_rest() {
         assert_eq!(unit.state, "stored", "unit {}", unit.ordinal);
         assert_eq!(
             unit.content_blob_checksum,
-            checksums
-                .get(&unit.source_unit_key)
-                .cloned()
-                .flatten(),
+            checksums.get(&unit.source_unit_key).cloned().flatten(),
             "unit {} was re-stored rather than left alone",
             unit.ordinal
         );

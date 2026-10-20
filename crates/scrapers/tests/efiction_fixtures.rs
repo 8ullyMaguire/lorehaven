@@ -160,10 +160,9 @@ fn the_chapter_key_is_the_members_own_chapid_on_both_members() {
     assert_eq!(gw.units[0].source_unit_key, "51874");
     assert_eq!(gw.units[12].source_unit_key, "51886");
     assert!(
-        gw.units.iter().all(|chapter| chapter
-            .source_unit_key
-            .chars()
-            .all(|c| c.is_ascii_digit())),
+        gw.units
+            .iter()
+            .all(|chapter| chapter.source_unit_key.chars().all(|c| c.is_ascii_digit())),
         "every chapter key must be a chapid, never an ordinal fallback: {:?}",
         gw.units
             .iter()
@@ -540,10 +539,7 @@ async fn a_member_answering_with_its_print_template_still_yields_the_prose() {
         .expect("chapter 1 reads from the print template");
 
     assert_eq!(from_reading.ordinal, from_print.ordinal);
-    assert_eq!(
-        from_reading.source_unit_key,
-        from_print.source_unit_key
-    );
+    assert_eq!(from_reading.source_unit_key, from_print.source_unit_key);
     assert!(
         from_print.content_html.contains("Back in January 2020"),
         "the print view's own container is read"

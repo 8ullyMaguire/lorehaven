@@ -1191,10 +1191,7 @@ mod tests {
 
     // --- CTA placement (spec §42) -----------------------------------------
 
-    fn input_with_cta<'a>(
-        units: &'a [EpubUnit<'a>],
-        placement: CtaPlacement,
-    ) -> EpubInput<'a> {
+    fn input_with_cta<'a>(units: &'a [EpubUnit<'a>], placement: CtaPlacement) -> EpubInput<'a> {
         EpubInput {
             cta: Some(EpubCta {
                 placement,
@@ -1258,10 +1255,7 @@ mod tests {
 
     #[test]
     fn cta_placement_parses_and_round_trips() {
-        assert_eq!(
-            CtaPlacement::parse("per_unit"),
-            Some(CtaPlacement::PerUnit)
-        );
+        assert_eq!(CtaPlacement::parse("per_unit"), Some(CtaPlacement::PerUnit));
         assert_eq!(CtaPlacement::parse("per_work"), Some(CtaPlacement::PerWork));
         assert_eq!(CtaPlacement::parse("off"), Some(CtaPlacement::Off));
         assert_eq!(CtaPlacement::parse("everywhere"), None);
@@ -1299,9 +1293,7 @@ mod tests {
         // Every unit's prose is in the container, and so is the one whose
         // title needed escaping.
         let archive = Archive::read(&bytes).expect("a zip");
-        let third = archive
-            .text("OEBPS/text/unit-00003.xhtml")
-            .expect("unit 3");
+        let third = archive.text("OEBPS/text/unit-00003.xhtml").expect("unit 3");
         assert!(third.contains("Ending."));
         assert!(third.contains("A &amp; B &lt;not a tag&gt;"), "{third}");
     }

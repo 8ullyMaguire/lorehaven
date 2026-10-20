@@ -43,8 +43,8 @@ use darkhold_db::imports::CredentialEvent;
 use darkhold_db::{imports, Backend, Database, DatabaseConfig};
 use darkhold_scrapers::registry::Registry;
 use darkhold_scrapers::{
-    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceKey,
-    SourceResult, SourceWork,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceKey, SourceResult,
+    SourceUnit, SourceWork,
 };
 use serde_json::json;
 use test_support::TestClient;

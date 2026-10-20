@@ -489,8 +489,7 @@ async fn create_bookmark(
     if let Some(permille) = body.position_permille {
         if !(0..=1000).contains(&permille) {
             return Err(ApiError(AppError::Validation {
-                message: "a bookmark position is a thousandth of a unit, so 0 to 1000"
-                    .to_owned(),
+                message: "a bookmark position is a thousandth of a unit, so 0 to 1000".to_owned(),
                 field_errors: Default::default(),
             }));
         }

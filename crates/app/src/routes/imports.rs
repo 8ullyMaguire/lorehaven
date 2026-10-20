@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 
 use darkhold_db::imports::CredentialEvent;
 use darkhold_db::{imports, library, revisions, secrets};
-use darkhold_domain::imports::{plan_import, UnitIdentity, ImportedWork};
+use darkhold_domain::imports::{plan_import, ImportedWork, UnitIdentity};
 use darkhold_domain::library::ReadingStatus;
 use darkhold_domain::{AppError, PseudId};
 use darkhold_scrapers::{SafeFetcher, SourceAdapter, SourceKey};
@@ -70,10 +70,7 @@ pub fn router() -> Router<AppState> {
         .route("/imports/{id}", get(get_import))
         .route("/imports/{id}/cancel", post(cancel_import))
         .route("/library/imports/csv", post(import_shelf_csv))
-        .route(
-            "/imports/{id}/retry-failed-units",
-            post(retry_failed_units),
-        )
+        .route("/imports/{id}/retry-failed-units", post(retry_failed_units))
         .route(
             "/source-credentials",
             get(list_credentials).post(store_credential),
@@ -768,7 +765,7 @@ async fn find_duplicate(
 
 /// Render a plan for the interface.
 fn describe_plan(plan: &darkhold_domain::imports::ImportPlan) -> PlanView {
-    use darkhold_domain::imports::{UnitChange, ImportPlan};
+    use darkhold_domain::imports::{ImportPlan, UnitChange};
     let (name, changes) = match plan {
         ImportPlan::Create => ("create", Vec::new()),
         ImportPlan::NoChange => ("no_change", Vec::new()),
@@ -1522,10 +1519,7 @@ async fn retry_failed_units(
     }
 
     let units = imports::list_import_units(state.db(), &row.id).await?;
-    let failed = units
-        .iter()
-        .filter(|unit| unit.state == "failed")
-        .count();
+    let failed = units.iter().filter(|unit| unit.state == "failed").count();
     if failed == 0 {
         // Nothing to do, and saying so is better than queueing a job that will
         // find nothing and look like it did something.

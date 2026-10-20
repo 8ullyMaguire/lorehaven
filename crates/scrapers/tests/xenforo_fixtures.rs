@@ -234,10 +234,7 @@ fn a_thread_page_carries_a_widget_list_and_the_count_check_is_what_refuses_it() 
         .parse_threadmark_page(&fixture("thread.html"), THREAD)
         .expect("the widget parses as a list");
 
-    assert!(
-        marks.units.len() < 10,
-        "the widget is a handful of items"
-    );
+    assert!(marks.units.len() < 10, "the widget is a handful of items");
     assert_eq!(
         marks.stated,
         Some(42),
@@ -268,10 +265,7 @@ fn a_completed_work_is_read_as_complete() {
     assert_eq!(marks.stated, Some(1));
     assert_eq!(marks.units.len(), 1);
     assert_eq!(marks.units[0].source_unit_key, "125333051");
-    assert_eq!(
-        marks.units[0].title,
-        "The poem, may my cat rest in peace"
-    );
+    assert_eq!(marks.units[0].title, "The poem, may my cat rest in peace");
     // Opened 2026-09-09, written in one post: the two dates are days apart and
     // read from different fields.
     assert_eq!(marks.created, Some(datetime!(2026-09-09 22:54:33 UTC)));

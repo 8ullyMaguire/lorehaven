@@ -24,8 +24,8 @@ use scraper::Html;
 use url::Url;
 
 use crate::{
-    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError,
-    SourceKey, SourceResult, SourceWork, WorkStatus,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceError, SourceKey,
+    SourceResult, SourceUnit, SourceWork, WorkStatus,
 };
 
 /// Hosts this adapter serves.
@@ -396,11 +396,7 @@ impl SourceAdapter for Pawchive {
         ))
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         let _ = (html, work);
         Err(SourceError::Unsupported(
             "Pawchive has no HTML chapters entry point".to_owned(),

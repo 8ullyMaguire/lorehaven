@@ -28,8 +28,8 @@
 
 use async_trait::async_trait;
 use darkhold_scrapers::{
-    AuthKind, UnitRef, Credentials, Fetcher, Registry, SourceAdapter, SourceCapabilities,
-    SourceUnit, SourceKey, SourceResult, SourceWork, WorkStatus,
+    AuthKind, Credentials, Fetcher, Registry, SourceAdapter, SourceCapabilities, SourceKey,
+    SourceResult, SourceUnit, SourceWork, UnitRef, WorkStatus,
 };
 use url::Url;
 

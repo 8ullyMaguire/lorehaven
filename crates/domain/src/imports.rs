@@ -375,10 +375,7 @@ pub fn plan_import(existing: Option<&ImportedWork>, fetched: &ImportedWork) -> I
     let mut held: BTreeMap<&str, &UnitIdentity> = BTreeMap::new();
     let mut duplicates: BTreeSet<String> = BTreeSet::new();
     for unit in &existing.units {
-        if held
-            .insert(unit.source_unit_key.as_str(), unit)
-            .is_some()
-        {
+        if held.insert(unit.source_unit_key.as_str(), unit).is_some() {
             duplicates.insert(unit.source_unit_key.clone());
         }
     }
@@ -393,17 +390,13 @@ pub fn plan_import(existing: Option<&ImportedWork>, fetched: &ImportedWork) -> I
     for unit in &fetched.units {
         let key = unit.source_unit_key.as_str();
         if !held.contains_key(key) {
-            changes.push(UnitChange::Added {
-                unit: unit.clone(),
-            });
+            changes.push(UnitChange::Added { unit: unit.clone() });
         } else if seen.contains(key) {
             // A key the source lists twice. Recorded as a duplicate rather than
             // imported twice; the unique constraint on the unit table would
             // refuse the second write anyway, and failing the whole import over
             // it would help nobody.
-            changes.push(UnitChange::Removed {
-                unit: unit.clone(),
-            });
+            changes.push(UnitChange::Removed { unit: unit.clone() });
         } else {
             seen.insert(key);
         }
@@ -412,9 +405,7 @@ pub fn plan_import(existing: Option<&ImportedWork>, fetched: &ImportedWork) -> I
     // Removals, in the order we held them.
     for unit in &existing.units {
         if !fetched_by_key.contains_key(unit.source_unit_key.as_str()) {
-            changes.push(UnitChange::Removed {
-                unit: unit.clone(),
-            });
+            changes.push(UnitChange::Removed { unit: unit.clone() });
         }
     }
 
@@ -793,8 +784,7 @@ mod tests {
 
     #[test]
     fn classify_held_zero_word_count() {
-        let work =
-            ImportedWork::new("Title", "Author").with_unit(UnitIdentity::new("1", 1, "Ch"));
+        let work = ImportedWork::new("Title", "Author").with_unit(UnitIdentity::new("1", 1, "Ch"));
         assert_eq!(
             work.classify_quality(),
             ImportQuality::Held {
@@ -840,8 +830,7 @@ mod tests {
     /// A real title and a real author that reports no counted words. §11.14's
     /// held case, and the one a rule that called junk would lose without trace.
     fn a_work_with_no_words() -> ImportedWork {
-        ImportedWork::new("A Real Work", "someone")
-            .with_unit(UnitIdentity::new("c1", 1, "One"))
+        ImportedWork::new("A Real Work", "someone").with_unit(UnitIdentity::new("c1", 1, "One"))
     }
 
     /// A real title, real words, and an author who is whitespace. The

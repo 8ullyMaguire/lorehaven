@@ -134,9 +134,9 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, text_of, AuthKind, UnitRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
-    SourceWork, Wall, WorkStatus,
+    attr_of, collapse_whitespace, html_of, text_of, AuthKind, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef,
+    Wall, WorkStatus,
 };
 
 /// SpaceBattles.
@@ -1127,11 +1127,7 @@ impl SourceAdapter for XenForo {
         Ok(self.assemble_work(&id, thread, ThreadmarkPage::default()))
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // Every chapter of this work that this document carries, in the work's
         // order. A XenForo post address serves the containing page — the recorded
         // one holds 26 posts — and nothing on the page says which of them was

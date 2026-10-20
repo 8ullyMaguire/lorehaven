@@ -149,11 +149,10 @@ async fn request(
         );
     }
 
-    let unit_key =
-        match darkhold_db::reader_body_copies::unit_key_for_work(state.db(), &id).await {
-            Ok(key) => key,
-            Err(error) => return internal(error),
-        };
+    let unit_key = match darkhold_db::reader_body_copies::unit_key_for_work(state.db(), &id).await {
+        Ok(key) => key,
+        Err(error) => return internal(error),
+    };
 
     let copy = match darkhold_db::reader_body_copies::request_copy(
         state.db(),

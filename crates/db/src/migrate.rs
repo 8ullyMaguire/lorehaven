@@ -650,6 +650,324 @@ mod tests {
         }
     }
 
+    /// A foreign key's column and the column it references must have the
+    /// **same type**, and a copied column must have the same type as the one
+    /// it comes from — in the same dialect.
+    ///
+    /// The parity test above compares the column *names* and not their types,
+    /// so a type mismatch between the two dialects is invisible to it — and
+    /// PostgreSQL refuses the statement at runtime with "column \"id\" is of
+    /// type uuid but expression is of type text", which names the column and
+    /// not the dialect. That is how migration 0120's PostgreSQL twin shipped a
+    /// rebuild whose `id` was UUID where the table it copied had a TEXT, and
+    /// every test that migrated failed.
+    ///
+    /// The rule is narrow on purpose: a column's type may differ between the
+    /// dialects (`id` is TEXT on SQLite and UUID on PostgreSQL), but a
+    /// **reference** and a **copy** must match their counterpart *within* a
+    /// dialect, because that is what the database checks.
+    #[test]
+    fn every_reference_and_every_copy_keeps_its_type() {
+        for backend in [Backend::Sqlite, Backend::Postgres] {
+            // **The schema is cumulative**: a migration may reference a table
+            // an earlier migration created, so the type map is built over
+            // every migration before any of them is checked. A per-migration
+            // map would silently skip every reference to an earlier table --
+            // and every reference to a table created later.
+            let mut tables: std::collections::HashMap<
+                String,
+                std::collections::HashMap<String, String>,
+            > = std::collections::HashMap::new();
+            for migration in catalogue(backend) {
+                for (name, columns) in table_types(migration.sql) {
+                    tables.entry(name).or_default().extend(columns);
+                }
+            }
+            for migration in catalogue(backend) {
+                for (table, column, target_table, target_column) in foreign_keys(migration.sql) {
+                    let Some(actual) = tables.get(&table).and_then(|cols| cols.get(&column)) else {
+                        continue;
+                    };
+                    let Some(expected) = tables
+                        .get(&target_table)
+                        .and_then(|cols| cols.get(&target_column))
+                    else {
+                        continue;
+                    };
+                    assert_eq!(
+                        actual,
+                        expected,
+                        "{}: {table}.{column} is {actual} and {target_table}.{target_column} \
+                         is {expected}: a reference must match its target's type in \
+                         {backend:?}",
+                        migration.id()
+                    );
+                }
+                for (target_table, target_column, source_table, source_column) in
+                    copies(migration.sql)
+                {
+                    let Some(actual) = tables
+                        .get(&target_table)
+                        .and_then(|cols| cols.get(&target_column))
+                    else {
+                        continue;
+                    };
+                    let Some(expected) = tables
+                        .get(&source_table)
+                        .and_then(|cols| cols.get(&source_column))
+                    else {
+                        continue;
+                    };
+                    assert_eq!(
+                        actual,
+                        expected,
+                        "{}: {target_table}.{target_column} is {actual} and \
+                         {source_table}.{source_column} is {expected}: a copy must \
+                         keep its type in {backend:?}",
+                        migration.id()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every `INSERT INTO t (...) SELECT ... FROM s`, as the copied pairs.
+    ///
+    /// **Only the explicit form.** A `SELECT *` copies every column and the
+    /// database checks them all, but a migration that writes `SELECT *` into a
+    /// differently-typed column is rare enough that the statement's own
+    /// failure names it.
+    fn copies(sql: &str) -> Vec<(String, String, String, String)> {
+        let mut found = Vec::new();
+        for statement in sql.split(';') {
+            // **The whitespace is normalised first**, because a statement is
+            // written across lines and a parser that looks for " SELECT "
+            // finds nothing when the SELECT starts a line.
+            let statement = &collapse_whitespace(statement);
+            let upper = statement.to_uppercase();
+            let Some(insert_at) = upper.find("INSERT INTO ") else {
+                continue;
+            };
+            let Some(select_at) = upper.find(" SELECT ") else {
+                continue;
+            };
+            let Some(from_at) = upper[select_at..].find(" FROM ") else {
+                continue;
+            };
+            let from_at = select_at + from_at;
+
+            let target_table = statement[insert_at + "INSERT INTO ".len()..]
+                .split(['(', ' ', '\'', '"'])
+                .next()
+                .unwrap_or_default()
+                .to_lowercase();
+            let source_table = statement[from_at + " FROM ".len()..]
+                .split(['(', ' ', '\'', '"'])
+                .next()
+                .unwrap_or_default()
+                .to_lowercase();
+
+            let target_columns = column_list(&statement[insert_at..select_at]);
+            let source_columns = column_list(&statement[select_at..from_at]);
+            if target_columns.is_empty() || target_columns.len() != source_columns.len() {
+                continue;
+            }
+            for (target, source) in target_columns.iter().zip(source_columns.iter()) {
+                found.push((
+                    target_table.clone(),
+                    target.to_lowercase(),
+                    source_table.clone(),
+                    source.to_lowercase(),
+                ));
+            }
+        }
+        found
+    }
+
+    /// Collapse every run of whitespace into a single space.
+    fn collapse_whitespace(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut space = false;
+        for ch in text.chars() {
+            if ch.is_whitespace() {
+                space = true;
+                continue;
+            }
+            if space && !out.is_empty() {
+                out.push(' ');
+            }
+            space = false;
+            out.push(ch);
+        }
+        out
+    }
+
+    /// The column names in a fragment, as a list.
+    ///
+    /// **Either the parenthesised form or the bare form**, because the two
+    /// halves of a copy use different spellings: an `INSERT INTO t (a, b)` names
+    /// its columns in parentheses, and a `SELECT a, b` does not.
+    fn column_list(text: &str) -> Vec<String> {
+        let inner = match (text.find('('), text.find(')')) {
+            (Some(open), Some(close)) if close > open => &text[open + 1..close],
+            _ => {
+                // The bare form: strip a leading SELECT and take what is left.
+                let trimmed = text.trim();
+                let without_select = trimmed
+                    .strip_prefix("SELECT ")
+                    .or_else(|| trimmed.strip_prefix("select "))
+                    .unwrap_or(trimmed);
+                without_select
+            }
+        };
+        inner
+            .split(',')
+            .map(|part| part.trim().to_lowercase())
+            .filter(|part| {
+                !part.is_empty() && part.chars().all(|c| c.is_alphanumeric() || c == '_')
+            })
+            .collect()
+    }
+
+    /// Every table's column types, as the migrations declare them.
+    fn table_types(
+        sql: &str,
+    ) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+        let mut tables: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, String>,
+        > = std::collections::HashMap::new();
+        let mut current: Option<String> = None;
+        let mut depth = 0usize;
+        for line in sql.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed
+                .strip_prefix("CREATE TABLE IF NOT EXISTS")
+                .or_else(|| trimmed.strip_prefix("CREATE TABLE"))
+            {
+                let name = rest
+                    .trim()
+                    .split(['(', ' ', '"'])
+                    .next()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                current = Some(name);
+                tables.entry(current.clone().unwrap()).or_default();
+                depth = 0;
+                continue;
+            }
+            let Some(table) = current.clone() else {
+                continue;
+            };
+            if trimmed.starts_with('(') {
+                depth += 1;
+            }
+            if trimmed.starts_with(')') {
+                if depth == 0 {
+                    current = None;
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    current = None;
+                    continue;
+                }
+            }
+            // A comment line is not a column. The estate's migrations are
+            // heavily commented, and a comment that begins with a word and a
+            // second word reads exactly like a column declaration.
+            if trimmed.starts_with("--") || trimmed.starts_with('#') {
+                continue;
+            }
+            // A column: a name, a type, and the rest.
+            let mut parts = trimmed.split_whitespace();
+            let Some(name) = parts.next() else { continue };
+            let Some(kind) = parts.next() else { continue };
+            if name.to_uppercase().starts_with("FOREIGN")
+                || name.to_uppercase().starts_with("UNIQUE")
+                || name.to_uppercase().starts_with("PRIMARY")
+                || name.to_uppercase().starts_with("CONSTRAINT")
+                || name.to_uppercase().starts_with("CHECK")
+            {
+                continue;
+            }
+            tables
+                .entry(table)
+                .or_default()
+                .insert(name.to_lowercase(), kind.to_uppercase());
+        }
+        tables
+    }
+
+    /// Every foreign key, as (table, column, target table, target column).
+    fn foreign_keys(sql: &str) -> Vec<(String, String, String, String)> {
+        let mut found = Vec::new();
+        let mut current: Option<String> = None;
+        let mut depth = 0usize;
+        for line in sql.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed
+                .strip_prefix("CREATE TABLE IF NOT EXISTS")
+                .or_else(|| trimmed.strip_prefix("CREATE TABLE"))
+            {
+                current = Some(
+                    rest.trim()
+                        .split(['(', ' ', '"'])
+                        .next()
+                        .unwrap_or_default()
+                        .to_lowercase(),
+                );
+                depth = 0;
+                continue;
+            }
+            let Some(table) = current.clone() else {
+                continue;
+            };
+            if trimmed.starts_with('(') {
+                depth += 1;
+            }
+            if trimmed.starts_with(')') {
+                if depth == 0 {
+                    current = None;
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    current = None;
+                    continue;
+                }
+            }
+            // An inline reference: `col TYPE REFERENCES other (col)`.
+            if let Some(position) = trimmed.find("REFERENCES ") {
+                let before = &trimmed[..position];
+                let column = before
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let rest = &trimmed[position + "REFERENCES ".len()..];
+                let mut target = rest.split_whitespace();
+                let Some(target_table) = target.next() else {
+                    continue;
+                };
+                let target_column = rest
+                    .split('(')
+                    .nth(1)
+                    .and_then(|inside| inside.split(')').next())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_lowercase();
+                found.push((
+                    table,
+                    column,
+                    target_table.trim_matches('"').to_lowercase(),
+                    target_column,
+                ));
+            }
+        }
+        found
+    }
+
     #[test]
     fn the_schema_parser_sees_tables_columns_and_indexes() {
         // The check above is only as good as this parser, so it is pinned.

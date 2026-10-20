@@ -29,9 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{escape_text, Block, Document, Inline, Mark};
 
-pub use epub::{
-    CtaPlacement, EpubUnit, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance,
-};
+pub use epub::{CtaPlacement, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance, EpubUnit};
 
 /// A format a work can be exported to (spec §13.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

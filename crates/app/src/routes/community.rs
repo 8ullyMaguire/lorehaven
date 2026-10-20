@@ -167,30 +167,23 @@ async fn post_comment(
         ),
     };
     // Validate anchor fields if provided.
-    let (anchor_kind, anchor_value, anchor_unit_id) = match (
-        &body.anchor_kind,
-        &body.anchor_value,
-        &body.anchor_unit_id,
-    ) {
-        (Some(kind_str), Some(value), unit_id) => {
-            let kind = darkhold_domain::anchor::AnchorKind::from_str(kind_str)
-                .map_err(|e| ApiError(darkhold_domain::AppError::field("anchor_kind", &e)))?;
-            darkhold_domain::anchor::validate_anchor(kind, value, unit_id.as_deref())
-                .map_err(|e| ApiError(darkhold_domain::AppError::field("anchor", &e)))?;
-            (
-                Some(kind_str.clone()),
-                Some(value.clone()),
-                unit_id.clone(),
-            )
-        }
-        (None, None, _) => (None, None, None),
-        _ => {
-            return Err(ApiError(darkhold_domain::AppError::field(
-                "anchor",
-                "anchor_kind and anchor_value must be provided together",
-            )));
-        }
-    };
+    let (anchor_kind, anchor_value, anchor_unit_id) =
+        match (&body.anchor_kind, &body.anchor_value, &body.anchor_unit_id) {
+            (Some(kind_str), Some(value), unit_id) => {
+                let kind = darkhold_domain::anchor::AnchorKind::from_str(kind_str)
+                    .map_err(|e| ApiError(darkhold_domain::AppError::field("anchor_kind", &e)))?;
+                darkhold_domain::anchor::validate_anchor(kind, value, unit_id.as_deref())
+                    .map_err(|e| ApiError(darkhold_domain::AppError::field("anchor", &e)))?;
+                (Some(kind_str.clone()), Some(value.clone()), unit_id.clone())
+            }
+            (None, None, _) => (None, None, None),
+            _ => {
+                return Err(ApiError(darkhold_domain::AppError::field(
+                    "anchor",
+                    "anchor_kind and anchor_value must be provided together",
+                )));
+            }
+        };
 
     let id = darkhold_db::community::insert_comment(
         state.db(),

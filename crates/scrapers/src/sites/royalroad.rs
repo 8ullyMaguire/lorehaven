@@ -62,9 +62,9 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    collapse_whitespace, strip_tags, text_of, texts_of, UnitRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
-    SourceWork, WorkStatus,
+    collapse_whitespace, strip_tags, text_of, texts_of, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef,
+    WorkStatus,
 };
 
 /// The host this adapter serves.
@@ -525,11 +525,7 @@ impl SourceAdapter for RoyalRoad {
         self.parse_work(html, url)
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // A chapter document holds one chapter, so this returns a list of one.
         // The ordinal is recovered by matching the page's title against the
         // work's chapter list, which is what makes the fixture test able to

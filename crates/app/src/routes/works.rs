@@ -55,7 +55,7 @@ use darkhold_domain::policy::{
     can_access_content_with_standing, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,
 };
-use darkhold_domain::{AppError, UnitId, PseudId, RevisionId, WorkId};
+use darkhold_domain::{AppError, PseudId, RevisionId, UnitId, WorkId};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -109,10 +109,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/works/{id}/lineage", get(list_lineage).post(add_lineage))
         .route("/works/{id}/fork", post(fork_work))
-        .route(
-            "/chapters/{id}",
-            patch(update_unit).delete(delete_unit),
-        )
+        .route("/chapters/{id}", patch(update_unit).delete(delete_unit))
         .route("/chapters/{id}/revisions", get(list_revisions))
         .route("/chapters/{id}/restore-revision", post(restore_revision))
 }
@@ -1064,11 +1061,7 @@ async fn delete_unit(
     let unit_id = parse_unit_id(&id)?;
     let unit = content::find_unit(state.db(), unit_id)
         .await?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
 
     // Same authorization as an edit: loading the parent work through the acting
     // pseud means a stranger's unit is not found rather than found-and-refused.
@@ -1083,9 +1076,7 @@ async fn delete_unit(
     // it becomes reachable the moment a delete races two concurrent requests, and
     // the second one should get "not found", not a 500.
     if !content::delete_unit(state.db(), unit_id).await? {
-        return Err(ApiError(AppError::NotFound {
-            resource: "unit",
-        }));
+        return Err(ApiError(AppError::NotFound { resource: "unit" }));
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1099,11 +1090,7 @@ async fn update_unit(
     let unit_id = parse_unit_id(&id)?;
     let unit = content::find_unit(state.db(), unit_id)
         .await?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
 
     // Loading the parent work through the acting pseud is the authorization
     // step: a stranger's unit is not found rather than found-and-refused.
@@ -1147,21 +1134,13 @@ async fn update_unit(
 
     if request.title.is_some() {
         let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
-        let changed = content::update_unit(
-            state.db(),
-            unit.id,
-            request.expected_version,
-            Some(&title),
-        )
-        .await?;
+        let changed =
+            content::update_unit(state.db(), unit.id, request.expected_version, Some(&title))
+                .await?;
         if !changed && request.document.is_none() {
             let current = content::find_unit(state.db(), unit.id)
                 .await?
-                .ok_or_else(|| {
-                    ApiError(AppError::NotFound {
-                        resource: "unit",
-                    })
-                })?;
+                .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
             return Err(ApiError(AppError::RevisionConflict {
                 expected: request.expected_version,
                 actual: current.version,
@@ -1171,11 +1150,7 @@ async fn update_unit(
 
     let updated = content::find_unit(state.db(), unit.id)
         .await?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
 
     Ok(Json(UnitView::from(updated)))
 }
@@ -1202,10 +1177,7 @@ async fn reorder_units(
         .await
         .map_err(from_content)?;
 
-    let units = trace_step(
-        "units",
-        content::units_for_work(state.db(), work.id).await,
-    )?;
+    let units = trace_step("units", content::units_for_work(state.db(), work.id).await)?;
     Ok(Json(units.into_iter().map(UnitView::from).collect()))
 }
 
@@ -1237,20 +1209,14 @@ async fn read_unit(
         .iter()
         .find(|candidate| candidate.id == unit_id)
         .cloned()
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
 
     let revision = match unit.current_revision_id {
         Some(id) => content::find_revision(state.db(), id).await?,
         None => None,
     };
 
-    let position = units
-        .iter()
-        .position(|candidate| candidate.id == unit_id);
+    let position = units.iter().position(|candidate| candidate.id == unit_id);
     let previous_unit_id = position
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| units.get(index))
@@ -1314,11 +1280,7 @@ async fn list_revisions(
     let unit_id = parse_unit_id(&id)?;
     let unit = content::find_unit(state.db(), unit_id)
         .await?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
     let (_work, contributors) = author_work(&state, &user, &unit.work_id.to_string()).await?;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
@@ -1326,8 +1288,7 @@ async fn list_revisions(
     }
 
     let current = unit.current_revision_id.map(|id| id.to_string());
-    let revisions: Vec<RevisionSummary> =
-        content::revisions_for_unit(state.db(), unit_id).await?;
+    let revisions: Vec<RevisionSummary> = content::revisions_for_unit(state.db(), unit_id).await?;
 
     Ok(Json(
         revisions
@@ -1355,11 +1316,7 @@ async fn restore_revision(
     let unit_id = parse_unit_id(&id)?;
     let unit = content::find_unit(state.db(), unit_id)
         .await?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
     let (_work, contributors) = author_work(&state, &user, &unit.work_id.to_string()).await?;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
@@ -1378,11 +1335,7 @@ async fn restore_revision(
 
     let updated = content::find_unit(state.db(), unit_id)
         .await?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "unit",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
 
     Ok(Json(UnitView::from(updated)))
 }
@@ -2278,11 +2231,8 @@ fn parse_work_id(raw: &str) -> ApiResult<WorkId> {
 }
 
 fn parse_unit_id(raw: &str) -> ApiResult<UnitId> {
-    raw.parse().map_err(|_| {
-        ApiError(AppError::NotFound {
-            resource: "unit",
-        })
-    })
+    raw.parse()
+        .map_err(|_| ApiError(AppError::NotFound { resource: "unit" }))
 }
 
 fn parse_visibility(raw: &str) -> Visibility {

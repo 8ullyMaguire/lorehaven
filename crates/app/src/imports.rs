@@ -27,9 +27,7 @@
 use anyhow::Result;
 use darkhold_db::storage::BlobStore;
 use darkhold_db::{imports, jobs};
-use darkhold_domain::imports::{
-    plan_import, UnitChange, UnitIdentity, ImportPlan, ImportedWork,
-};
+use darkhold_domain::imports::{plan_import, ImportPlan, ImportedWork, UnitChange, UnitIdentity};
 use darkhold_domain::JobId;
 use darkhold_scrapers::registry::Registry;
 use darkhold_scrapers::{
@@ -1053,8 +1051,7 @@ async fn store_units(
     // Bulk for a fresh import; per-unit for a retry, and only when the source
     // genuinely addresses units one at a time. Anything else is a bulk fetch
     // whose already-stored units are skipped rather than re-read.
-    let per_unit_retry =
-        !previous.is_empty() && !failed.is_empty() && capabilities.per_unit_fetch;
+    let per_unit_retry = !previous.is_empty() && !failed.is_empty() && capabilities.per_unit_fetch;
 
     let fetched = if per_unit_retry {
         let mut units = Vec::new();
@@ -1194,13 +1191,7 @@ async fn store_units(
 
         let done = i64::try_from(index + 1).unwrap_or(i64::MAX);
         let permille = PREVIEW_PERMILLE + (950 * done / total);
-        progress(
-            state,
-            job,
-            permille,
-            Some(unit.source_unit_key.as_str()),
-        )
-        .await?;
+        progress(state, job, permille, Some(unit.source_unit_key.as_str())).await?;
     }
 
     if any_failed {

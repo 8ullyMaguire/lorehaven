@@ -42,11 +42,7 @@ impl std::fmt::Display for AnchorKind {
 ///
 /// - `paragraph` anchors require a unit id and a non-negative integer value.
 /// - `timestamp` anchors require a value in `HH:MM:SS(.fff)?` or `SS(.fff)?` form.
-pub fn validate_anchor(
-    kind: AnchorKind,
-    value: &str,
-    unit_id: Option<&str>,
-) -> Result<(), String> {
+pub fn validate_anchor(kind: AnchorKind, value: &str, unit_id: Option<&str>) -> Result<(), String> {
     match kind {
         AnchorKind::Paragraph => {
             let unit = unit_id.ok_or("paragraph anchors require a unit_id")?;

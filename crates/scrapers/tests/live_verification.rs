@@ -159,10 +159,7 @@ async fn royal_road_still_reads() {
         work.author_url.is_some(),
         "the author URL is on the page; a blank one means the selector moved"
     );
-    assert!(
-        work.unit_count() > 100,
-        "a long work lost its chapter list"
-    );
+    assert!(work.unit_count() > 100, "a long work lost its chapter list");
     assert!(work.word_count.unwrap_or(0) > 0, "no word count");
     // The recorded fixture is a completed work. If this fails the site changed
     // and the fixture, not the parser, is what needs re-reading.
@@ -298,10 +295,9 @@ async fn the_efiction_family_still_reads() {
     // fallback key is indistinguishable from a real one until an author inserts a
     // chapter, which is exactly when a reader's place in the work is lost.
     assert!(
-        work.units.iter().all(|chapter| chapter
-            .source_unit_key
-            .chars()
-            .all(|c| c.is_ascii_digit())),
+        work.units
+            .iter()
+            .all(|chapter| chapter.source_unit_key.chars().all(|c| c.is_ascii_digit())),
         "a chapter key is not a chapid: {:?}",
         work.units
             .iter()
@@ -385,10 +381,7 @@ async fn an_efiction_chapter_body_still_comes_back_with_text() {
     //
     // A chapter the work does not have is refused rather than invented.
     assert!(
-        adapter
-            .fetch_unit(&fetch, &work, 5000, None)
-            .await
-            .is_err(),
+        adapter.fetch_unit(&fetch, &work, 5000, None).await.is_err(),
         "a chapter past the end of the work was reported as read"
     );
 }

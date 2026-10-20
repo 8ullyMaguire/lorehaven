@@ -94,8 +94,8 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    AuthKind, UnitRef, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit,
-    SourceError, SourceKey, SourceResult, SourceWork, WorkStatus,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceError, SourceKey,
+    SourceResult, SourceUnit, SourceWork, UnitRef, WorkStatus,
 };
 
 /// The host, without `www.`.

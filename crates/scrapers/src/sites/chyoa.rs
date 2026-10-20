@@ -32,9 +32,9 @@ use scraper::{Html, Selector};
 use url::Url;
 
 use crate::{
-    attr_of, collapse_whitespace, text_of, AuthKind, UnitRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
-    SourceWork, WorkStatus,
+    attr_of, collapse_whitespace, text_of, AuthKind, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef,
+    WorkStatus,
 };
 
 /// Hosts this adapter serves.
@@ -339,11 +339,7 @@ impl SourceAdapter for Chyoa {
         })
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // When given a chapter page, parse its body.
         if work.source_url.contains("/chapter/") {
             let chapter = self.parse_chapter(html, work, 1)?;

@@ -39,9 +39,9 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, strip_tags, text_of, texts_of, UnitRef, Credentials,
-    Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey,
-    SourceResult, SourceWork, Wall, WorkStatus,
+    attr_of, collapse_whitespace, html_of, strip_tags, text_of, texts_of, Credentials, Fetcher,
+    SourceAdapter, SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit,
+    SourceWork, UnitRef, Wall, WorkStatus,
 };
 
 /// Hosts this adapter serves.
@@ -468,11 +468,7 @@ impl SourceAdapter for ArchiveSoftware {
                     work.source_work_key
                 ))
             })?;
-        if !chapter
-            .source_unit_key
-            .chars()
-            .all(|c| c.is_ascii_digit())
-        {
+        if !chapter.source_unit_key.chars().all(|c| c.is_ascii_digit()) {
             return Err(SourceError::Unsupported(
                 "this work's chapter ids are not known, so a single chapter cannot be re-read"
                     .to_owned(),
@@ -547,11 +543,7 @@ impl SourceAdapter for ArchiveSoftware {
         self.parse_work(html, url)
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         self.parse_chapters(html, work)
     }
 }

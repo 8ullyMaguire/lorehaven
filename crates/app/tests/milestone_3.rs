@@ -367,19 +367,13 @@ async fn publishing_needs_a_title_a_unit_and_content_and_then_reads_publicly() {
     let (status, body) = publish(&mut author, &work_id, 1, None).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"]["code"], "VALIDATION_FAILED");
-    assert!(
-        body["error"]["field_errors"]["units"].is_string(),
-        "{body}"
-    );
+    assert!(body["error"]["field_errors"]["units"].is_string(), "{body}");
 
     // A work with a unit but no text is still not publishable.
     let (unit, version) = add_unit(&mut author, &work_id, "One").await;
     let (status, body) = publish(&mut author, &work_id, 1, None).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(
-        body["error"]["field_errors"]["units"].is_string(),
-        "{body}"
-    );
+    assert!(body["error"]["field_errors"]["units"].is_string(), "{body}");
 
     // With text, it is.
     let (status, body) = save_unit(&mut author, &unit, version, "It began here.").await;
@@ -531,9 +525,7 @@ async fn a_stale_edit_is_refused_with_a_conflict_that_names_both_versions() {
     let (_, unit_body) = first
         .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
-    let version = unit_body["unit"]["version"]
-        .as_i64()
-        .expect("version");
+    let version = unit_body["unit"]["version"].as_i64().expect("version");
     let (status, _) = save_unit(&mut first, &unit, version, "One.").await;
     assert_eq!(status, StatusCode::OK);
 
@@ -557,13 +549,7 @@ async fn restoring_a_revision_creates_a_new_one_rather_than_rewriting_history() 
     let (_, body) = save_unit(&mut author, &unit, version, "First version.").await;
     let first_version_number = body["version"].as_i64().expect("version");
 
-    let (_, body) = save_unit(
-        &mut author,
-        &unit,
-        first_version_number,
-        "Second version.",
-    )
-    .await;
+    let (_, body) = save_unit(&mut author, &unit, first_version_number, "Second version.").await;
     let second_version_number = body["version"].as_i64().expect("version");
 
     let (status, body) = author
@@ -1017,9 +1003,7 @@ async fn a_stranger_cannot_delete_someone_elses_unit() {
     let mut stranger = harness.client();
     register(&mut stranger, "stranger@example.com", "Stranger").await;
     active_pseud(&mut stranger).await;
-    let (status, body) = stranger
-        .delete(&format!("/api/v1/chapters/{unit}"))
-        .await;
+    let (status, body) = stranger.delete(&format!("/api/v1/chapters/{unit}")).await;
     assert_eq!(
         status,
         StatusCode::NOT_FOUND,

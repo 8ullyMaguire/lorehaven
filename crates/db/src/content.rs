@@ -27,7 +27,7 @@ use sqlx::FromRow;
 use darkhold_domain::content::{can_publish_work, publication_readiness, PublicationFacts};
 use darkhold_domain::document::Document;
 use darkhold_domain::policy::{Actor, Decision};
-use darkhold_domain::{AppError, UnitId, PseudId, PublicationEventId, RevisionId, WorkId};
+use darkhold_domain::{AppError, PseudId, PublicationEventId, RevisionId, UnitId, WorkId};
 
 use crate::identity::now_rfc3339;
 use crate::{sql_owned, Backend, Database};
@@ -1252,11 +1252,7 @@ pub async fn delete_unit(db: &Database, id: UnitId) -> Result<bool> {
 /// The supplied list must be exactly the work's live units; anything else is
 /// refused rather than partially applied, so a client with a stale list cannot
 /// silently drop a unit that another tab added.
-pub async fn reorder_units(
-    db: &Database,
-    work: WorkId,
-    ordered: &[UnitId],
-) -> ContentResult<bool> {
+pub async fn reorder_units(db: &Database, work: WorkId, ordered: &[UnitId]) -> ContentResult<bool> {
     let existing = units_for_work(db, work).await?;
     let existing_ids: Vec<UnitId> = existing.iter().map(|unit| unit.id).collect();
 
@@ -1379,8 +1375,8 @@ pub async fn append_revision(
         "SELECT version FROM units WHERE id::text = ?",
     );
 
-    let payload = serde_json::json!({ "unit_id": unit, "revision_id": id, "work_id": work })
-        .to_string();
+    let payload =
+        serde_json::json!({ "unit_id": unit, "revision_id": id, "work_id": work }).to_string();
 
     macro_rules! write_revision {
         ($tx:expr) => {{
@@ -1507,10 +1503,7 @@ pub async fn find_revision(db: &Database, id: RevisionId) -> ContentResult<Optio
 }
 
 /// A unit's revisions, newest first.
-pub async fn revisions_for_unit(
-    db: &Database,
-    unit: UnitId,
-) -> Result<Vec<RevisionSummary>> {
+pub async fn revisions_for_unit(db: &Database, unit: UnitId) -> Result<Vec<RevisionSummary>> {
     let sql = db.sql(
         "SELECT r.id AS id, r.revision_number AS revision_number, r.word_count AS word_count,
                 r.note AS note, r.created_at AS created_at, r.restored_from_id AS restored_from_id,
@@ -1595,10 +1588,7 @@ pub async fn restore_revision(
 /// How many units a work has, and how many of them are not empty.
 pub async fn unit_facts(db: &Database, work: WorkId) -> Result<(usize, usize)> {
     let units = units_for_work(db, work).await?;
-    let with_content = units
-        .iter()
-        .filter(|unit| unit.has_content())
-        .count();
+    let with_content = units.iter().filter(|unit| unit.has_content()).count();
     Ok((units.len(), with_content))
 }
 

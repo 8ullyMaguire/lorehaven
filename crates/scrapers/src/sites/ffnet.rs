@@ -100,9 +100,9 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, text_of, AuthKind, UnitRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
-    SourceWork, Wall, WorkStatus,
+    attr_of, collapse_whitespace, html_of, text_of, AuthKind, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceError, SourceKey, SourceResult, SourceUnit, SourceWork, UnitRef,
+    Wall, WorkStatus,
 };
 
 /// The host FanFiction.net is read from, without `www.`.
@@ -539,11 +539,7 @@ impl SourceAdapter for FanFiction {
         self.parse_work(html, &work_id)
     }
 
-    fn units_from_html(
-        &self,
-        html: &str,
-        work: &SourceWork,
-    ) -> SourceResult<Vec<SourceUnit>> {
+    fn units_from_html(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         // A chapter document holds one chapter. Its position comes from the
         // option the page marks `selected` — the page does not otherwise state
         // it — and the title from the work's own list when that list has the

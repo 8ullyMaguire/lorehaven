@@ -140,10 +140,7 @@ impl ShapeRule {
                             ));
                         }
                         Some(prev) if unit.ordinal != prev + 1 => {
-                            return Err(format!(
-                                "ordinals jump from {prev} to {}",
-                                unit.ordinal
-                            ));
+                            return Err(format!("ordinals jump from {prev} to {}", unit.ordinal));
                         }
                         _ => {}
                     }
@@ -914,11 +911,7 @@ auth:
         .await;
 
         assert!(!report.passed());
-        assert!(
-            report.render().contains("has_units"),
-            "{}",
-            report.render()
-        );
+        assert!(report.render().contains("has_units"), "{}", report.render());
     }
 
     #[tokio::test]
