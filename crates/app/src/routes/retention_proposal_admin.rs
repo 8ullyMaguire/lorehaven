@@ -352,7 +352,7 @@ async fn override_setting(
         &darkhold_db::governance::AuditEntry {
             actor: &user.account_id.to_string(),
             actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
-            reason: Some(&reason),
+            reason: Some(reason),
             action: "retention.proposal.override",
             subject_type: "retention_proposal",
             subject_id: &proposal.id,

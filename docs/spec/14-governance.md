@@ -108,6 +108,57 @@ credits, not any activity-volume metric. The only automatic *demotion* is spam: 
 spam reports in 90 days drops one level, never below level 2, with diminishing recovery
 (`0.7^loss_count`).
 
+### What the implementation settled
+
+- **The ladder is configuration, and no route holds a level number.** A route asks for the
+  *privilege* it needs — `ModerationQueue`, `ScopedBans`, `CreateMood` — and the ladder says
+  which level holds it. The names, the unlocks and the levels are one configuration table, so an
+  instance that wants its moderators at level 2 writes a different ladder rather than changing
+  the code. The privilege vocabulary is **closed**: a configuration naming a privilege the build
+  does not know is a startup error, because a privilege nobody holds is a privilege that
+  silently unlocks nothing.
+- **The ladder is cumulative.** A level holds everything the levels below it hold, so level 1
+  does not repeat level 0's reading privileges. The specification's table lists only what each
+  level *adds*, and the cumulative rule is what makes it mean what it says.
+- **Level 0 is the anonymous reader and level 1 is "an account, or a guest."** A registered
+  account is at level 1 from the moment it exists, and its level is *computed* rather than
+  inferred from the absence of a row. The levels above it are unchanged, so this renumbers
+  only the bottom of the ladder — and it is the reason "level 1 to submit" and "level 3 plus
+  quorum to curate" (§15.2) mean what they say.
+- **The full engine follows the tier threshold.** Level 4's row says "the full engine (T2)
+  **if `full_min_trust` is 4**" — so `tiers.full_min_trust` decides where the full engine
+  sits, and the ladder's row follows it. There is no second configuration key to keep in
+  step, and no way for them to disagree.
+- **The four axes each name their review**, and that is what makes them *earned* rather than
+  *active*: tenure is time; contributions are proposals **passed** or **approved**, so somebody
+  else accepted them; the vote score is the **public** ratings on the account's published work
+  (a reader's private rating is their own business, and letting it move a writer's standing
+  would make the axis a weapon); and the report accuracy is reports **upheld** minus reports
+  **dismissed** — net, not a rate, because a rate rewards a reader with one lucky report as much
+  as a reader with fifty confirmed ones.
+- **The activity volume is measured and then thrown away.** It is counted so that the
+  counter-example can be stated rather than asserted: ten thousand posts is a lower level than
+  twenty accepted contributions. The score function does not read it, and the stored basis does
+  not carry it.
+- **A level is written with the basis that explains it**, and **every change writes an event**.
+  The event log is **append-only, and enforced**: triggers refuse an update and a delete on both
+  engines, because a trust history that can be rewritten is not a history. The cause vocabulary
+  is closed in the code *and* in the database, because two lists that can disagree would be a
+  list the database accepts and the code cannot explain.
+- **The elastic requirement is stored, not computed per request.** The pool is a count over
+  every account, and a trust gate is asked on every request a reader makes that they are not
+  allowed to make. Storing it is also what makes **no ratchet** true by construction: the
+  requirement is a pure function of the pool and has no memory of what it decided last time.
+- **The trust refusal names both levels** — the one found and the one required — because a
+  refusal that names neither is not actionable, and §0.3 makes the thresholds visible by design.
+- **A guest never extends its trust**, and that is enforced rather than merely configured: a
+  guest with ninety days of tenure would otherwise reach level 2 on the tenure axis alone, and
+  the guest door is otherwise a trust farm.
+- **The demotion's floor is not configurable.** A demotion that could take an account to level 0
+  would make the account a guest again, and a guest's contents are foldable away. And
+  *confirmed* means a reviewer **upheld** the report and the report said **spam**: an open
+  report is an allegation, and a demotion is not founded on an allegation.
+
 | key | default |
 |---|---|
 | `trust.levels[]` | per site |
@@ -153,6 +204,29 @@ the decider**. Safety decisions are never modulated; the human decides.
 
 Every moderator, curator and operator action is recorded and **readable by any signed-in reader**,
 with actor, action, target, reason and timestamp. Metamoderation votes are anonymised.
+
+### What the implementation settled
+
+- **Anonymous access is 401, not 403.** "403 answers 'yes, and you may not'" — but the modlog is
+  not a door that exists only for the permitted. It is a public record that any reader of the
+  instance may read, and being anonymous is a fact about the *reader* rather than about the
+  record. A 403 would tell an anonymous caller that the modlog exists and that they may not see
+  it, which is an answer to a question this section says they may ask.
+- **The acting account is never published.** The audit log's `actor` column holds the account —
+  right for an audit, which is the instance's own record — but the modlog is a *public* surface,
+  and publishing an account id there would publish the very link §7 says no public surface may
+  publish. **The actor is the acting pseudonym**, and a target that is an account is published as
+  that account's public face.
+- **The reason is a column, not something dug out of a blob.** The action's detail is a JSON
+  document whose shape differs per action; a reason read out of it would be present in some
+  entries and absent in others, and the contract says *every* entry carries one.
+- **A panel decision is the instance acting.** An action with no pseudonym behind it is rendered
+  as such — which is what an anonymised metamoderation vote is, since "the actor is the jury
+  panel, not the voter".
+- **The cursor is one implementation.** A cursor is a promise, and the promise has to be the same
+  promise everywhere: the same encoding, the same `(timestamp, id)` pair, and a cursor this
+  collection did not issue is a **validation failure rather than an empty page** — an empty page
+  would say "you have reached the end" when the truth is "I did not understand you".
 
 ## 14.7 Quorum and curation
 

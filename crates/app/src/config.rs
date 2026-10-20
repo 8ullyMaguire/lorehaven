@@ -3495,7 +3495,7 @@ impl Config {
                 );
             }
         }
-        for (privilege, asked, ladder_level) in tr.require.loosening(ladder) {
+        if let Some((privilege, asked, ladder_level)) = tr.require.loosening(ladder).first() {
             anyhow::bail!(
                 "trust.require.{} asks for level {asked}, which is below the ladder's \
                  {ladder_level}: a requirement may be tightened but not loosened, because \

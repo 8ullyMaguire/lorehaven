@@ -207,12 +207,16 @@ async fn vote_score(db: &Database, account: &str) -> Result<i64, sqlx::Error> {
            JOIN pseuds p ON p.id = w.owner_pseud_id
           WHERE p.account_id = ? AND w.lifecycle = 'published'
             AND r.is_public = 1 AND r.deleted_at IS NULL",
-        "SELECT COALESCE(SUM(r.stars), 0) - 3 * COUNT(r.id)
+        // `is_public` is a BOOLEAN on PostgreSQL and an INTEGER on SQLite, and
+        // `SUM(stars)` is a NUMERIC on PostgreSQL — so the cast is not
+        // decoration: without it the expression decodes as a numeric and the
+        // shared `i64` reader cannot read it.
+        "SELECT CAST(COALESCE(SUM(r.stars), 0) AS BIGINT) - 3 * COUNT(r.id)
            FROM rating r
            JOIN works w ON w.id = r.work_id
            JOIN pseuds p ON p.id = w.owner_pseud_id
           WHERE p.account_id = $1::uuid AND w.lifecycle = 'published'
-            AND r.is_public = 1 AND r.deleted_at IS NULL",
+            AND r.is_public = TRUE AND r.deleted_at IS NULL",
     );
     let score: (i64,) = match db.backend() {
         Backend::Sqlite => {
@@ -249,7 +253,7 @@ async fn report_accuracy(db: &Database, account: &str) -> Result<i64, sqlx::Erro
           - COUNT(CASE WHEN LOWER(t.outcome) = 'dismiss' THEN 1 END)
            FROM reports r
            JOIN review_tasks t ON t.report_id = r.id
-          WHERE r.reporter = $1::uuid",
+          WHERE r.reporter = $1",
     );
     let accuracy: (i64,) = match db.backend() {
         Backend::Sqlite => {
@@ -282,12 +286,15 @@ async fn activity_volume(db: &Database, account: &str) -> Result<i64, sqlx::Erro
           + (SELECT COUNT(*) FROM works w
               JOIN pseuds p ON p.id = w.owner_pseud_id
              WHERE p.account_id = ? AND w.deleted_at IS NULL)",
+        // `comments.author_pseud` is a TEXT column on both engines while
+        // `pseuds.id` is a UUID on PostgreSQL — so the join casts, and the
+        // table is `pseuds` on both.
         "SELECT
             (SELECT COUNT(*) FROM comments c
-              JOIN pseudos p ON p.id = c.author_pseud
+              JOIN pseuds p ON p.id = c.author_pseud::uuid
              WHERE p.account_id = $1::uuid AND c.deleted_at IS NULL)
           + (SELECT COUNT(*) FROM works w
-              JOIN pseudos p ON p.id = w.owner_pseud_id
+              JOIN pseuds p ON p.id = w.owner_pseud_id
              WHERE p.account_id = $1::uuid AND w.deleted_at IS NULL)",
     );
     let volume: (i64,) = match db.backend() {
@@ -436,7 +443,7 @@ async fn is_guest(db: &Database, account: &str) -> Result<bool, sqlx::Error> {
 async fn stored_level(db: &Database, account: &str) -> Result<Option<i64>, sqlx::Error> {
     let sql = db.sql(
         "SELECT level FROM trust_levels WHERE account = ?",
-        "SELECT CAST(level AS BIGINT) FROM trust_levels WHERE account = $1::uuid",
+        "SELECT CAST(level AS BIGINT) FROM trust_levels WHERE account = $1",
     );
     let row: Option<(i64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -505,7 +512,7 @@ pub async fn write_trust(
             .execute(db.postgres_pool().expect("postgres"))
             .await?;
             sqlx::query("UPDATE accounts SET trust_level = $1 WHERE id = $2::uuid")
-                .bind(level as i32)
+                .bind(level)
                 .bind(account)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -526,7 +533,7 @@ async fn stored_evidence(
 ) -> Result<Option<darkhold_domain::trust::TrustEvidence>, sqlx::Error> {
     let sql = db.sql(
         "SELECT basis FROM trust_levels WHERE account = ?",
-        "SELECT basis::text FROM trust_levels WHERE account = $1::uuid",
+        "SELECT basis::text FROM trust_levels WHERE account = $1",
     );
     let basis: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -650,7 +657,7 @@ pub async fn confirmed_spam_reports(
         "SELECT COUNT(DISTINCT r.id)
            FROM reports r
            JOIN review_tasks t ON t.report_id = r.id
-          WHERE r.subject_type = 'account' AND r.subject_id = $1::uuid
+          WHERE r.subject_type = 'account' AND r.subject_id = $1
             AND LOWER(r.reason) = 'spam'
             AND LOWER(t.outcome) = 'uphold'
             AND r.created_at >= $2",
@@ -1498,9 +1505,12 @@ pub async fn list_modlog(
            FROM audit_log
           WHERE (? = '' OR (created_at, id) < (?, ?))
           ORDER BY created_at DESC, id DESC LIMIT ?",
+        // `audit_log.id` is a TEXT column on both engines, so the cursor's id
+        // is compared as text — casting it to a UUID would be a cast of a
+        // column that is not one.
         "SELECT id::text, actor_pseud, reason, action, subject_type, subject_id, created_at
            FROM audit_log
-          WHERE ($1 = '' OR (created_at, id) < ($2, $3::uuid))
+          WHERE ($1 = '' OR (created_at, id) < ($2, $3))
           ORDER BY created_at DESC, id DESC LIMIT $4",
     );
     let rows: Vec<ModlogRow> = match db.backend() {

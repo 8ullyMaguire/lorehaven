@@ -348,12 +348,28 @@ async fn a_computed_level_is_written_with_the_basis_that_explains_it() {
 
     // The stored basis carries the four axis values and the weights, so the
     // level can be explained.
-    let sql = "SELECT basis FROM trust_levels WHERE account = ?";
-    let row: Option<(String,)> = sqlx::query_as(sql)
-        .bind(&account)
-        .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await
-        .expect("read the basis");
+    //
+    // **The basis is a JSON document on PostgreSQL and TEXT on SQLite**, so the
+    // read casts on the one side that needs it.
+    let sql = harness.tdb.db().sql(
+        "SELECT basis FROM trust_levels WHERE account = ?",
+        "SELECT basis::text FROM trust_levels WHERE account = $1",
+    );
+    let row: Option<(String,)> = match harness.tdb.db().backend() {
+        darkhold_db::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(&account)
+                .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+        }
+        darkhold_db::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(&account)
+                .fetch_optional(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+        }
+    }
+    .expect("read the basis");
     let (basis,) = row.expect("a stored level");
     let parsed: Value = serde_json::from_str(&basis).expect("the basis is JSON");
     assert_eq!(

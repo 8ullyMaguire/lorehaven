@@ -303,19 +303,36 @@ async fn the_table_refuses_to_be_rewritten() {
     .expect("record the event");
 
     // An UPDATE is refused.
-    let update = sqlx::query("UPDATE trust_events SET to_level = 6")
-        .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await;
+    //
+    // **On both engines**, because the trigger is on both engines: a history
+    // that can be rewritten on one of them is a history that can be rewritten.
+    let update = match harness.tdb.db().backend() {
+        darkhold_db::Backend::Sqlite => sqlx::query("UPDATE trust_events SET to_level = 6")
+            .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .map(|_| ()),
+        darkhold_db::Backend::Postgres => sqlx::query("UPDATE trust_events SET to_level = 6")
+            .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .map(|_| ()),
+    };
     assert!(
         update.is_err(),
-        "an update must be refused: a trust history that can be rewritten is not \\
+        "an update must be refused: a trust history that can be rewritten is not \
          a history"
     );
 
     // And a DELETE is refused.
-    let delete = sqlx::query("DELETE FROM trust_events")
-        .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await;
+    let delete = match harness.tdb.db().backend() {
+        darkhold_db::Backend::Sqlite => sqlx::query("DELETE FROM trust_events")
+            .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .map(|_| ()),
+        darkhold_db::Backend::Postgres => sqlx::query("DELETE FROM trust_events")
+            .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .map(|_| ()),
+    };
     assert!(delete.is_err(), "a delete must be refused too");
 
     // The row is still there.
