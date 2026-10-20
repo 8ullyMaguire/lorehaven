@@ -325,7 +325,7 @@ mod tests {
     use super::*;
     #[test]
     fn praise_is_positive() {
-        let v = classify("I loved this chapter, the banter was wonderful!");
+        let v = classify("I loved this unit, the banter was wonderful!");
         assert_eq!(v.class, FeedbackClass::Positive);
         assert!(v.signals.contains(&"appreciation".to_owned()));
     }

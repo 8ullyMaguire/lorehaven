@@ -24,7 +24,7 @@
 //! page does not state how many episodes the work has.** A work with 795 episodes
 //! serves 100 rows and a pager; the number 795 appears only on the info page, as
 //! 全795エピソード. So a preview that reads the work page and stops reports 100 of
-//! 795 chapters, and — because the import trusts the preview — silently imports a
+//! 795 units, and — because the import trusts the preview — silently imports a
 //! seventh of the work as though it were all of it.
 //!
 //! This adapter therefore reads the info page first, walks every page of the
@@ -83,8 +83,8 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    collapse_whitespace, strip_tags, text_of, ChapterRef, Credentials, Fetcher, SourceAdapter,
-    SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult, SourceWork,
+    collapse_whitespace, strip_tags, text_of, UnitRef, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult, SourceWork,
     WorkStatus,
 };
 
@@ -448,12 +448,12 @@ impl Syosetu {
                 status: info.status,
                 published_at: info.published_at,
                 updated_at: info.updated_at,
-                chapters: vec![ChapterRef {
+                units: vec![UnitRef {
                     ordinal: 1,
                     // The work's own ncode, not `1`: there is no episode 1 to
                     // name, and `fetch_chapter` reads this to know it must fetch
                     // the work page rather than build an episode URL.
-                    source_chapter_key: ncode.to_owned(),
+                    source_unit_key: ncode.to_owned(),
                     title: collapse_whitespace(&title),
                 }],
                 rating_text: None,
@@ -573,14 +573,14 @@ impl Syosetu {
                 .max()
         });
 
-        let chapters = episodes
+        let units = episodes
             .into_iter()
-            .map(|(ordinal, title)| ChapterRef {
+            .map(|(ordinal, title)| UnitRef {
                 ordinal,
                 // The episode number is the site's own stable identifier for the
                 // chapter: it is in the URL, and it is what the site itself
                 // displays as `2/795`.
-                source_chapter_key: ordinal.to_string(),
+                source_unit_key: ordinal.to_string(),
                 title,
             })
             .collect();
@@ -601,7 +601,7 @@ impl Syosetu {
             status: info.status,
             published_at: info.published_at,
             updated_at,
-            chapters,
+            units,
             rating_text: None,
             warning_texts: Vec::new(),
             tags: info.tags,
@@ -614,7 +614,7 @@ impl Syosetu {
         html: &str,
         work: &SourceWork,
         ordinal: u32,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
         if is_not_found(&document) {
             return Err(SourceError::NotFound);
@@ -632,7 +632,7 @@ impl Syosetu {
             .map(|raw| collapse_whitespace(&raw))
             .filter(|title| !title.is_empty())
             .or_else(|| {
-                work.chapters
+                work.units
                     .iter()
                     .find(|chapter| chapter.ordinal == ordinal)
                     .map(|chapter| chapter.title.clone())
@@ -650,16 +650,16 @@ impl Syosetu {
         // here: a one-shot's chapter is keyed by its ncode, and returning "1"
         // instead would give the same chapter two identities — the work's and the
         // fetched chapter's — and the import dedupes on that key.
-        let source_chapter_key = work
-            .chapters
+        let source_unit_key = work
+            .units
             .iter()
             .find(|chapter| chapter.ordinal == ordinal)
-            .map(|chapter| chapter.source_chapter_key.clone())
+            .map(|chapter| chapter.source_unit_key.clone())
             .unwrap_or_else(|| ordinal.to_string());
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal,
-            source_chapter_key,
+            source_unit_key,
             title,
             content_html,
             image_urls,
@@ -715,10 +715,10 @@ impl SourceAdapter for Syosetu {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             // An episode number is its own URL, so a retry re-reads exactly one
             // chapter without touching the work page or the other episodes.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             // The info page links to the author's page, but that page's layout
             // has not been recorded.
             bibliography: false,
@@ -790,21 +790,21 @@ impl SourceAdapter for Syosetu {
         self.assemble(&ncode, &work.body, &info.body, &list_pages)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         let ncode = &work.source_work_key;
 
         // A one-shot's single chapter is the work page itself, and there is no
         // episode list to walk.
-        if work.chapters.len() == 1
+        if work.units.len() == 1
             && work
-                .chapters
+                .units
                 .first()
-                .is_some_and(|chapter| chapter.source_chapter_key == *ncode)
+                .is_some_and(|chapter| chapter.source_unit_key == *ncode)
         {
             let page = fetch.get(&Syosetu::work_url(ncode)).await?;
             return self
@@ -812,26 +812,26 @@ impl SourceAdapter for Syosetu {
                 .map(|chapter| vec![chapter]);
         }
 
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for chapter in &work.chapters {
+        let mut units = Vec::with_capacity(work.units.len());
+        for chapter in &work.units {
             let page = fetch
                 .get(&Syosetu::episode_url(ncode, chapter.ordinal))
                 .await?;
-            chapters.push(self.parse_episode(&page.body, work, chapter.ordinal)?);
+            units.push(self.parse_episode(&page.body, work, chapter.ordinal)?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let ncode = &work.source_work_key;
         let known = work
-            .chapters
+            .units
             .iter()
             .find(|chapter| chapter.ordinal == ordinal)
             .ok_or_else(|| {
@@ -840,7 +840,7 @@ impl SourceAdapter for Syosetu {
 
         // A one-shot has no episode URLs at all: its single chapter is the work
         // page, which is what the chapter's key being the ncode means.
-        let target = if known.source_chapter_key == *ncode {
+        let target = if known.source_unit_key == *ncode {
             Syosetu::work_url(ncode)
         } else {
             Syosetu::episode_url(ncode, ordinal)
@@ -874,12 +874,12 @@ impl SourceAdapter for Syosetu {
                 status: info.status,
                 published_at: info.published_at,
                 updated_at: info.updated_at,
-                // The chapters themselves are not on the info page, and inventing
+                // The units themselves are not on the info page, and inventing
                 // placeholder refs for `total` of them would put a chapter count
                 // into a preview with nothing behind it. Empty here means "this
                 // document does not carry the list", and the caller that combines
                 // documents fills it in.
-                chapters: Vec::new(),
+                units: Vec::new(),
                 rating_text: None,
                 warning_texts: Vec::new(),
                 tags: info.tags,
@@ -908,12 +908,12 @@ impl SourceAdapter for Syosetu {
                 status: WorkStatus::Unknown,
                 published_at: None,
                 updated_at: page.latest,
-                chapters: page
+                units: page
                     .episodes
                     .into_iter()
-                    .map(|(ordinal, title)| ChapterRef {
+                    .map(|(ordinal, title)| UnitRef {
                         ordinal,
-                        source_chapter_key: ordinal.to_string(),
+                        source_unit_key: ordinal.to_string(),
                         title,
                     })
                     .collect(),
@@ -946,9 +946,9 @@ impl SourceAdapter for Syosetu {
             status: WorkStatus::Complete,
             published_at: None,
             updated_at: None,
-            chapters: vec![ChapterRef {
+            units: vec![UnitRef {
                 ordinal: 1,
-                source_chapter_key: ncode,
+                source_unit_key: ncode,
                 title,
             }],
             rating_text: None,
@@ -957,11 +957,11 @@ impl SourceAdapter for Syosetu {
         })
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // A one-shot's work page holds its single chapter's prose; an episode page
         // holds one episode's. The ordinal is taken from the caller's list by
         // matching the chapter key, and a page that matches nothing is reported
@@ -991,7 +991,7 @@ impl SourceAdapter for Syosetu {
             .or_else(|| {
                 let title =
                     text_of(&document, "h1.p-novel__title").map(|raw| collapse_whitespace(&raw))?;
-                work.chapters
+                work.units
                     .iter()
                     .find(|chapter| chapter.title == title)
                     .map(|chapter| chapter.ordinal)
@@ -1367,8 +1367,8 @@ mod tests {
     fn the_capability_a_retry_needs_is_advertised() {
         let capabilities = adapter().capabilities();
         assert!(capabilities.metadata);
-        assert!(capabilities.chapters);
-        assert!(capabilities.per_chapter_fetch);
+        assert!(capabilities.units);
+        assert!(capabilities.per_unit_fetch);
         // The author page's layout has not been recorded.
         assert!(!capabilities.bibliography);
     }

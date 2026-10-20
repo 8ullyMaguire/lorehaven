@@ -256,17 +256,17 @@ async fn create_work(client: &mut Client, title: &str) -> Value {
     body
 }
 
-/// Add a chapter and return its identifier and version.
-async fn add_chapter(client: &mut Client, work: &str, title: &str) -> (String, i64) {
+/// Add a unit and return its identifier and version.
+async fn add_unit(client: &mut Client, work: &str, title: &str) -> (String, i64) {
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work}/chapters"),
             json!({ "title": title }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
     (
-        body["id"].as_str().expect("chapter id").to_owned(),
+        body["id"].as_str().expect("unit id").to_owned(),
         body["version"].as_i64().expect("version"),
     )
 }
@@ -282,15 +282,15 @@ fn document(text: &str) -> Value {
     })
 }
 
-async fn save_chapter(
+async fn save_unit(
     client: &mut Client,
-    chapter: &str,
+    unit: &str,
     expected_version: i64,
     text: &str,
 ) -> (StatusCode, Value) {
     client
         .patch(
-            &format!("/api/v1/chapters/{chapter}"),
+            &format!("/api/v1/chapters/{unit}"),
             json!({ "expected_version": expected_version, "document": document(text) }),
         )
         .await
@@ -312,7 +312,7 @@ async fn publish(
 }
 
 // ---------------------------------------------------------------------------
-// The vertical slice: draft → chapter → save → publish → read
+// The vertical slice: draft → unit → save → publish → read
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -326,17 +326,17 @@ async fn a_draft_is_reachable_to_its_author_and_is_a_404_to_everyone_else() {
     assert_eq!(work["lifecycle"], "draft");
     assert_eq!(work["role"], "owner");
 
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    let (status, body) = save_chapter(&mut author, &chapter, version, "It began.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    let (status, body) = save_unit(&mut author, &unit, version, "It began.").await;
     assert_eq!(status, StatusCode::OK, "save: {body}");
     assert_eq!(body["word_count"], 2);
     assert_eq!(body["has_content"], true);
 
-    // The author sees it, with its chapter.
+    // The author sees it, with its unit.
     let (status, body) = author.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["title"], "The Long Road");
-    assert_eq!(body["chapters"].as_array().expect("chapters").len(), 1);
+    assert_eq!(body["units"].as_array().expect("units").len(), 1);
     assert!(body["publication_blockers"]
         .as_array()
         .expect("blockers")
@@ -348,7 +348,7 @@ async fn a_draft_is_reachable_to_its_author_and_is_a_404_to_everyone_else() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let (status, _) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -356,7 +356,7 @@ async fn a_draft_is_reachable_to_its_author_and_is_a_404_to_everyone_else() {
 }
 
 #[tokio::test]
-async fn publishing_needs_a_title_a_chapter_and_content_and_then_reads_publicly() {
+async fn publishing_needs_a_title_a_unit_and_content_and_then_reads_publicly() {
     let harness = Harness::new("publish").await;
     let mut author = harness.client();
     register(&mut author, "author@example.com", "Quill").await;
@@ -368,28 +368,28 @@ async fn publishing_needs_a_title_a_chapter_and_content_and_then_reads_publicly(
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"]["code"], "VALIDATION_FAILED");
     assert!(
-        body["error"]["field_errors"]["chapters"].is_string(),
+        body["error"]["field_errors"]["units"].is_string(),
         "{body}"
     );
 
-    // A work with a chapter but no text is still not publishable.
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
+    // A work with a unit but no text is still not publishable.
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
     let (status, body) = publish(&mut author, &work_id, 1, None).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert!(
-        body["error"]["field_errors"]["chapters"].is_string(),
+        body["error"]["field_errors"]["units"].is_string(),
         "{body}"
     );
 
     // With text, it is.
-    let (status, body) = save_chapter(&mut author, &chapter, version, "It began here.").await;
+    let (status, body) = save_unit(&mut author, &unit, version, "It began here.").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, body) = publish(&mut author, &work_id, 1, None).await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
     assert_eq!(body["lifecycle"], "published");
     assert!(body["published_at"].is_string());
 
-    // A stranger can now read the work and the chapter.
+    // A stranger can now read the work and the unit.
     let mut stranger = harness.anonymous();
     let (status, body) = stranger.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -400,7 +400,7 @@ async fn publishing_needs_a_title_a_chapter_and_content_and_then_reads_publicly(
     assert!(body.get("version").is_none());
 
     let (status, body) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["sanitized_html"], "<p>It began here.</p>");
@@ -419,29 +419,29 @@ async fn an_anonymous_reader_never_receives_a_draft_revision() {
 
     let work = create_work(&mut author, "Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Secret draft text.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Secret draft text.").await;
     publish(&mut author, &work_id, 1, None).await;
 
     let mut stranger = harness.anonymous();
     let (status, body) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK);
 
     // A second revision is written after publication. A reader must get the
     // current one, and must never be handed an arbitrary earlier revision.
-    let (status, body) = save_chapter(
+    let (status, body) = save_unit(
         &mut author,
-        &chapter,
-        body["chapter"]["version"].as_i64().unwrap(),
+        &unit,
+        body["unit"]["version"].as_i64().unwrap(),
         "Second text.",
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let (status, body) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["sanitized_html"], "<p>Second text.</p>");
@@ -464,7 +464,7 @@ async fn an_anonymous_reader_never_receives_a_draft_revision() {
     let (status, _) = stranger.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -492,7 +492,7 @@ async fn a_stale_edit_is_refused_with_a_conflict_that_names_both_versions() {
 
     let work = create_work(&mut first, "Draft").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, _) = add_chapter(&mut first, &work_id, "One").await;
+    let (unit, _) = add_unit(&mut first, &work_id, "One").await;
 
     // The same account in a second browser: it reads version 1 and edits.
     let mut second = harness.client();
@@ -527,17 +527,17 @@ async fn a_stale_edit_is_refused_with_a_conflict_that_names_both_versions() {
     let (_, body) = first.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(body["summary"], "First writer.");
 
-    // The same rule holds for chapter text.
-    let (_, chapter_body) = first
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+    // The same rule holds for unit text.
+    let (_, unit_body) = first
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
-    let version = chapter_body["chapter"]["version"]
+    let version = unit_body["unit"]["version"]
         .as_i64()
         .expect("version");
-    let (status, _) = save_chapter(&mut first, &chapter, version, "One.").await;
+    let (status, _) = save_unit(&mut first, &unit, version, "One.").await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, body) = save_chapter(&mut second, &chapter, version, "Two.").await;
+    let (status, body) = save_unit(&mut second, &unit, version, "Two.").await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"]["code"], "REVISION_CONFLICT");
 
@@ -552,14 +552,14 @@ async fn restoring_a_revision_creates_a_new_one_rather_than_rewriting_history() 
 
     let work = create_work(&mut author, "Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
 
-    let (_, body) = save_chapter(&mut author, &chapter, version, "First version.").await;
+    let (_, body) = save_unit(&mut author, &unit, version, "First version.").await;
     let first_version_number = body["version"].as_i64().expect("version");
 
-    let (_, body) = save_chapter(
+    let (_, body) = save_unit(
         &mut author,
-        &chapter,
+        &unit,
         first_version_number,
         "Second version.",
     )
@@ -567,7 +567,7 @@ async fn restoring_a_revision_creates_a_new_one_rather_than_rewriting_history() 
     let second_version_number = body["version"].as_i64().expect("version");
 
     let (status, body) = author
-        .get(&format!("/api/v1/chapters/{chapter}/revisions"))
+        .get(&format!("/api/v1/chapters/{unit}/revisions"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let revisions = body.as_array().expect("revisions");
@@ -579,14 +579,14 @@ async fn restoring_a_revision_creates_a_new_one_rather_than_rewriting_history() 
 
     let (status, body) = author
         .post(
-            &format!("/api/v1/chapters/{chapter}/restore-revision"),
+            &format!("/api/v1/chapters/{unit}/restore-revision"),
             json!({ "revision_id": oldest_id }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "restore: {body}");
 
     let (status, body) = author
-        .get(&format!("/api/v1/chapters/{chapter}/revisions"))
+        .get(&format!("/api/v1/chapters/{unit}/revisions"))
         .await;
     assert_eq!(status, StatusCode::OK);
     let revisions = body.as_array().expect("revisions");
@@ -601,7 +601,7 @@ async fn restoring_a_revision_creates_a_new_one_rather_than_rewriting_history() 
 
     // The current text is the restored text.
     let (status, body) = author
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["sanitized_html"], "<p>First version.</p>");
@@ -623,8 +623,8 @@ async fn replaying_one_idempotency_key_does_not_publish_or_notify_twice() {
 
     let work = create_work(&mut author, "Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Something to read.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Something to read.").await;
 
     let (status, body) = publish(&mut author, &work_id, 1, Some("publish-attempt-1")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -796,7 +796,7 @@ async fn an_editor_may_change_text_but_not_publish() {
 
     let work = create_work(&mut owner, "Shared").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut owner, &work_id, "One").await;
+    let (unit, version) = add_unit(&mut owner, &work_id, "One").await;
 
     let (status, body) = owner
         .post(
@@ -811,7 +811,7 @@ async fn an_editor_may_change_text_but_not_publish() {
         .await;
 
     // The editor may edit text.
-    let (status, body) = save_chapter(&mut editor, &chapter, version, "Edited by Ink.").await;
+    let (status, body) = save_unit(&mut editor, &unit, version, "Edited by Ink.").await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // But may not publish, nor invite.
@@ -844,9 +844,9 @@ async fn a_document_outside_the_editor_schema_is_refused_and_changes_nothing() {
 
     let work = create_work(&mut author, "Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
 
-    let (status, body) = save_chapter(&mut author, &chapter, version, "Legitimate text.").await;
+    let (status, body) = save_unit(&mut author, &unit, version, "Legitimate text.").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let version = body["version"].as_i64().expect("version");
 
@@ -873,7 +873,7 @@ async fn a_document_outside_the_editor_schema_is_refused_and_changes_nothing() {
     ] {
         let (status, body) = author
             .patch(
-                &format!("/api/v1/chapters/{chapter}"),
+                &format!("/api/v1/chapters/{unit}"),
                 json!({ "expected_version": version, "document": hostile }),
             )
             .await;
@@ -888,13 +888,13 @@ async fn a_document_outside_the_editor_schema_is_refused_and_changes_nothing() {
     // Nothing was written: the stored revision is unchanged and there is still
     // exactly one of them.
     let (status, body) = author
-        .get(&format!("/api/v1/chapters/{chapter}/revisions"))
+        .get(&format!("/api/v1/chapters/{unit}/revisions"))
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().expect("revisions").len(), 1, "{body}");
 
     let (_, body) = author
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(body["sanitized_html"], "<p>Legitimate text.</p>");
 
@@ -909,10 +909,10 @@ async fn markup_is_escaped_in_the_reading_view() {
 
     let work = create_work(&mut author, "Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    let (status, _) = save_chapter(
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    let (status, _) = save_unit(
         &mut author,
-        &chapter,
+        &unit,
         version,
         "<script>alert('x')</script> & \"quotes\"",
     )
@@ -922,7 +922,7 @@ async fn markup_is_escaped_in_the_reading_view() {
 
     let mut stranger = harness.anonymous();
     let (status, body) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let html = body["sanitized_html"].as_str().expect("html");
@@ -934,45 +934,45 @@ async fn markup_is_escaped_in_the_reading_view() {
 }
 
 // ---------------------------------------------------------------------------
-// Chapter deletion (spec §8) — soft delete, owner or contributor only
+// Unit deletion (spec §8) — soft delete, owner or contributor only
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_deleted_chapter_disappears_from_reads_but_keeps_its_row() {
-    // `delete_chapter` has been implemented and unwired since it was written:
-    // chapters could be created, edited and restored, never removed. It is a
+async fn a_deleted_unit_disappears_from_reads_but_keeps_its_row() {
+    // `delete_unit` has been implemented and unwired since it was written:
+    // units could be created, edited and restored, never removed. It is a
     // *soft* delete on purpose — a reader's stored position may point at a
-    // chapter, and the revision history is what makes an accident recoverable —
+    // unit, and the revision history is what makes an accident recoverable —
     // so this asserts both halves: gone from the API, still in the table.
-    let harness = Harness::new("chapter-delete").await;
+    let harness = Harness::new("unit-delete").await;
     let mut owner = harness.client();
     register(&mut owner, "owner@example.com", "ChapOwner").await;
     active_pseud(&mut owner).await;
     let work = create_work(&mut owner, "Deletable").await;
     let work_id = work["id"].as_str().expect("work id").to_owned();
-    let (chapter, _version) = add_chapter(&mut owner, &work_id, "Doomed").await;
+    let (unit, _version) = add_unit(&mut owner, &work_id, "Doomed").await;
 
-    // Positive precondition: the chapter is readable before it is deleted.
-    // The read path for one chapter is under its work, not /chapters/{id}.
-    let read_path = format!("/api/v1/works/{work_id}/chapters/{chapter}");
+    // Positive precondition: the unit is readable before it is deleted.
+    // The read path for one unit is under its work, not /units/{id}.
+    let read_path = format!("/api/v1/works/{work_id}/chapters/{unit}");
     let (status, body) = owner.get(&read_path).await;
     assert_eq!(status, StatusCode::OK, "precondition: {body}");
 
-    let (status, body) = owner.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    let (status, body) = owner.delete(&format!("/api/v1/chapters/{unit}")).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "delete: {body}");
 
     let (status, _) = owner.get(&read_path).await;
     assert_eq!(
         status,
         StatusCode::NOT_FOUND,
-        "a deleted chapter is not readable"
+        "a deleted unit is not readable"
     );
 
     // Soft, not gone: the row survives with deleted_at set. This is the part a
     // hard delete would fail.
     let deleted_at = harness
         .tdb
-        .fetch_text("SELECT deleted_at FROM chapters WHERE id = ?", &chapter)
+        .fetch_text("SELECT deleted_at FROM units WHERE id = ?", &unit)
         .await
         .expect("the row is still there — this is a soft delete, not a hard one");
     assert!(
@@ -983,42 +983,42 @@ async fn a_deleted_chapter_disappears_from_reads_but_keeps_its_row() {
 }
 
 #[tokio::test]
-async fn deleting_a_chapter_twice_is_a_404_not_a_second_success() {
-    // The second delete names a chapter that is not there. Reporting 204 would
+async fn deleting_a_unit_twice_is_a_404_not_a_second_success() {
+    // The second delete names a unit that is not there. Reporting 204 would
     // tell the caller it had just removed something.
-    let harness = Harness::new("chapter-delete-twice").await;
+    let harness = Harness::new("unit-delete-twice").await;
     let mut owner = harness.client();
     register(&mut owner, "owner2@example.com", "ChapOwner2").await;
     active_pseud(&mut owner).await;
     let work = create_work(&mut owner, "Twice").await;
     let work_id = work["id"].as_str().expect("work id").to_owned();
-    let (chapter, _) = add_chapter(&mut owner, &work_id, "Doomed Twice").await;
+    let (unit, _) = add_unit(&mut owner, &work_id, "Doomed Twice").await;
 
-    let (status, _) = owner.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    let (status, _) = owner.delete(&format!("/api/v1/chapters/{unit}")).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, body) = owner.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    let (status, body) = owner.delete(&format!("/api/v1/chapters/{unit}")).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "second delete: {body}");
     harness.cleanup().await;
 }
 
 #[tokio::test]
-async fn a_stranger_cannot_delete_someone_elses_chapter() {
+async fn a_stranger_cannot_delete_someone_elses_unit() {
     // Authorization is by loading the parent work through the acting pseud, so a
-    // stranger's chapter is a 404 rather than a 403: confirming it exists is
+    // stranger's unit is a 404 rather than a 403: confirming it exists is
     // itself a disclosure.
-    let harness = Harness::new("chapter-delete-stranger").await;
+    let harness = Harness::new("unit-delete-stranger").await;
     let mut owner = harness.client();
     register(&mut owner, "chapowner@example.com", "ChapOwner3").await;
     active_pseud(&mut owner).await;
     let work = create_work(&mut owner, "Guarded").await;
     let work_id = work["id"].as_str().expect("work id").to_owned();
-    let (chapter, _) = add_chapter(&mut owner, &work_id, "Protected").await;
+    let (unit, _) = add_unit(&mut owner, &work_id, "Protected").await;
 
     let mut stranger = harness.client();
     register(&mut stranger, "stranger@example.com", "Stranger").await;
     active_pseud(&mut stranger).await;
     let (status, body) = stranger
-        .delete(&format!("/api/v1/chapters/{chapter}"))
+        .delete(&format!("/api/v1/chapters/{unit}"))
         .await;
     assert_eq!(
         status,
@@ -1026,9 +1026,9 @@ async fn a_stranger_cannot_delete_someone_elses_chapter() {
         "not found, not forbidden: {body}"
     );
 
-    // And the chapter is still there.
+    // And the unit is still there.
     let (status, body) = owner
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(
         status,
@@ -1039,19 +1039,19 @@ async fn a_stranger_cannot_delete_someone_elses_chapter() {
 }
 
 #[tokio::test]
-async fn a_contributor_who_may_not_edit_cannot_delete_a_chapter() {
+async fn a_contributor_who_may_not_edit_cannot_delete_a_unit() {
     // The stranger test alone does not pin the `can_edit` check: `author_work`
     // already refuses a non-contributor with a 404, so removing `can_edit` from
     // the delete route left that test green. The case only `can_edit` decides is
     // a contributor whose role grants reach but not editing — a beta reader, who
     // can read the work and would still be refused a delete.
-    let harness = Harness::new("chapter-delete-betareader").await;
+    let harness = Harness::new("unit-delete-betareader").await;
     let mut owner = harness.client();
     register(&mut owner, "br@example.com", "BetaOwner").await;
     active_pseud(&mut owner).await;
     let work = create_work(&mut owner, "Beta Shared").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, _) = add_chapter(&mut owner, &work_id, "Beta's Work").await;
+    let (unit, _) = add_unit(&mut owner, &work_id, "Beta's Work").await;
 
     let mut reader = harness.client();
     register(&mut reader, "beta@example.com", "Beta").await;
@@ -1082,16 +1082,16 @@ async fn a_contributor_who_may_not_edit_cannot_delete_a_chapter() {
     assert_eq!(body["role"], "beta_reader");
 
     // ...but reach is not edit.
-    let (status, body) = reader.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    let (status, body) = reader.delete(&format!("/api/v1/chapters/{unit}")).await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
         "a beta reader may read the work but not delete its text: {body}"
     );
 
-    // And the chapter is intact.
+    // And the unit is intact.
     let (status, _) = owner
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "the refused delete changed nothing");
     harness.cleanup().await;

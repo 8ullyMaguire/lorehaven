@@ -17,7 +17,7 @@
 
   const MODES = [
     { value: 'plain', label: 'Plain', desc: 'Standard discussion thread' },
-    { value: 'reading_group', label: 'Reading Group', desc: 'Scheduled chapters with discussion' },
+    { value: 'reading_group', label: 'Reading Group', desc: 'Scheduled units with discussion' },
     { value: 'critique_circle', label: 'Critique Circle', desc: 'Queue-based peer review' },
     { value: 'wiki_pin', label: 'Wiki Pin', desc: 'Collaborative pinned note' },
     { value: 'prompt', label: 'Prompt', desc: 'Writing prompt thread' },

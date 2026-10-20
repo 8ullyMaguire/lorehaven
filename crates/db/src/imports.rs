@@ -1,5 +1,5 @@
 //! Import repositories: the source catalogue, per-pseud credentials, library
-//! items, import jobs and imported chapters (spec §11).
+//! items, import jobs and imported units (spec §11).
 //!
 //! Conventions are the same as every other module in this crate: DML is written
 //! once with `?` placeholders and the PostgreSQL half carries its casts, reads
@@ -143,12 +143,12 @@ pub struct LibraryItem {
     /// When *we* last looked. Kept apart from the line above, because "the
     /// author updated it" and "we checked it" are different facts.
     pub last_synced_at: Option<String>,
-    /// How many of this work's chapters are stored and readable.
+    /// How many of this work's units are stored and readable.
     ///
     /// Counted, not copied from the source: the source's number is a claim about
     /// the work and this is a fact about the copy. They differ whenever an
     /// import is partial, which is the state a reader most needs to be told.
-    pub chapter_count: i64,
+    pub unit_count: i64,
     /// Which import produced this and from where.
     pub provenance_json: String,
     /// When this copy was created.
@@ -182,7 +182,7 @@ pub struct ImportJob {
     pub state: String,
     /// The library item this produced or updated.
     pub library_item_id: Option<String>,
-    /// The per-chapter report, as JSON.
+    /// The per-unit report, as JSON.
     pub report_json: Option<String>,
     /// When it was asked for.
     pub created_at: String,
@@ -206,32 +206,32 @@ impl ImportJob {
     }
 }
 
-/// One chapter's import state.
+/// One unit's import state.
 ///
 /// The `state` vocabulary is deliberately four-valued. `skipped` is the one that
-/// matters: a re-import that did not need to re-read a chapter is not a chapter
+/// matters: a re-import that did not need to re-read a unit is not a unit
 /// that failed, and a report that conflates them tells a reader the wrong thing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportChapter {
+pub struct ImportUnit {
     /// Identifier.
     pub id: String,
-    /// The import this chapter belongs to.
+    /// The import this unit belongs to.
     pub import_job_id: String,
     /// The library item it landed in.
     pub library_item_id: Option<String>,
-    /// The source's own chapter identifier, or the ordinal when it has none.
-    pub source_chapter_key: String,
+    /// The source's own unit identifier, or the ordinal when it has none.
+    pub source_unit_key: String,
     /// 1-based position.
     pub ordinal: i64,
     /// Title as the source shows it.
     pub title: String,
     /// `pending`, `stored`, `skipped` or `failed`.
     pub state: String,
-    /// The chapter body, by content checksum.
+    /// The unit body, by content checksum.
     pub content_blob_checksum: Option<String>,
-    /// Set when the chapter was materialised into a work's chapter.
-    pub chapter_id: Option<String>,
-    /// Why a chapter failed, or what a skip meant.
+    /// Set when the unit was materialised into a work's unit.
+    pub unit_id: Option<String>,
+    /// Why a unit failed, or what a skip meant.
     pub note: Option<String>,
 }
 
@@ -1005,11 +1005,11 @@ pub async fn find_library_item(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_UNIT_COUNT} FROM library_items
              WHERE account_id = ? AND source_key = ? AND source_work_key = ?"
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_UNIT_COUNT} FROM library_items
              WHERE account_id::text = ? AND source_key = ? AND source_work_key = ?"
         ),
     );
@@ -1026,11 +1026,11 @@ pub async fn get_library_item(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_UNIT_COUNT} FROM library_items \
              WHERE id = ? AND account_id = ?"
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_UNIT_COUNT} FROM library_items \
              WHERE id::text = ? AND account_id::text = ?"
         ),
     );
@@ -1068,14 +1068,14 @@ pub async fn list_library_items(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_UNIT_COUNT} FROM library_items
              WHERE account_id = ?
                AND (? IS NULL OR (updated_at, id) < (?, ?))
              ORDER BY updated_at DESC, id DESC
              LIMIT ?"
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_UNIT_COUNT} FROM library_items
              WHERE account_id::text = ?
                AND (?::text IS NULL OR (updated_at, id::text) < (?::text, ?::text))
              ORDER BY updated_at DESC, id DESC
@@ -1386,14 +1386,14 @@ pub async fn set_import_state(
 }
 
 // ---------------------------------------------------------------------------
-// Imported chapters
+// Imported units
 // ---------------------------------------------------------------------------
 
-/// What is known about a chapter at the moment its row is written.
+/// What is known about a unit at the moment its row is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportChapterInput {
+pub struct ImportUnitInput {
     /// The source's own identifier.
-    pub source_chapter_key: String,
+    pub source_unit_key: String,
     /// 1-based position.
     pub ordinal: i64,
     /// Title as the source shows it.
@@ -1402,51 +1402,51 @@ pub struct ImportChapterInput {
     pub state: String,
     /// The body's content checksum, when it has been stored.
     pub content_blob_checksum: Option<String>,
-    /// Why a chapter failed, or what a skip meant.
+    /// Why a unit failed, or what a skip meant.
     pub note: Option<String>,
 }
 
-/// Record a chapter's outcome, replacing any earlier row for the same chapter.
+/// Record a unit's outcome, replacing any earlier row for the same unit.
 ///
-/// `(import_job_id, source_chapter_key)` is unique, so this is the write that
+/// `(import_job_id, source_unit_key)` is unique, so this is the write that
 /// makes a retry idempotent: running the same import twice cannot store a
-/// chapter twice, and a chapter already `stored` can be skipped rather than
+/// unit twice, and a unit already `stored` can be skipped rather than
 /// re-read.
-pub async fn upsert_import_chapter(
+pub async fn upsert_import_unit(
     db: &Database,
     import_job_id: &str,
     library_item_id: Option<&str>,
-    input: &ImportChapterInput,
+    input: &ImportUnitInput,
 ) -> Result<()> {
-    let id = darkhold_domain::ImportChapterId::new().to_string();
+    let id = darkhold_domain::ImportUnitId::new().to_string();
     let now = now_rfc3339();
     let input = input.clone();
     let item = library_item_id.map(str::to_owned);
     let sql = db.sql(
-        "INSERT INTO import_chapters (id, import_job_id, library_item_id, source_chapter_key,
+        "INSERT INTO import_units (id, import_job_id, library_item_id, source_unit_key,
                                       ordinal, title, state, content_blob_checksum, note,
                                       created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (import_job_id, source_chapter_key) DO UPDATE SET
-             library_item_id = COALESCE(excluded.library_item_id, import_chapters.library_item_id),
+         ON CONFLICT (import_job_id, source_unit_key) DO UPDATE SET
+             library_item_id = COALESCE(excluded.library_item_id, import_units.library_item_id),
              ordinal = excluded.ordinal,
              title = excluded.title,
              state = excluded.state,
              content_blob_checksum = COALESCE(excluded.content_blob_checksum,
-                                              import_chapters.content_blob_checksum),
+                                              import_units.content_blob_checksum),
              note = excluded.note,
              updated_at = excluded.updated_at",
-        "INSERT INTO import_chapters (id, import_job_id, library_item_id, source_chapter_key,
+        "INSERT INTO import_units (id, import_job_id, library_item_id, source_unit_key,
                                       ordinal, title, state, content_blob_checksum, note,
                                       created_at, updated_at)
          VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (import_job_id, source_chapter_key) DO UPDATE SET
-             library_item_id = COALESCE(excluded.library_item_id, import_chapters.library_item_id),
+         ON CONFLICT (import_job_id, source_unit_key) DO UPDATE SET
+             library_item_id = COALESCE(excluded.library_item_id, import_units.library_item_id),
              ordinal = excluded.ordinal,
              title = excluded.title,
              state = excluded.state,
              content_blob_checksum = COALESCE(excluded.content_blob_checksum,
-                                              import_chapters.content_blob_checksum),
+                                              import_units.content_blob_checksum),
              note = excluded.note,
              updated_at = excluded.updated_at",
     );
@@ -1456,7 +1456,7 @@ pub async fn upsert_import_chapter(
             .bind(&id)
             .bind(import_job_id)
             .bind(item.clone())
-            .bind(&input.source_chapter_key)
+            .bind(&input.source_unit_key)
             .bind(input.ordinal)
             .bind(&input.title)
             .bind(&input.state)
@@ -1468,30 +1468,30 @@ pub async fn upsert_import_chapter(
     .await
     .with_context(|| {
         format!(
-            "recording chapter {} of import {import_job_id}",
-            input.source_chapter_key
+            "recording unit {} of import {import_job_id}",
+            input.source_unit_key
         )
     })?;
     Ok(())
 }
 
-/// The chapters of one import, in order.
-pub async fn list_import_chapters(
+/// The units of one import, in order.
+pub async fn list_import_units(
     db: &Database,
     import_job_id: &str,
-) -> Result<Vec<ImportChapter>> {
+) -> Result<Vec<ImportUnit>> {
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {IMPORT_CHAPTER_COLUMNS} FROM import_chapters
+            "SELECT {IMPORT_UNIT_COLUMNS} FROM import_units
              WHERE import_job_id = ? ORDER BY ordinal"
         ),
         format!(
-            "SELECT {IMPORT_CHAPTER_COLUMNS_PG} FROM import_chapters
+            "SELECT {IMPORT_UNIT_COLUMNS_PG} FROM import_units
              WHERE import_job_id::text = ? ORDER BY ordinal"
         ),
     );
-    let rows: Vec<ImportChapterRow> = match db.backend() {
+    let rows: Vec<ImportUnitRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(import_job_id)
@@ -1505,12 +1505,12 @@ pub async fn list_import_chapters(
                 .await?
         }
     };
-    rows.into_iter().map(decode_import_chapter).collect()
+    rows.into_iter().map(decode_import_unit).collect()
 }
 
-/// The most recent chapters recorded for a library item.
+/// The most recent units recorded for a library item.
 ///
-/// This is what a re-import compares against: the checksum each chapter had the
+/// This is what a re-import compares against: the checksum each unit had the
 /// last time it was read is the only way to answer "did the text actually
 /// change", a question a preview cannot answer.
 /// What the previous import of this work stored, or `None` if there is no
@@ -1518,14 +1518,14 @@ pub async fn list_import_chapters(
 ///
 /// This is the input the planner needs: a re-import is compared against what is
 /// already held, and "nothing held yet" is a different answer from "held, with
-/// these chapters". Returning an empty vector for both would make a first
+/// these units". Returning an empty vector for both would make a first
 /// import look like an update that removed everything.
-pub async fn previous_chapters_for(
+pub async fn previous_units_for(
     db: &Database,
     account_id: &str,
     source_key: &str,
     source_work_key: &str,
-) -> Result<Option<Vec<ImportChapter>>> {
+) -> Result<Option<Vec<ImportUnit>>> {
     let item = find_library_item(db, account_id, source_key, source_work_key).await?;
     let Some(item) = item else {
         return Ok(None);
@@ -1533,7 +1533,7 @@ pub async fn previous_chapters_for(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {IMPORT_CHAPTER_COLUMNS} FROM import_chapters
+            "SELECT {IMPORT_UNIT_COLUMNS} FROM import_units
              WHERE import_job_id = (
                  SELECT id FROM import_jobs
                  WHERE library_item_id = ? AND account_id = ?
@@ -1542,7 +1542,7 @@ pub async fn previous_chapters_for(
              ORDER BY ordinal"
         ),
         format!(
-            "SELECT {IMPORT_CHAPTER_COLUMNS} FROM import_chapters
+            "SELECT {IMPORT_UNIT_COLUMNS} FROM import_units
              WHERE import_job_id = (
                  SELECT id FROM import_jobs
                  WHERE library_item_id::text = ? AND account_id::text = ?
@@ -1551,7 +1551,7 @@ pub async fn previous_chapters_for(
              ORDER BY ordinal"
         ),
     );
-    let rows: Vec<ImportChapterRow> = match db.backend() {
+    let rows: Vec<ImportUnitRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(&item.id)
@@ -1568,39 +1568,39 @@ pub async fn previous_chapters_for(
         }
     };
     rows.into_iter()
-        .map(decode_import_chapter)
+        .map(decode_import_unit)
         .collect::<Result<Vec<_>>>()
         .map(Some)
 }
 
-pub async fn latest_chapters_for_item(
+pub async fn latest_units_for_item(
     db: &Database,
     library_item_id: &str,
-) -> Result<Vec<ImportChapter>> {
+) -> Result<Vec<ImportUnit>> {
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {IMPORT_CHAPTER_COLUMNS} FROM import_chapters
+            "SELECT {IMPORT_UNIT_COLUMNS} FROM import_units
              WHERE library_item_id = ?
                AND import_job_id = (
-                   SELECT import_job_id FROM import_chapters
+                   SELECT import_job_id FROM import_units
                    WHERE library_item_id = ?
                    ORDER BY updated_at DESC, id DESC LIMIT 1
                )
              ORDER BY ordinal"
         ),
         format!(
-            "SELECT {IMPORT_CHAPTER_COLUMNS_PG} FROM import_chapters
+            "SELECT {IMPORT_UNIT_COLUMNS_PG} FROM import_units
              WHERE library_item_id::text = ?
                AND import_job_id = (
-                   SELECT import_job_id FROM import_chapters
+                   SELECT import_job_id FROM import_units
                    WHERE library_item_id::text = ?
                    ORDER BY updated_at DESC, id DESC LIMIT 1
                )
              ORDER BY ordinal"
         ),
     );
-    let rows: Vec<ImportChapterRow> = match db.backend() {
+    let rows: Vec<ImportUnitRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(library_item_id)
@@ -1616,7 +1616,7 @@ pub async fn latest_chapters_for_item(
                 .await?
         }
     };
-    rows.into_iter().map(decode_import_chapter).collect()
+    rows.into_iter().map(decode_import_unit).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2110,18 +2110,18 @@ pub async fn delete_source_credential(
 // Row shapes
 // ---------------------------------------------------------------------------
 
-/// How many chapters of this copy are actually stored.
+/// How many units of this copy are actually stored.
 ///
-/// Counted from `import_chapters` rather than read off the source's own count,
+/// Counted from `import_units` rather than read off the source's own count,
 /// because the two answer different questions and the difference is the point:
-/// "the source lists 109 chapters" and "we hold 109 chapters" diverge the moment
+/// "the source lists 109 units" and "we hold 109 units" diverge the moment
 /// an import is partial, and a library that showed the source's number would
 /// report a complete copy of a work it holds a third of. `state = 'stored'` is
-/// the same rule the planner uses, so a chapter that is known and not yet
+/// the same rule the planner uses, so a unit that is known and not yet
 /// fetched does not count as one the reader can read.
-pub(crate) const LIBRARY_CHAPTER_COUNT: &str = "(SELECT COUNT(*) FROM import_chapters \
-    WHERE import_chapters.library_item_id = library_items.id AND state = 'stored') \
-    AS chapter_count";
+pub(crate) const LIBRARY_UNIT_COUNT: &str = "(SELECT COUNT(*) FROM import_units \
+    WHERE import_units.library_item_id = library_items.id AND state = 'stored') \
+    AS unit_count";
 
 pub(crate) const LIBRARY_COLUMNS: &str =
     "id, account_id, work_id, source_key, source_work_key, title, \
@@ -2141,12 +2141,12 @@ const IMPORT_JOB_COLUMNS_PG: &str = "id::text AS id, job_id::text AS job_id, \
     destination_type, dry_run, state, library_item_id::text AS library_item_id, report_json, \
     created_at, updated_at";
 
-const IMPORT_CHAPTER_COLUMNS: &str = "id, import_job_id, library_item_id, source_chapter_key, \
-    ordinal, title, state, content_blob_checksum, chapter_id, note";
+const IMPORT_UNIT_COLUMNS: &str = "id, import_job_id, library_item_id, source_unit_key, \
+    ordinal, title, state, content_blob_checksum, unit_id, note";
 
-const IMPORT_CHAPTER_COLUMNS_PG: &str = "id::text AS id, import_job_id::text AS import_job_id, \
-    library_item_id::text AS library_item_id, source_chapter_key, ordinal, title, state, \
-    content_blob_checksum, chapter_id::text AS chapter_id, note";
+const IMPORT_UNIT_COLUMNS_PG: &str = "id::text AS id, import_job_id::text AS import_job_id, \
+    library_item_id::text AS library_item_id, source_unit_key, ordinal, title, state, \
+    content_blob_checksum, unit_id::text AS unit_id, note";
 
 /// The columns every read of `sources` selects, in one place.
 ///
@@ -2188,7 +2188,7 @@ pub(crate) struct LibraryItemRow {
     pub(crate) id: String,
     pub(crate) account_id: String,
     pub(crate) work_id: Option<String>,
-    pub(crate) chapter_count: i64,
+    pub(crate) unit_count: i64,
     pub(crate) source_key: String,
     pub(crate) source_work_key: String,
     pub(crate) title: String,
@@ -2225,16 +2225,16 @@ struct ImportJobRow {
 }
 
 #[derive(FromRow)]
-struct ImportChapterRow {
+struct ImportUnitRow {
     id: String,
     import_job_id: String,
     library_item_id: Option<String>,
-    source_chapter_key: String,
+    source_unit_key: String,
     ordinal: i64,
     title: String,
     state: String,
     content_blob_checksum: Option<String>,
-    chapter_id: Option<String>,
+    unit_id: Option<String>,
     note: Option<String>,
 }
 
@@ -2288,7 +2288,7 @@ pub(crate) fn decode_library_item(row: LibraryItemRow) -> Result<LibraryItem> {
         source_url: row.source_url,
         source_updated_at: row.source_updated_at,
         last_synced_at: row.last_synced_at,
-        chapter_count: row.chapter_count,
+        unit_count: row.unit_count,
         provenance_json: row.provenance_json,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -2314,17 +2314,17 @@ fn decode_import_job(row: ImportJobRow) -> Result<ImportJob> {
     })
 }
 
-fn decode_import_chapter(row: ImportChapterRow) -> Result<ImportChapter> {
-    Ok(ImportChapter {
+fn decode_import_unit(row: ImportUnitRow) -> Result<ImportUnit> {
+    Ok(ImportUnit {
         id: row.id,
         import_job_id: row.import_job_id,
         library_item_id: row.library_item_id,
-        source_chapter_key: row.source_chapter_key,
+        source_unit_key: row.source_unit_key,
         ordinal: row.ordinal,
         title: row.title,
         state: row.state,
         content_blob_checksum: row.content_blob_checksum,
-        chapter_id: row.chapter_id,
+        unit_id: row.unit_id,
         note: row.note,
     })
 }

@@ -58,7 +58,7 @@
     },
     {
       title: 'Write without a queue',
-      body: 'Draft, revise and publish on your own schedule. Chapters are versioned and restorable, so an edit is never a leap of faith.',
+      body: 'Draft, revise and publish on your own schedule. Units are versioned and restorable, so an edit is never a leap of faith.',
       href: '/write',
       cta: 'Start writing',
     },

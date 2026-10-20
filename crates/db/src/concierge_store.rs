@@ -497,8 +497,8 @@ pub async fn is_complete(db: &Database, work_id: &str) -> Result<bool, sqlx::Err
 
 /// Estimated minutes for each of `work_ids`, keyed by id.
 ///
-/// Word counts live on `chapter_revisions`, not on `works` — the same aggregate
-/// the arena pool query computes. A work with no chapters has **no row here**,
+/// Word counts live on `revisions`, not on `works` — the same aggregate
+/// the arena pool query computes. A work with no units has **no row here**,
 /// which is how "we do not know how long this is" stays distinguishable from
 /// "zero minutes": `apply_budget` charges those the midpoint of the queue's own
 /// range and marks them, per §54.4.
@@ -526,15 +526,15 @@ pub async fn duration_estimates(
         db,
         format!(
             "SELECT c.work_id, SUM(cr.word_count)
-               FROM chapters c
-               JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+               FROM units c
+               JOIN revisions cr ON cr.id = c.current_revision_id
               WHERE c.work_id IN ({placeholders})
               GROUP BY c.work_id"
         ),
         format!(
             "SELECT c.work_id::text, SUM(cr.word_count)::float8
-               FROM chapters c
-               JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+               FROM units c
+               JOIN revisions cr ON cr.id = c.current_revision_id
               WHERE c.work_id IN ({placeholders})
               GROUP BY c.work_id"
         ),
@@ -564,7 +564,7 @@ pub async fn duration_estimates(
 
     let mut out = std::collections::HashMap::new();
     for (work_id, words) in rows {
-        // `SUM` over zero chapters is NULL, and a NULL means "no estimate" — which
+        // `SUM` over zero units is NULL, and a NULL means "no estimate" — which
         // §54.4 wants marked rather than rounded into a number. An estimate that
         // rounds to 0 minutes is treated as unknown for the same reason: reporting
         // "0 minutes" as a measurement is a claim we cannot back.

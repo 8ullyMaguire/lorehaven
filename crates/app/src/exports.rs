@@ -3,7 +3,7 @@
 //! # Three things this file is careful about
 //!
 //! **The work is read through the reader's own path.** An export is a copy of
-//! what the reader may read, so it loads the same document, the same chapters and
+//! what the reader may read, so it loads the same document, the same units and
 //! the same imported bodies as the reader's pages. A second door into the content
 //! is how an export quietly becomes a way to read something the reader could not
 //! open.
@@ -25,7 +25,7 @@ use darkhold_db::exports as repo;
 use darkhold_db::exports::{ExportJob, NewExport};
 use darkhold_db::storage::BlobStore;
 use darkhold_domain::exports::{
-    render, Converter, ExportChapter, ExportError, ExportFormat, ExportOptions, ExportProvenance,
+    render, Converter, ExportUnit, ExportError, ExportFormat, ExportOptions, ExportProvenance,
     ExportWork,
 };
 use darkhold_domain::jobs::{JobKind, RetryPolicy};
@@ -271,7 +271,7 @@ pub fn is_known_subject(subject_type: &str) -> bool {
 ///
 /// # Errors
 /// Returns [`ExportFailure::Empty`] when there is nothing to export, which is a
-/// refusal rather than a bug: an export of no chapters is a file that lies about
+/// refusal rather than a bug: an export of no units is a file that lies about
 /// what the reader asked for.
 pub async fn load_subject(
     state: &AppState,
@@ -325,13 +325,13 @@ async fn load_work(state: &AppState, work_id: &str) -> Result<ExportWork, Export
         }
     }
 
-    let chapters = darkhold_db::content::chapters_for_work(db, work.id)
+    let units = darkhold_db::content::units_for_work(db, work.id)
         .await
         .map_err(|error| ExportFailure::Storage(error.to_string()))?;
 
     let mut exported = Vec::new();
-    for (index, chapter) in chapters.iter().enumerate() {
-        let Some(revision_id) = chapter.current_revision_id else {
+    for (index, unit) in units.iter().enumerate() {
+        let Some(revision_id) = unit.current_revision_id else {
             continue;
         };
         let document = darkhold_db::content::revision_document(db, revision_id)
@@ -342,16 +342,16 @@ async fn load_work(state: &AppState, work_id: &str) -> Result<ExportWork, Export
         };
         let document = darkhold_domain::document::Document::from_json(&document)
             .map_err(|error| ExportFailure::Storage(error.to_string()))?;
-        exported.push(ExportChapter::authored(
+        exported.push(ExportUnit::authored(
             u32::try_from(index).unwrap_or(0) + 1,
-            chapter.title.clone(),
+            unit.title.clone(),
             document,
         ));
     }
 
     if exported.is_empty() {
         return Err(ExportFailure::Empty(
-            "that work has no chapters to export yet".to_owned(),
+            "that work has no units to export yet".to_owned(),
         ));
     }
 
@@ -359,7 +359,7 @@ async fn load_work(state: &AppState, work_id: &str) -> Result<ExportWork, Export
         title: work.title.clone(),
         author: names.join(", "),
         language: work.language.clone(),
-        chapters: exported,
+        units: exported,
         provenance: None,
         identifier: darkhold_domain::exports::stable_identifier(&[
             "work",
@@ -381,14 +381,14 @@ async fn load_library_item(
         .map_err(|error| ExportFailure::Storage(error.to_string()))?
         .ok_or_else(|| ExportFailure::Empty("that library item does not exist".to_owned()))?;
 
-    let chapters = darkhold_db::imports::latest_chapters_for_item(db, item_id)
+    let units = darkhold_db::imports::latest_units_for_item(db, item_id)
         .await
         .map_err(|error| ExportFailure::Storage(error.to_string()))?;
 
     let store = BlobStore::new(state.config().storage.root.clone());
     let mut exported = Vec::new();
-    for chapter in chapters.iter().filter(|c| c.state == "stored") {
-        let Some(checksum) = chapter.content_blob_checksum.clone() else {
+    for unit in units.iter().filter(|c| c.state == "stored") {
+        let Some(checksum) = unit.content_blob_checksum.clone() else {
             continue;
         };
         let Some(bytes) = store
@@ -399,16 +399,16 @@ async fn load_library_item(
             continue;
         };
         let html = String::from_utf8_lossy(&bytes).into_owned();
-        exported.push(ExportChapter::imported(
-            u32::try_from(chapter.ordinal).unwrap_or(0),
-            chapter.title.clone(),
+        exported.push(ExportUnit::imported(
+            u32::try_from(unit.ordinal).unwrap_or(0),
+            unit.title.clone(),
             html,
         ));
     }
 
     if exported.is_empty() {
         return Err(ExportFailure::Empty(
-            "that import has no stored chapters to export".to_owned(),
+            "that import has no stored units to export".to_owned(),
         ));
     }
 
@@ -422,7 +422,7 @@ async fn load_library_item(
         title: item.title.clone(),
         author: item.author_text.clone(),
         language: item.language.clone().unwrap_or_else(|| "und".to_owned()),
-        chapters: exported,
+        units: exported,
         // An imported work's provenance is the point of recording it: the file
         // says where it came from and when it was read.
         provenance: Some(ExportProvenance {
@@ -754,7 +754,7 @@ pub async fn request(
     let export_id = MediaAssetId::new().to_string();
 
     // The subject is loaded once here, before the job exists, so that a work with
-    // no chapters is refused in the request rather than in a worker the reader
+    // no units is refused in the request rather than in a worker the reader
     // never sees.
     load_subject(state, account_id, subject_type, subject_id)
         .await
@@ -979,7 +979,7 @@ async fn apply_instance_cta(
 ) -> Result<(), ExportFailure> {
     let config = state.config();
     let placement = match config.exports.cta_placement.as_str() {
-        "per_chapter" => CtaPlacementSerde::PerChapter,
+        "per_unit" => CtaPlacementSerde::PerUnit,
         "per_work" => CtaPlacementSerde::PerWork,
         "off" => CtaPlacementSerde::Off,
         _ => {

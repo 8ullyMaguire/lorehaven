@@ -614,7 +614,7 @@
               </p>
 
               <ul class="facts">
-                <li>{item.chapter_count} chapters</li>
+                <li>{item.unit_count} units</li>
                 <li>{item.status}</li>
                 {#if item.word_count !== null}
                   <li>{item.word_count.toLocaleString()} words</li>

@@ -3,7 +3,7 @@
 //! ## What this is for
 //!
 //! `darkhold_domain::coordinates` computes four measures over a work's prose —
-//! sentence-length variance, dialogue ratio, vocabulary richness, chapter-length
+//! sentence-length variance, dialogue ratio, vocabulary richness, unit-length
 //! spread — as pure, deterministic functions. This module stores the result and
 //! hands it back, because ranking needs them per *candidate* work and a browse
 //! page scores dozens to return one page.
@@ -58,8 +58,8 @@
 //!   * a row with an `unmeasurable_reason` — measured and found unmeasurable, with
 //!     the reason stored so an operator asking why a work is not rankable does not
 //!     have to guess;
-//!   * a measured row with `chapter_length_spread = NULL` — a single-chapter
-//!     work: measured, and with no chapter-length distribution to report.
+//!   * a measured row with `unit_length_spread = NULL` — a single-unit
+//!     work: measured, and with no unit-length distribution to report.
 //!
 //! `dialogue_ratio = 0.0` is a real measurement — a work with no dialogue — and is
 //! stored as `0.0`, never NULL. Collapsing it into the absent case would say "we do
@@ -71,7 +71,7 @@
 use crate::{Backend, Database};
 use anyhow::Result;
 use darkhold_domain::coordinates::{
-    coordinates, ChapterText, Coordinates, Corpus, Unmeasurable, WorkCoordinates,
+    coordinates, UnitText, Coordinates, Corpus, Unmeasurable, WorkCoordinates,
 };
 
 /// A stored coordinate row, exactly as the table holds it.
@@ -129,7 +129,7 @@ type StoredRow = (
 /// Measure a work from its own stored text and store the result.
 ///
 /// This is the call an ingest or publish path makes, and it is the piece that was
-/// missing: [`corpus_for_work`] already read a work's chapters and
+/// missing: [`corpus_for_work`] already read a work's units and
 /// `measure_and_store` already wrote the result, but nothing in the crate called
 /// either. The store and its tests were complete and correct, and every work's
 /// coordinates were permanently absent — which §49.3 forbids treating as a zero.
@@ -140,7 +140,7 @@ type StoredRow = (
 /// of the text, which is what §49.3's determinism requires and what makes
 /// recomputing it here safe.
 ///
-/// A work with no chapters yields `Ok(None)` and writes nothing. That is the
+/// A work with no units yields `Ok(None)` and writes nothing. That is the
 /// `Coordinates::Unmeasurable(NoText)` case arriving from the database side
 /// rather than the domain side, and it is the honest answer: a work whose text has
 /// not been written has nothing to measure, and must not acquire coordinates that
@@ -151,7 +151,7 @@ pub async fn measure_work_and_store(
     text_version: i64,
     computed_at: &str,
 ) -> Result<Option<StoredCoordinates>> {
-    let Some((mut corpus, _chapters)) = corpus_for_work(db, work_id, 0).await? else {
+    let Some((mut corpus, _units)) = corpus_for_work(db, work_id, 0).await? else {
         return Ok(None);
     };
     // `corpus_for_work` takes the dialogue count because its caller may have one.
@@ -201,7 +201,7 @@ pub async fn store_coordinates(
             Some(c.sentence_length_variance),
             Some(c.dialogue_ratio),
             Some(c.vocabulary_richness),
-            c.chapter_length_spread,
+            c.unit_length_spread,
             None,
         ),
         Coordinates::Unmeasurable(why) => (None, None, None, None, Some(reason_str(*why))),
@@ -217,14 +217,14 @@ pub async fn store_coordinates(
     let sql = db.sql(
         "INSERT INTO work_coordinates
              (work_id, sentence_length_variance, dialogue_ratio, vocabulary_richness,
-              chapter_length_spread, unmeasurable_reason, word_count, sentence_count,
+              unit_length_spread, unmeasurable_reason, word_count, sentence_count,
               text_version, computed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (work_id) DO UPDATE SET
              sentence_length_variance = excluded.sentence_length_variance,
              dialogue_ratio           = excluded.dialogue_ratio,
              vocabulary_richness      = excluded.vocabulary_richness,
-             chapter_length_spread    = excluded.chapter_length_spread,
+             unit_length_spread    = excluded.unit_length_spread,
              unmeasurable_reason      = excluded.unmeasurable_reason,
              word_count               = excluded.word_count,
              sentence_count           = excluded.sentence_count,
@@ -232,14 +232,14 @@ pub async fn store_coordinates(
              computed_at              = excluded.computed_at",
         "INSERT INTO work_coordinates
              (work_id, sentence_length_variance, dialogue_ratio, vocabulary_richness,
-              chapter_length_spread, unmeasurable_reason, word_count, sentence_count,
+              unit_length_spread, unmeasurable_reason, word_count, sentence_count,
               text_version, computed_at)
          VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (work_id) DO UPDATE SET
              sentence_length_variance = excluded.sentence_length_variance,
              dialogue_ratio           = excluded.dialogue_ratio,
              vocabulary_richness      = excluded.vocabulary_richness,
-             chapter_length_spread    = excluded.chapter_length_spread,
+             unit_length_spread    = excluded.unit_length_spread,
              unmeasurable_reason      = excluded.unmeasurable_reason,
              word_count               = excluded.word_count,
              sentence_count           = excluded.sentence_count,
@@ -304,11 +304,11 @@ pub async fn store_coordinates(
 pub async fn measured_coordinates(db: &Database, work_id: &str) -> Result<Option<WorkCoordinates>> {
     let sql = db.sql(
         "SELECT sentence_length_variance, dialogue_ratio, vocabulary_richness,
-                chapter_length_spread, word_count, sentence_count
+                unit_length_spread, word_count, sentence_count
          FROM work_coordinates
          WHERE work_id = ? AND unmeasurable_reason IS NULL",
         "SELECT sentence_length_variance, dialogue_ratio, vocabulary_richness,
-                chapter_length_spread, word_count, sentence_count
+                unit_length_spread, word_count, sentence_count
          FROM work_coordinates
          WHERE work_id = $1::uuid AND unmeasurable_reason IS NULL",
     );
@@ -345,9 +345,9 @@ pub async fn measured_coordinates(db: &Database, work_id: &str) -> Result<Option
                 sentence_length_variance: variance.expect("checked above"),
                 dialogue_ratio: dialogue.expect("checked above"),
                 vocabulary_richness: vocabulary.expect("checked above"),
-                // A single-chapter work's absent spread survives the round trip as
+                // A single-unit work's absent spread survives the round trip as
                 // None, which is the whole point: measured, with no distribution.
-                chapter_length_spread: spread,
+                unit_length_spread: spread,
                 word_count: words.unwrap_or(0) as usize,
                 sentence_count: sentences.unwrap_or(0) as usize,
             }))
@@ -362,11 +362,11 @@ pub async fn measured_coordinates(db: &Database, work_id: &str) -> Result<Option
 pub async fn stored_coordinates(db: &Database, work_id: &str) -> Result<Option<StoredCoordinates>> {
     let sql = db.sql(
         "SELECT sentence_length_variance, dialogue_ratio, vocabulary_richness,
-                chapter_length_spread, unmeasurable_reason, text_version, computed_at
+                unit_length_spread, unmeasurable_reason, text_version, computed_at
          FROM work_coordinates
          WHERE work_id = ?",
         "SELECT sentence_length_variance, dialogue_ratio, vocabulary_richness,
-                chapter_length_spread, unmeasurable_reason, text_version, computed_at
+                unit_length_spread, unmeasurable_reason, text_version, computed_at
          FROM work_coordinates
          WHERE work_id = $1::uuid",
     );
@@ -396,7 +396,7 @@ pub async fn stored_coordinates(db: &Database, work_id: &str) -> Result<Option<S
             sentence_length_variance: require(variance, work_id, "sentence_length_variance")?,
             dialogue_ratio: require(dialogue, work_id, "dialogue_ratio")?,
             vocabulary_richness: require(vocabulary, work_id, "vocabulary_richness")?,
-            chapter_length_spread: spread,
+            unit_length_spread: spread,
             // Not selected by this query. A caller needing the counts wants
             // `measured_coordinates`, which reads them; recorded rather than left
             // implicit because a defaulted zero is exactly the sort of value that
@@ -440,7 +440,7 @@ pub async fn measured_coordinates_for(
     for chunk in work_ids.chunks(CHUNK) {
         let mut sql = String::from(
             "SELECT sentence_length_variance, dialogue_ratio, vocabulary_richness, \
-             chapter_length_spread, word_count, sentence_count \
+             unit_length_spread, word_count, sentence_count \
              FROM work_coordinates WHERE unmeasurable_reason IS NULL AND work_id IN (",
         );
         for (i, _) in chunk.iter().enumerate() {
@@ -500,7 +500,7 @@ pub async fn measured_coordinates_for(
                     sentence_length_variance: variance,
                     dialogue_ratio: dialogue,
                     vocabulary_richness: vocabulary,
-                    chapter_length_spread: spread,
+                    unit_length_spread: spread,
                     word_count: words.unwrap_or(0) as usize,
                     sentence_count: sentences.unwrap_or(0) as usize,
                 },
@@ -599,29 +599,29 @@ fn parse_reason(text: &str) -> Result<Unmeasurable> {
     }
 }
 
-/// Build a [`Corpus`] from a work's chapters, in reading order.
+/// Build a [`Corpus`] from a work's units, in reading order.
 ///
 /// The one place that turns stored prose into something the domain layer measures.
 /// It lives here rather than in the domain crate because it is the shape of *this*
-/// database's chapter rows, not a property of coordinates.
+/// database's unit rows, not a property of coordinates.
 ///
 /// Word counts come from the stored column rather than being recounted, so the
 /// measures agree with the number the platform already shows a reader.
-pub fn corpus_from_chapters(chapters: Vec<ChapterText>, dialogue_words: usize) -> Corpus {
+pub fn corpus_from_units(units: Vec<UnitText>, dialogue_words: usize) -> Corpus {
     Corpus {
-        chapters,
+        units,
         dialogue_words,
     }
 }
 
-/// Read a work's chapter prose out of the database and into a [`Corpus`].
+/// Read a work's unit prose out of the database and into a [`Corpus`].
 ///
-/// The other half of [`corpus_from_chapters`], and the reason a recompute needs no
-/// new plumbing: this is where `chapter_revisions.plain_text` becomes coordinates
-/// input. Rows are ordered by the chapter's own order key, so the corpus is in
+/// The other half of [`corpus_from_units`], and the reason a recompute needs no
+/// new plumbing: this is where `revisions.plain_text` becomes coordinates
+/// input. Rows are ordered by the unit's own order key, so the corpus is in
 /// reading order.
 ///
-/// `latest_only` restricts to the newest revision per chapter, which is what a
+/// `latest_only` restricts to the newest revision per unit, which is what a
 /// measurement wants: §49.3's contract is about *a* text, and measuring a
 /// superseded revision would produce a coordinate that describes prose no reader
 /// can see.
@@ -634,18 +634,18 @@ pub async fn corpus_for_work(
     work_id: &str,
     dialogue_words: usize,
 ) -> Result<Option<(Corpus, i64)>> {
-    // The join to `chapters` is what supplies the reading order; `plain_text` and
+    // The join to `units` is what supplies the reading order; `plain_text` and
     // `word_count` come from the revision. Ordered by (order_key, revision) so two
-    // chapters cannot trade places between runs.
+    // units cannot trade places between runs.
     let sql = db.sql(
         "SELECT cr.plain_text, cr.word_count
-         FROM chapter_revisions cr
-         JOIN chapters c ON c.id = cr.chapter_id
+         FROM revisions cr
+         JOIN units c ON c.id = cr.unit_id
          WHERE c.work_id = ?
          ORDER BY c.order_key, cr.created_at DESC, cr.id DESC",
         "SELECT cr.plain_text, cr.word_count
-         FROM chapter_revisions cr
-         JOIN chapters c ON c.id = cr.chapter_id
+         FROM revisions cr
+         JOIN units c ON c.id = cr.unit_id
          WHERE c.work_id = $1::uuid
          ORDER BY c.order_key, cr.created_at DESC, cr.id DESC",
     );
@@ -668,12 +668,12 @@ pub async fn corpus_for_work(
     if rows.is_empty() {
         return Ok(None);
     }
-    let chapters: Vec<ChapterText> = rows
+    let units: Vec<UnitText> = rows
         .into_iter()
-        .map(|(plain_text, word_count)| ChapterText {
+        .map(|(plain_text, word_count)| UnitText {
             plain_text,
             word_count: word_count as usize,
         })
         .collect();
-    Ok(Some((corpus_from_chapters(chapters, dialogue_words), 0)))
+    Ok(Some((corpus_from_units(units, dialogue_words), 0)))
 }

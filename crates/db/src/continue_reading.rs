@@ -47,11 +47,11 @@ pub struct ContinueReading {
     /// rather than a percentage: the caller decides how to round, and a store that
     /// returns `83.3%` as a string has taken a presentation decision.
     pub position_permille: i32,
-    /// The chapter the reader was on, if the row names one.
-    pub chapter_id: Option<String>,
-    /// That chapter's title, resolved for display. `None` when the row names no chapter,
-    /// or when the chapter was since deleted — which must not fail the whole banner.
-    pub chapter_title: Option<String>,
+    /// The unit the reader was on, if the row names one.
+    pub unit_id: Option<String>,
+    /// That unit's title, resolved for display. `None` when the row names no unit,
+    /// or when the unit was since deleted — which must not fail the whole banner.
+    pub unit_title: Option<String>,
     /// RFC 3339. When this reader last wrote this row.
     pub updated_at: String,
 }
@@ -91,7 +91,7 @@ pub async fn continue_reading(db: &Database, account_id: &str) -> Result<Option<
         // they did was put it back to 15%. **MAX is the FURTHEST position, not the LAST
         // one**, and aggregating two columns independently also lets them disagree about
         // which row they came from: `MAX(updated_at)` ordered the group while
-        // `MAX(position_permille)` reported a position from a different chapter.
+        // `MAX(position_permille)` reported a position from a different unit.
         //
         // So there is no aggregate. Grouping by every selected column and ordering by
         // `updated_at` puts the reader's NEWEST row first, and `LIMIT 1` returns all of
@@ -102,7 +102,7 @@ pub async fn continue_reading(db: &Database, account_id: &str) -> Result<Option<
         SELECT rp.subject_id                       AS work_id,
                w.title                              AS title,
                rp.position_permille                 AS position_permille,
-               rp.chapter_id                        AS chapter_id,
+               rp.unit_id                        AS unit_id,
                rp.updated_at                        AS updated_at
           FROM reading_progress rp
           JOIN works w ON w.id = rp.subject_id
@@ -119,7 +119,7 @@ pub async fn continue_reading(db: &Database, account_id: &str) -> Result<Option<
            -- abandoned is not either. Both are tested by deleting exactly one at a time.
            AND rp.position_permille < 1000
          GROUP BY rp.subject_id, w.title, rp.position_permille,
-                  rp.chapter_id, rp.updated_at
+                  rp.unit_id, rp.updated_at
          ORDER BY rp.updated_at DESC, rp.subject_id ASC
          LIMIT 1
         "#,
@@ -127,13 +127,13 @@ pub async fn continue_reading(db: &Database, account_id: &str) -> Result<Option<
         // and `works.id` is UUID, so the JOIN needs `rp.subject_id::uuid` -- without it
         // this is `operator does not exist: uuid = text` at plan time, which reads as a
         // schema problem rather than a cast problem. The SQLite arm cannot catch it: its
-        // `subject_id` really is TEXT and its `works.id` really is TEXT. `chapter_id` is
+        // `subject_id` really is TEXT and its `works.id` really is TEXT. `unit_id` is
         // cast in the SELECT because it is read back into a `String`.
         r#"
         SELECT rp.subject_id::text              AS work_id,
                w.title                           AS title,
                rp.position_permille              AS position_permille,
-               rp.chapter_id::text               AS chapter_id,
+               rp.unit_id::text               AS unit_id,
                rp.updated_at                     AS updated_at
           FROM reading_progress rp
           JOIN works w ON w.id = rp.subject_id::uuid
@@ -146,7 +146,7 @@ pub async fn continue_reading(db: &Database, account_id: &str) -> Result<Option<
            -- row, so that is the one that decides whether there is anything to continue.
            AND rp.position_permille < 1000
          GROUP BY rp.subject_id, w.title, rp.position_permille,
-                  rp.chapter_id, rp.updated_at
+                  rp.unit_id, rp.updated_at
          ORDER BY rp.updated_at DESC, rp.subject_id ASC
          LIMIT 1
         "#,
@@ -170,50 +170,50 @@ pub async fn continue_reading(db: &Database, account_id: &str) -> Result<Option<
         }
     };
 
-    let Some((work_id, title, position_permille, chapter_id, updated_at)) = row else {
+    let Some((work_id, title, position_permille, unit_id, updated_at)) = row else {
         return Ok(None);
     };
 
-    // The chapter title is a SECOND query on purpose. Resolving it in the join above would
-    // multiply the `reading_progress` rows by the chapter count and break the
+    // The unit title is a SECOND query on purpose. Resolving it in the join above would
+    // multiply the `reading_progress` rows by the unit count and break the
     // one-row-per-work grouping the whole query depends on.
-    let chapter_title = match chapter_id.as_deref() {
+    let unit_title = match unit_id.as_deref() {
         None => None,
-        Some(id) => chapter_title_for(db, id).await?,
+        Some(id) => unit_title_for(db, id).await?,
     };
 
     Ok(Some(ContinueReading {
         work_id,
         title,
         position_permille: i32::try_from(position_permille).unwrap_or(1000),
-        chapter_id,
-        chapter_title,
+        unit_id,
+        unit_title,
         updated_at,
     }))
 }
 
-/// The title of a chapter, or `None` if it no longer exists.
+/// The title of a unit, or `None` if it no longer exists.
 ///
-/// A missing chapter is not a failure: the reader's progress row outlives the chapter it
-/// points at, and a deleted chapter must cost the banner its chapter NAME, not the whole
+/// A missing unit is not a failure: the reader's progress row outlives the unit it
+/// points at, and a deleted unit must cost the banner its unit NAME, not the whole
 /// banner. A 500 here would blank the retention feature because an author deleted a
-/// chapter.
-async fn chapter_title_for(db: &Database, chapter_id: &str) -> Result<Option<String>> {
+/// unit.
+async fn unit_title_for(db: &Database, unit_id: &str) -> Result<Option<String>> {
     let sql = db.sql(
-        "SELECT title FROM chapters WHERE id = ?1",
-        "SELECT title FROM chapters WHERE id = $1::uuid",
+        "SELECT title FROM units WHERE id = ?1",
+        "SELECT title FROM units WHERE id = $1::uuid",
     );
 
     let found: Option<(String,)> = match db.backend() {
         crate::Backend::Sqlite => {
             sqlx::query_as(&sql)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .fetch_optional(db.sqlite_pool().expect("sqlite pool for a sqlite backend"))
                 .await?
         }
         crate::Backend::Postgres => {
             sqlx::query_as(&sql)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .fetch_optional(
                     db.postgres_pool()
                         .expect("postgres pool for a postgres backend"),
@@ -243,7 +243,7 @@ pub async fn unfinished_works(
         r#"
         SELECT rp.subject_id, w.title,
                rp.position_permille,
-               rp.chapter_id,
+               rp.unit_id,
                rp.updated_at
           FROM reading_progress rp
           JOIN works w ON w.id = rp.subject_id
@@ -253,13 +253,13 @@ pub async fn unfinished_works(
            AND w.published_at IS NOT NULL
            AND rp.position_permille < 1000
          GROUP BY rp.subject_id, w.title, rp.position_permille,
-                  rp.chapter_id, rp.updated_at
+                  rp.unit_id, rp.updated_at
          ORDER BY rp.updated_at DESC, rp.subject_id ASC
          LIMIT ?2
         "#,
         r#"
         SELECT rp.subject_id::text, w.title, rp.position_permille,
-               rp.chapter_id::text, rp.updated_at
+               rp.unit_id::text, rp.updated_at
           FROM reading_progress rp
           JOIN works w ON w.id = rp.subject_id::uuid
          WHERE rp.account_id = $1::uuid
@@ -271,7 +271,7 @@ pub async fn unfinished_works(
          -- this reader's devices to the row they wrote LAST rather than to an aggregate
          -- over all of them.
          GROUP BY rp.subject_id, w.title, rp.position_permille,
-                  rp.chapter_id, rp.updated_at
+                  rp.unit_id, rp.updated_at
          ORDER BY rp.updated_at DESC, rp.subject_id ASC
          LIMIT $2
         "#,
@@ -298,17 +298,17 @@ pub async fn unfinished_works(
     };
 
     let mut out = Vec::with_capacity(rows.len());
-    for (work_id, title, position_permille, chapter_id, updated_at) in rows {
-        let chapter_title = match chapter_id.as_deref() {
+    for (work_id, title, position_permille, unit_id, updated_at) in rows {
+        let unit_title = match unit_id.as_deref() {
             None => None,
-            Some(id) => chapter_title_for(db, id).await?,
+            Some(id) => unit_title_for(db, id).await?,
         };
         out.push(ContinueReading {
             work_id,
             title,
             position_permille: i32::try_from(position_permille).unwrap_or(1000),
-            chapter_id,
-            chapter_title,
+            unit_id,
+            unit_title,
             updated_at,
         });
     }
@@ -389,8 +389,8 @@ mod tests {
             work_id: "w".into(),
             title: "t".into(),
             position_permille: p,
-            chapter_id: None,
-            chapter_title: None,
+            unit_id: None,
+            unit_title: None,
             updated_at: "t".into(),
         };
         assert_eq!(make(0).percent(), 0);

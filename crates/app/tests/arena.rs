@@ -28,7 +28,7 @@ async fn seed_account_and_works(db: &darkhold_db::Database) {
                 sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, 'published', 'public', datetime('now'), datetime('now'))")
                     .bind(&wid).bind(format!("Arena Fic {}", i + 1)).bind(&pseud_id)
                     .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-                seed_chapter(db, &wid, &pseud_id, i).await;
+                seed_unit(db, &wid, &pseud_id, i).await;
             }
         }
         darkhold_db::Backend::Postgres => {
@@ -43,43 +43,43 @@ async fn seed_account_and_works(db: &darkhold_db::Database) {
                 sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())")
                     .bind(&wid).bind(format!("Arena Fic {}", i + 1)).bind(&pseud_id)
                     .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-                seed_chapter(db, &wid, &pseud_id, i).await;
+                seed_unit(db, &wid, &pseud_id, i).await;
             }
         }
     }
 }
 
-/// Seed one chapter + current revision per work so word_count is populated
-/// (word_count lives on chapter_revisions, not works).
-async fn seed_chapter(db: &darkhold_db::Database, work_id: &str, pseud_id: &str, i: usize) {
-    let chapter_id = id(&format!("{work_id}-ch1"));
+/// Seed one unit + current revision per work so word_count is populated
+/// (word_count lives on revisions, not works).
+async fn seed_unit(db: &darkhold_db::Database, work_id: &str, pseud_id: &str, i: usize) {
+    let unit_id = id(&format!("{work_id}-ch1"));
     let revision_id = id(&format!("{work_id}-rev1"));
     let words = 5000 + i * 100;
     match db.backend() {
         darkhold_db::Backend::Sqlite => {
-            sqlx::query("INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at) VALUES (?, ?, 10, 'Chapter 1', datetime('now'), datetime('now'))")
-                .bind(&chapter_id).bind(work_id)
+            sqlx::query("INSERT INTO units (id, work_id, order_key, title, created_at, updated_at) VALUES (?, ?, 10, 'Unit 1', datetime('now'), datetime('now'))")
+                .bind(&unit_id).bind(work_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-            sqlx::query("INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES (?, ?, 1, '{}', '', '', ?, ?, datetime('now'))")
-                .bind(&revision_id).bind(&chapter_id).bind(words as i64).bind(pseud_id)
+            sqlx::query("INSERT INTO revisions (id, unit_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES (?, ?, 1, '{}', '', '', ?, ?, datetime('now'))")
+                .bind(&revision_id).bind(&unit_id).bind(words as i64).bind(pseud_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-            sqlx::query("UPDATE chapters SET current_revision_id = ? WHERE id = ?")
+            sqlx::query("UPDATE units SET current_revision_id = ? WHERE id = ?")
                 .bind(&revision_id)
-                .bind(&chapter_id)
+                .bind(&unit_id)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
         }
         darkhold_db::Backend::Postgres => {
-            sqlx::query("INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 10, 'Chapter 1', now(), now())")
-                .bind(&chapter_id).bind(work_id)
+            sqlx::query("INSERT INTO units (id, work_id, order_key, title, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 10, 'Unit 1', now(), now())")
+                .bind(&unit_id).bind(work_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES ($1::uuid, $2::uuid, 1, '{}', '', '', $3, $4::uuid, now())")
-                .bind(&revision_id).bind(&chapter_id).bind(words as i64).bind(pseud_id)
+            sqlx::query("INSERT INTO revisions (id, unit_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES ($1::uuid, $2::uuid, 1, '{}', '', '', $3, $4::uuid, now())")
+                .bind(&revision_id).bind(&unit_id).bind(words as i64).bind(pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("UPDATE chapters SET current_revision_id = $1::uuid WHERE id = $2::uuid")
+            sqlx::query("UPDATE units SET current_revision_id = $1::uuid WHERE id = $2::uuid")
                 .bind(&revision_id)
-                .bind(&chapter_id)
+                .bind(&unit_id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
                 .unwrap();

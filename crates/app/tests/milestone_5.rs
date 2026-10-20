@@ -700,7 +700,7 @@ async fn the_same_bytes_stored_twice_share_one_blob() {
     let store = harness.store();
 
     let (first, key) = store
-        .put(harness.tdb.db(), b"the same chapter text", "text/plain")
+        .put(harness.tdb.db(), b"the same unit text", "text/plain")
         .await
         .expect("put");
     let before = store
@@ -712,7 +712,7 @@ async fn the_same_bytes_stored_twice_share_one_blob() {
     // A second put of the same bytes, a moment later.
     tokio::time::sleep(Duration::from_millis(5)).await;
     let (second, second_key) = store
-        .put(harness.tdb.db(), b"the same chapter text", "text/plain")
+        .put(harness.tdb.db(), b"the same unit text", "text/plain")
         .await
         .expect("put");
     assert_eq!(first, second);
@@ -734,11 +734,18 @@ async fn the_same_bytes_stored_twice_share_one_blob() {
     assert!(path.exists(), "{}", path.display());
     assert_eq!(
         tokio::fs::read(&path).await.expect("read"),
-        b"the same chapter text"
+        b"the same unit text"
     );
     let (blobs, bytes) = store.usage(harness.tdb.db()).await.expect("usage");
     assert_eq!(blobs, 1);
-    assert_eq!(bytes, 21, "the byte count is the file's, not an estimate");
+    // The byte count is the file's, not an estimate — so it is the length of
+    // the bytes that were stored, and the bytes are named in the assertion
+    // above.
+    assert_eq!(
+        bytes,
+        b"the same unit text".len() as i64,
+        "the byte count is the file's, not an estimate"
+    );
 
     harness.cleanup().await;
 }

@@ -439,7 +439,7 @@ impl FetchPolicy {
     /// The largest body this class of read may accept (spec §11.5, amendment
     /// §1.2).
     ///
-    /// `Metadata` gets an eighth of the content ceiling, because a chapter
+    /// `Metadata` gets an eighth of the content ceiling, because a unit
     /// listing is small and a body is not — and the whole point of declaring a
     /// class is that the ceiling follows the declaration rather than the URL. A
     /// 1 MiB page that was declared `Content` is refused; a 1 MiB page declared
@@ -484,7 +484,7 @@ pub struct SafeFetcher {
     ///
     /// Cached on the fetcher rather than rebuilt per request because a solver
     /// holds a *session* — the cookies a solved challenge earned — and a session
-    /// rebuilt for every chapter is a challenge solved for every chapter, which
+    /// rebuilt for every unit is a challenge solved for every unit, which
     /// is the load this tier exists to avoid.
     solver: Mutex<Option<Arc<SolverClient>>>,
     /// The archive client, built once.
@@ -522,9 +522,9 @@ pub struct SafeFetcher {
     /// host and the count carries the rest.
     robots_discard_hosts: Mutex<HashSet<String>>,
     /// The hosts already reported, so the override is stated once per host
-    /// rather than once per chapter.
+    /// rather than once per unit.
     ///
-    /// A 122-chapter import against a host that forbids chapter paths is 122
+    /// A 122-unit import against a host that forbids unit paths is 122
     /// identical warnings, and a log line repeated until it is scrolled past is
     /// not a record of anything.
     robots_override_hosts: Mutex<HashSet<String>>,
@@ -753,7 +753,7 @@ impl SafeFetcher {
     /// Fetch, declaring what kind of read this is (spec §11.5, `FetchClass`).
     ///
     /// The class is a parameter rather than something derived from the URL,
-    /// because a URL that looks like a chapter fetched as `Metadata` has to be
+    /// because a URL that looks like a unit fetched as `Metadata` has to be
     /// bounded as a metadata fetch. A fetcher that inferred it from the path
     /// would let an adapter's guess raise its own ceiling.
     async fn get_with_class(
@@ -974,7 +974,7 @@ impl SafeFetcher {
     ///
     /// Built once per fetcher — and a fetcher serves one import — because the
     /// solver's *session* is the cookies a solved challenge earned. A session
-    /// rebuilt per chapter is a challenge solved per chapter, which is exactly
+    /// rebuilt per unit is a challenge solved per unit, which is exactly
     /// the load this tier exists to avoid.
     async fn solver(&self, config: &SolverConfig) -> SourceResult<Arc<SolverClient>> {
         let mut slot = self.solver.lock().await;
@@ -1452,7 +1452,7 @@ impl Fetcher for SafeFetcher {
 /// A `304` can only answer a request that carried a condition, so an
 /// unconditional `get` that receives one has hit a fault rather than an
 /// unchanged page. Returning an error here rather than an empty body is the
-/// difference between a loud bug and a chapter stored as nothing — which is the
+/// difference between a loud bug and a unit stored as nothing — which is the
 /// exact failure the ported Syosetu code had.
 /// How to say a status code to an operator.
 ///
@@ -1513,7 +1513,7 @@ fn expect_fetched(result: ConditionalFetch) -> SourceResult<Fetched> {
 /// A fetcher that serves recorded pages and records what was asked for.
 ///
 /// This is the test seam. It exists so the *orchestration* — how many requests
-/// an import makes, whether a retry re-reads chapters it already has, whether a
+/// an import makes, whether a retry re-reads units it already has, whether a
 /// disabled source is touched at all — can be asserted without a network. The
 /// parsers themselves are tested through the adapters' `*_from_html` entry
 /// points, which need no fetcher.
@@ -1678,7 +1678,7 @@ enum RobotsGate {
 /// asserted against real rules parsed from real files.
 ///
 /// The class is an input, never derived from the path. That is the single most
-/// important property of this signature: a URL that looks like a chapter
+/// important property of this signature: a URL that looks like a unit
 /// fetched as `Metadata` is bounded as a metadata fetch, so the ceiling cannot
 /// be raised by an adapter's guess about what shape the URL has.
 ///
@@ -1703,7 +1703,7 @@ fn robots_gate(
         // Only the metadata class survives this posture, and it survives only
         // as a read whose bytes are thrown away. `Content` and `Media` fall
         // through to `Refused` because "read it, store none of it" is a
-        // coherent instruction about a chapter listing and not about a chapter.
+        // coherent instruction about a unit listing and not about a unit.
         RobotsPosture::MetadataOnly => match class {
             FetchClass::Metadata => RobotsGate::ReadAndDiscarded,
             FetchClass::Content | FetchClass::Media => RobotsGate::Refused,
@@ -1868,7 +1868,7 @@ pub(crate) fn charset_of_content_type(content_type: &str) -> Option<&str> {
 /// Because the sources this reads from are old PHP archives that declare a
 /// charset they do not use. `tgstorytime.com` says `charset=ISO-8859-1` — as do
 /// three other members of the eFiction family — and then emits byte `0x92`, the
-/// Windows-1252 right single quote, in the middle of chapter titles. Decoded as
+/// Windows-1252 right single quote, in the middle of unit titles. Decoded as
 /// true Latin-1 that byte becomes a C1 control character; decoded lossily it
 /// becomes `U+FFFD`; either way the title is corrupted and the corruption is
 /// invisible until somebody reads it. A reader importing a work whose title is
@@ -1937,11 +1937,11 @@ const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
 /// # Why decompression belongs here
 ///
 /// A source may compress a response whether or not the request asked for it.
-/// `wattpad.com`'s chapter endpoint answers `content-encoding: gzip` to an
+/// `wattpad.com`'s unit endpoint answers `content-encoding: gzip` to an
 /// explicit `Accept-Encoding: identity` — verified 2026-09-11 — and a fetcher
-/// that passed those bytes on would hand an adapter gzip for a chapter body.
+/// that passed those bytes on would hand an adapter gzip for a unit body.
 /// Nothing fails: the bytes are stored, the parse finds no prose, and the import
-/// reports a chapter that is empty. It is the same class of silent corruption as
+/// reports a unit that is empty. It is the same class of silent corruption as
 /// a mis-read charset, and it is handled in the same place for the same reason.
 ///
 /// # What is not handled
@@ -2202,7 +2202,7 @@ mod tests {
     fn metadata_only_still_refuses_every_content_and_media_path() {
         // The property that makes `metadata_only` a posture rather than a
         // loophole. `ReadAndDiscarded` is scoped to `FetchClass::Metadata`, and
-        // a chapter under the same posture is refused outright — which is the
+        // a unit under the same posture is refused outright — which is the
         // only thing stopping "read it and discard it" from becoming "read it
         // and keep the parts worth keeping".
         let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Darkhold");
@@ -2221,19 +2221,19 @@ mod tests {
     #[test]
     fn the_class_is_never_inferred_from_the_path() {
         // The single most important property of the new signature. A URL that
-        // looks exactly like a chapter page, fetched as `Metadata`, must come
+        // looks exactly like a unit page, fetched as `Metadata`, must come
         // out the same as any other metadata fetch — because if a fetcher
         // inferred the class from the path, an adapter's guess about a URL's
         // shape would raise its own ceiling, and the "just the metadata" door
         // would be a body door with a different name.
         let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Darkhold");
-        let chapter_shaped = "/viewstory.php?sid=6369";
+        let unit_shaped = "/viewstory.php?sid=6369";
 
         // Identical to a plain metadata path, despite looking like prose.
         assert_eq!(
             robots_gate(
                 &rules,
-                chapter_shaped,
+                unit_shaped,
                 RobotsPosture::MetadataOnly,
                 FetchClass::Metadata
             ),
@@ -2244,7 +2244,7 @@ mod tests {
         assert_eq!(
             robots_gate(
                 &rules,
-                chapter_shaped,
+                unit_shaped,
                 RobotsPosture::MetadataOnly,
                 FetchClass::Content
             ),
@@ -2468,7 +2468,7 @@ mod tests {
     fn a_gzipped_body_is_undone_before_it_is_read_as_text() {
         // Measured: `wattpad.com`'s part-text endpoint answers
         // `content-encoding: gzip` to an explicit `Accept-Encoding: identity`.
-        // A fetcher that passed those bytes on would store a chapter body as
+        // A fetcher that passed those bytes on would store a unit body as
         // mojibake and report success.
         use std::io::Write;
 
@@ -3323,7 +3323,7 @@ mod tests {
         // real body, not on a fetch that cannot succeed.
         let mut page = crate::Fetched::from_source(
             "https://example.com/story/1",
-            "<html>the entire forbidden chapter, in full</html>",
+            "<html>the entire forbidden unit, in full</html>",
             Some("text/html".to_owned()),
         );
         SafeFetcher::label_fetched(
@@ -3370,12 +3370,12 @@ mod tests {
         ] {
             let mut page = crate::Fetched::from_source(
                 "https://example.com/story/1",
-                "<html>the chapter</html>",
+                "<html>the unit</html>",
                 None,
             );
             SafeFetcher::label_fetched(&mut page, FetchClass::Content, gate);
             assert_eq!(
-                page.body, "<html>the chapter</html>",
+                page.body, "<html>the unit</html>",
                 "{gate:?} is not a discard, so the bytes stay"
             );
             assert!(!page.discarded, "{gate:?} does not set the discard flag");
@@ -3392,16 +3392,16 @@ mod tests {
         // every metadata read. A metadata fetch of an allowed path is ordinary
         // and storable, and a labelling step that keyed off the class or the
         // posture rather than the gate would throw it away — silently dropping
-        // the chapter listings that is what the instance is for.
+        // the unit listings that is what the instance is for.
         let mut page = crate::Fetched::from_source(
             "https://example.com/story/1",
-            "<html>title, author, chapter list</html>",
+            "<html>title, author, unit list</html>",
             None,
         );
         SafeFetcher::label_fetched(&mut page, FetchClass::Metadata, RobotsGate::Allowed);
 
         assert_eq!(
-            page.body, "<html>title, author, chapter list</html>",
+            page.body, "<html>title, author, unit list</html>",
             "an ALLOWED metadata read is storable; the discard follows the gate, not the class"
         );
         assert!(!page.discarded);
@@ -3595,7 +3595,7 @@ mod tests {
     ///
     /// The bytes are `tgstorytime-work.html`'s own: `0x92` where the author
     /// typed a right single quote. Decoded as true Latin-1 this is a C1 control
-    /// character, and lossily it is `U+FFFD` — either way the chapter title,
+    /// character, and lossily it is `U+FFFD` — either way the unit title,
     /// which is the text a reader sees in their library, is corrupted.
     #[test]
     fn a_windows_1252_byte_in_a_latin1_declaration_is_a_quote() {

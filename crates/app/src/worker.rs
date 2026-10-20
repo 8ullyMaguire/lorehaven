@@ -558,8 +558,8 @@ impl Worker {
                 let work_id: darkhold_domain::ids::WorkId = work_id
                     .parse()
                     .map_err(|_| HandlerError::Fatal(format!("invalid work id: {work_id}")))?;
-                // Inline query: get the plain text of the latest published chapter.
-                // A chapter is indexed when it has a live revision
+                // Inline query: get the plain text of the latest published unit.
+                // A unit is indexed when it has a live revision
                 // (current_revision_id IS NOT NULL). The work's lifecycle
                 // ('draft'|'published') governs *visibility* in search results,
                 // not whether the text is indexed — the Reindex job fills the
@@ -567,8 +567,8 @@ impl Worker {
                 let plain_text: String = match state.db().backend() {
                     darkhold_db::Backend::Sqlite => sqlx::query_scalar(
                         "SELECT COALESCE(GROUP_CONCAT(cr.plain_text, ' '), '')
-                         FROM chapters c
-                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                         FROM units c
+                         JOIN revisions cr ON cr.id = c.current_revision_id
                          WHERE c.work_id = ?",
                     )
                     .bind(work_id.to_string())
@@ -577,8 +577,8 @@ impl Worker {
                     .unwrap_or_default(),
                     darkhold_db::Backend::Postgres => sqlx::query_scalar(
                         "SELECT COALESCE(STRING_AGG(cr.plain_text, ' '), '')
-                         FROM chapters c
-                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id::uuid
+                         FROM units c
+                         JOIN revisions cr ON cr.id = c.current_revision_id::uuid
                          WHERE c.work_id = $1::uuid",
                     )
                     .bind(work_id.to_string())

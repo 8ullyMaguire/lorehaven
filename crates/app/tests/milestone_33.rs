@@ -4,7 +4,7 @@
 //!
 //! - A topic defaults to "plain" and keeps working unchanged.
 //! - The mode is data: setting it restructures one surface with no code change.
-//! - A reading-group topic accepts schedule sections (position, chapter range,
+//! - A reading-group topic accepts schedule sections (position, unit range,
 //!   unlock time).
 //! - A wiki pin can be created and approved by the topic author.
 //! - A critique circle tracks a queue and assigns positions.
@@ -272,8 +272,8 @@ async fn reading_group_schedule_round_trip() {
             json!({
                 "position": 1,
                 "title": "Week 1: Prologue",
-                "chapter_start": 1,
-                "chapter_end": 3,
+                "unit_start": 1,
+                "unit_end": 3,
                 "unlocks_at": "2026-09-21T00:00:00Z"
             }),
         )

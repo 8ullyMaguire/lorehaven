@@ -87,7 +87,7 @@ async fn test_dnf_endpoints_unauthenticated() {
 
     let body = serde_json::json!({
         "reason": "slow_pacing",
-        "note": "Got too slow at chapter 10"
+        "note": "Got too slow at unit 10"
     });
 
     // All endpoints require authentication

@@ -325,38 +325,38 @@ async fn a_topics_spoiler_scope_can_be_set_and_cleared() {
 
     let scope: Option<i64> = match h.db().backend() {
         darkhold_db::Backend::Sqlite => {
-            sqlx::query_scalar("SELECT spoiler_scope_chapter FROM forum_topics WHERE id = ?")
+            sqlx::query_scalar("SELECT spoiler_scope_unit FROM forum_topics WHERE id = ?")
                 .bind(&w.topic)
                 .fetch_one(h.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("read scope")
         }
         darkhold_db::Backend::Postgres => sqlx::query_scalar(
-            "SELECT CAST(spoiler_scope_chapter AS BIGINT) FROM forum_topics WHERE id = $1",
+            "SELECT CAST(spoiler_scope_unit AS BIGINT) FROM forum_topics WHERE id = $1",
         )
         .bind(&w.topic)
         .fetch_one(h.db().postgres_pool().expect("postgres"))
         .await
         .expect("read scope"),
     };
-    assert_eq!(scope, Some(4), "spoilers are hidden from chapter 4");
+    assert_eq!(scope, Some(4), "spoilers are hidden from unit 4");
 
     // Clearing is `None`, and it has to actually clear rather than write a 0 --
-    // chapter 0 is a real chapter and a scope of 0 would hide the opening.
+    // unit 0 is a real unit and a scope of 0 would hide the opening.
     sp::set_topic_spoiler_scope(h.db(), &w.topic, None)
         .await
         .expect("clear scope");
 
     let scope: Option<i64> = match h.db().backend() {
         darkhold_db::Backend::Sqlite => {
-            sqlx::query_scalar("SELECT spoiler_scope_chapter FROM forum_topics WHERE id = ?")
+            sqlx::query_scalar("SELECT spoiler_scope_unit FROM forum_topics WHERE id = ?")
                 .bind(&w.topic)
                 .fetch_one(h.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("read cleared scope")
         }
         darkhold_db::Backend::Postgres => sqlx::query_scalar(
-            "SELECT CAST(spoiler_scope_chapter AS BIGINT) FROM forum_topics WHERE id = $1",
+            "SELECT CAST(spoiler_scope_unit AS BIGINT) FROM forum_topics WHERE id = $1",
         )
         .bind(&w.topic)
         .fetch_one(h.db().postgres_pool().expect("postgres"))

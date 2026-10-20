@@ -220,7 +220,7 @@ pub async fn render_queue(
         })));
     }
 
-    // 5. Duration estimates, then the cut. A work with no chapters has no
+    // 5. Duration estimates, then the cut. A work with no units has no
     //    estimate and is kept and marked (§54.4), charged the queue's midpoint.
     let estimates = store::duration_estimates(db, &candidates)
         .await

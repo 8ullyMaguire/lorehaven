@@ -75,7 +75,7 @@ pub async fn creator_dashboard(
             "total": totals.works,
             "published": totals.published,
             "unpublished": totals.unpublished,
-            "chapters": totals.chapters,
+            "units": totals.units,
             "words": totals.words,
         },
         "readers": {

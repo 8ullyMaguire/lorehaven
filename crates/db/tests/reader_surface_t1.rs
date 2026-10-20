@@ -327,50 +327,50 @@ async fn drop_schema_if(schema: &Option<String>) {
     }
 }
 
-/// A chapter with one saved revision carrying `words`, and that revision CURRENT.
+/// A unit with one saved revision carrying `words`, and that revision CURRENT.
 ///
-/// Item 4's aggregate is `SUM(chapter_revisions.word_count)` reached through
-/// `chapters.current_revision_id` — the same join `events::work_word_count` uses. Two
+/// Item 4's aggregate is `SUM(revisions.word_count)` reached through
+/// `units.current_revision_id` — the same join `events::work_word_count` uses. Two
 /// things this fixture has to get right, and both are silent when it does not:
 ///
-///  - the revision must be the chapter's CURRENT one. Summing all revisions would count
-///    every draft the author ever saved, so a chapter edited five times reports five times
+///  - the revision must be the unit's CURRENT one. Summing all revisions would count
+///    every draft the author ever saved, so a unit edited five times reports five times
 ///    its length;
 ///  - the author must own the revision (`created_by_pseud_id` is NOT NULL and REFERENCES
 ///    pseuds), which is why this needs a pseud and not just a work id.
-async fn chapter_with_words(db: &Database, work_id: &str, owner: &str, words: i64) -> String {
-    let chapter_id = uuid::Uuid::new_v4().to_string();
+async fn unit_with_words(db: &Database, work_id: &str, owner: &str, words: i64) -> String {
+    let unit_id = uuid::Uuid::new_v4().to_string();
     let revision_id = uuid::Uuid::new_v4().to_string();
-    let title = format!("Chapter for {work_id}");
+    let title = format!("Unit for {work_id}");
     // `exec` takes `&[&str]`, so the number has to be a `String` local rather than a
     // temporary: `&words.to_string()` is a `&String`, and the borrow dies mid-expression
     // anyway. The `#i` marker is what makes this bind as a bigint on PostgreSQL.
     let words = words.to_string();
     exec(
         db,
-        "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at)
+        "INSERT INTO units (id, work_id, order_key, title, created_at, updated_at)
          VALUES (?1#u, ?2#u, 10, ?3, ?4, ?4)",
-        &[&chapter_id, work_id, &title, T0],
+        &[&unit_id, work_id, &title, T0],
     )
     .await;
     exec(
         db,
-        "INSERT INTO chapter_revisions
-           (id, chapter_id, revision_number, document_json, sanitized_html, plain_text,
+        "INSERT INTO revisions
+           (id, unit_id, revision_number, document_json, sanitized_html, plain_text,
             word_count, created_by_pseud_id, created_at)
          VALUES (?1#u, ?2#u, 1, '{}', '<p></p>', '', ?3#i, ?4#u, ?5)",
-        &[&revision_id, &chapter_id, &words, owner, T0],
+        &[&revision_id, &unit_id, &words, owner, T0],
     )
     .await;
     // Set the pointer SECOND: it is a self-referencing FK, and SQLite resolves the target
     // when it is used rather than when it is declared, so this order is required.
     exec(
         db,
-        "UPDATE chapters SET current_revision_id = ?1#u WHERE id = ?2#u",
-        &[&revision_id, &chapter_id],
+        "UPDATE units SET current_revision_id = ?1#u WHERE id = ?2#u",
+        &[&revision_id, &unit_id],
     )
     .await;
-    chapter_id
+    unit_id
 }
 
 async fn node(db: &Database, kind: &str, canonical: &str) -> String {
@@ -886,7 +886,7 @@ async fn most_bookmarked_reports_word_count() {
     let (db, schema) = connect("wc-leaderboard").await;
     let w = work(&db, "Counted Serial", None).await;
     let owner = pseud(&db).await;
-    chapter_with_words(&db, &w, &owner, 4200).await;
+    unit_with_words(&db, &w, &owner, 4200).await;
     let acct = account(&db, 1).await;
     bookmark(&db, &acct, &w, true, WINDOW).await;
 
@@ -901,21 +901,21 @@ async fn most_bookmarked_reports_word_count() {
     drop_schema_if(&schema).await;
 }
 
-/// Word count SUMS across chapters, and a work with no chapters is 0 rather than absent.
+/// Word count SUMS across units, and a work with no units is 0 rather than absent.
 ///
 /// The zero is the half that matters for the client. `word_count` is a plain `i64` and the
 /// aggregate is COALESCEd in SQL, so an empty work reports 0 -- a true answer. Had it been
-/// `Option<i64>`, a card would render nothing for "no chapters", and the same rendering
+/// `Option<i64>`, a card would render nothing for "no units", and the same rendering
 /// would then be used for a count the server simply had not computed.
 #[tokio::test]
-async fn word_count_sums_chapters_and_reports_zero_for_an_empty_work() {
+async fn word_count_sums_units_and_reports_zero_for_an_empty_work() {
     let (db, schema) = connect("wc-sum").await;
-    let counted = work(&db, "Three Chapters", None).await;
-    let empty = work(&db, "No Chapters Yet", None).await;
+    let counted = work(&db, "Three Units", None).await;
+    let empty = work(&db, "No Units Yet", None).await;
     let owner = pseud(&db).await;
-    chapter_with_words(&db, &counted, &owner, 1000).await;
-    chapter_with_words(&db, &counted, &owner, 2500).await;
-    chapter_with_words(&db, &counted, &owner, 500).await;
+    unit_with_words(&db, &counted, &owner, 1000).await;
+    unit_with_words(&db, &counted, &owner, 2500).await;
+    unit_with_words(&db, &counted, &owner, 500).await;
     let acct = account(&db, 2).await;
     bookmark(&db, &acct, &counted, true, WINDOW).await;
     bookmark(&db, &acct, &empty, true, WINDOW).await;
@@ -934,28 +934,28 @@ async fn word_count_sums_chapters_and_reports_zero_for_an_empty_work() {
     drop_schema_if(&schema).await;
 }
 
-/// Only the CURRENT revision counts, so an edited chapter does not report its own history.
+/// Only the CURRENT revision counts, so an edited unit does not report its own history.
 ///
-/// This is the fixture bug this test exists to prevent. Summing every revision of a chapter
+/// This is the fixture bug this test exists to prevent. Summing every revision of a unit
 /// reports the length of every draft the author ever saved, which for a heavily revised
-/// chapter is several times the work's real length -- and it looks plausible, so nothing
+/// unit is several times the work's real length -- and it looks plausible, so nothing
 /// downstream would notice.
 #[tokio::test]
 async fn word_count_ignores_superseded_revisions() {
     let (db, schema) = connect("wc-current").await;
-    let w = work(&db, "Revised Chapter", None).await;
+    let w = work(&db, "Revised Unit", None).await;
     let owner = pseud(&db).await;
-    let chapter_id = chapter_with_words(&db, &w, &owner, 3000).await;
+    let unit_id = unit_with_words(&db, &w, &owner, 3000).await;
 
     // A second revision: a huge draft that was never made current.
     let revision2 = uuid::Uuid::new_v4().to_string();
     exec(
         &db,
-        "INSERT INTO chapter_revisions
-           (id, chapter_id, revision_number, document_json, sanitized_html, plain_text,
+        "INSERT INTO revisions
+           (id, unit_id, revision_number, document_json, sanitized_html, plain_text,
             word_count, created_by_pseud_id, created_at)
          VALUES (?1#u, ?2#u, 2, '{}', '<p></p>', '', ?3#i, ?4#u, ?5)",
-        &[&revision2, &chapter_id, "90000", &owner, T0],
+        &[&revision2, &unit_id, "90000", &owner, T0],
     )
     .await;
     // `current_revision_id` deliberately still names revision 1.
@@ -981,8 +981,8 @@ async fn new_in_your_fandoms_and_similar_also_carry_word_count() {
     let subject = work(&db, "Fandom Subject", None).await;
     let match_work = work(&db, "Fandom Match", None).await;
     let owner = pseud(&db).await;
-    chapter_with_words(&db, &match_work, &owner, 7777).await;
-    chapter_with_words(&db, &subject, &owner, 100).await;
+    unit_with_words(&db, &match_work, &owner, 7777).await;
+    unit_with_words(&db, &subject, &owner, 100).await;
 
     let hp = node(&db, "fandom", "Star Wars").await;
     tag(&db, &subject, &hp).await;

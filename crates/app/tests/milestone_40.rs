@@ -214,24 +214,24 @@ async fn create_work(client: &mut Client, title: &str, remix: &str) -> String {
         .await;
     assert_eq!(status, StatusCode::OK, "set permissions: {body}");
 
-    // Add a chapter so the work can be published.
+    // Add a unit so the work can be published.
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
-            json!({ "title": "Chapter 1" }),
+            json!({ "title": "Unit 1" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter_id = body["id"].as_str().expect("chapter id").to_owned();
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit_id = body["id"].as_str().expect("unit id").to_owned();
 
-    // Add body text to the chapter so the work can be published.
+    // Add body text to the unit so the work can be published.
     let (status, body) = client
         .patch(
-            &format!("/api/v1/chapters/{chapter_id}"),
+            &format!("/api/v1/chapters/{unit_id}"),
             json!({ "expected_version": 1, "document": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Opening text." }] }] } }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "update chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "update unit: {body}");
 
     // Publish so it's visible to others (needed for fork tests with a forker).
     let (status, body) = client
@@ -266,11 +266,11 @@ async fn fork_creates_draft_with_lineage_and_no_body() {
 
     let fork_id = body["id"].as_str().expect("fork id").to_owned();
 
-    // The fork should be a draft with no chapters.
+    // The fork should be a draft with no units.
     let (status, body) = forker.get(&format!("/api/v1/works/{fork_id}")).await;
     assert_eq!(status, StatusCode::OK, "get fork: {body}");
     assert_eq!(body["lifecycle"], "draft");
-    assert_eq!(body["chapters"].as_array().expect("chapters").len(), 0);
+    assert_eq!(body["units"].as_array().expect("units").len(), 0);
     assert!(body["title"].as_str().unwrap().contains("Fork"));
 
     // Verify lineage edge exists in DB.

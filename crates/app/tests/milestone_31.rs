@@ -211,21 +211,39 @@ async fn published_work(
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work_id = body["id"].as_str().expect("id").to_owned();
     let work_version = body["version"].as_i64().expect("version");
+
+    // **The discussion mode is `comments_only`** -- the legacy shape, supported
+    // indefinitely (spec §13.2). A *new* work is `thread_only` by default and
+    // its text discussion lives in the linked forum thread, so a test that
+    // comments on a work has to say which shape it wants.
+    let (status, body) = author
+        .request(
+            "PATCH",
+            &format!("/api/v1/works/{work_id}"),
+            Some(json!({
+                "expected_version": work_version,
+                "discussion_mode": "comments_only",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set the discussion mode: {body}");
+
+    let work_version = body["version"].as_i64().expect("version");
     let (status, body) = author
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter id").to_owned();
-    let chapter_version = body["version"].as_i64().expect("version");
-    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+    assert_eq!(status, StatusCode::CREATED, "unit: {body}");
+    let unit = body["id"].as_str().expect("unit id").to_owned();
+    let unit_version = body["version"].as_i64().expect("version");
+    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = author
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "save: {body}");
@@ -273,18 +291,31 @@ async fn seed_category(harness: &Harness) -> String {
 #[tokio::test]
 async fn a_new_work_reports_the_instance_default_mode() {
     let harness = Harness::new("default-mode").await;
-    let (work_id, _author) = published_work(&harness, "m31-a@t.test", "m31a", "Default Mode").await;
+    // **The work is created here and not through the helper**, because the
+    // helper sets the mode explicitly for the comment tests and this test is
+    // about the *default*.
+    let mut author = harness.client();
+    register(&mut author, "m31-a@t.test", "m31a").await;
+    let (status, body) = author
+        .post("/api/v1/works", json!({ "title": "Default Mode" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create work: {body}");
+    let work_id = body["id"].as_str().expect("work id").to_owned();
+
     let mut reader = harness.client();
     register(&mut reader, "m31-b@t.test", "m31b").await;
 
-    // The instance default (comments_only for legacy safety) applies.
+    // **The instance default is `thread_only`** (spec §13.2): a new work's
+    // page carries a typed-vote reaction bar and all text discussion lives in
+    // the linked forum thread. `comments_only` is the legacy shape, supported
+    // indefinitely.
     let (status, body) = reader
         .get(&format!("/api/v1/works/{work_id}/discussion-mode"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["mode"], "comments_only");
-    assert_eq!(body["comments_enabled"], true);
-    assert_eq!(body["thread_enabled"], false);
+    assert_eq!(body["mode"], "thread_only");
+    assert_eq!(body["comments_enabled"], false);
+    assert_eq!(body["thread_enabled"], true);
 
     harness.cleanup().await;
 }

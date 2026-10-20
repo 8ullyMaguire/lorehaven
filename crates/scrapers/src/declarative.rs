@@ -2,7 +2,7 @@
 //!
 //! This is the whole of Path A. A curator's YAML becomes a compiled manifest
 //! here, and this type does exactly what the eleven hand-written adapters do:
-//! recognise a URL, read metadata and a chapter list, read chapter bodies —
+//! recognise a URL, read metadata and a unit list, read unit bodies —
 //! through a [`Fetcher`] it is *passed*, and holds none.
 //!
 //! **The transport is handed in, never held**, which is §11.1's structural rule
@@ -24,8 +24,8 @@ use url::Url;
 use crate::sanitize::sanitize_fragment;
 use crate::source_manifest::CompiledSource;
 use crate::{
-    AuthKind, ChapterRef, Credentials, Fetched, Fetcher, SourceAdapter, SourceCapabilities,
-    SourceChapter, SourceError, SourceKey, SourceResult, SourceWork, VerificationStatus, Wall,
+    AuthKind, UnitRef, Credentials, Fetched, Fetcher, SourceAdapter, SourceCapabilities,
+    SourceUnit, SourceError, SourceKey, SourceResult, SourceWork, VerificationStatus, Wall,
     WorkStatus,
 };
 
@@ -56,7 +56,7 @@ impl DeclarativeAdapter {
     /// The work's own identifier, from its URL, if the URL matches the pattern.
     ///
     /// The id is the segment between `{id}` and the next `/`, so a pattern that
-    /// names a suffix (`/works/{id}/chapters/{num}`) resolves to the first
+    /// names a suffix (`/works/{id}/units/{num}`) resolves to the first
     /// segment after the prefix. This is the same rule §55.3's `work_pattern`
     /// describes, and it is why the pattern needs `{id}` at all.
     #[must_use]
@@ -67,14 +67,14 @@ impl DeclarativeAdapter {
         Some(id.to_string())
     }
 
-    /// The URL of one chapter, from the work's URL and the chapter's ordinal.
+    /// The URL of one unit, from the work's URL and the unit's ordinal.
     ///
-    /// `chapter_pattern` carries `{num}`, which is 1-based because
-    /// [`ChapterRef::ordinal`] is, and a 0-based chapter list is the kind of
-    /// off-by-one that only shows up as a reader missing chapter one.
+    /// `unit_pattern` carries `{num}`, which is 1-based because
+    /// [`UnitRef::ordinal`] is, and a 0-based unit list is the kind of
+    /// off-by-one that only shows up as a reader missing unit one.
     #[must_use]
-    pub fn chapter_url(&self, work_url: &str, work_id: &str, ordinal: u32) -> Option<String> {
-        let pattern = &self.source.manifest.chapter_pattern;
+    pub fn unit_url(&self, work_url: &str, work_id: &str, ordinal: u32) -> Option<String> {
+        let pattern = &self.source.manifest.unit_pattern;
         if !pattern.contains("{num}") {
             return None;
         }
@@ -119,10 +119,10 @@ impl DeclarativeAdapter {
             ))
         })?;
 
-        // A chapter list is required when the adapter claims the capability,
+        // A unit list is required when the adapter claims the capability,
         // because an empty list is the signal the import treats as a parse
-        // failure rather than as an empty work (SourceWork::chapters).
-        let chapters = self.chapters_from_html(&doc, &work_id);
+        // failure rather than as an empty work (SourceWork::units).
+        let units = self.units_from_html(&doc, &work_id);
 
         Ok(SourceWork {
             source_key: SourceKey::new(self.source.manifest.source_id.clone()),
@@ -142,23 +142,23 @@ impl DeclarativeAdapter {
             status: WorkStatus::Unknown,
             published_at: None,
             updated_at: None,
-            chapters,
+            units,
             rating_text: None,
             warning_texts: vec![],
             tags: all_text_at(&doc, &s.tags),
         })
     }
 
-    /// The chapter list, read from anchors under the work page.
+    /// The unit list, read from anchors under the work page.
     ///
-    /// Chapter links are found by their href matching the `chapter_pattern`'s
+    /// Unit links are found by their href matching the `unit_pattern`'s
     /// shape rather than by a selector the manifest supplies, because a
-    /// manifest's `chapter_pattern` *is* the statement of where chapters live.
+    /// manifest's `unit_pattern` *is* the statement of where units live.
     /// That keeps one fact about the source in one field instead of two that can
     /// disagree — a selector that stops matching and a pattern that still matches
     /// are the same bug with two names.
-    fn chapters_from_html(&self, doc: &Html, work_id: &str) -> Vec<ChapterRef> {
-        let needle = chapter_needle(&self.source.manifest.chapter_pattern);
+    fn units_from_html(&self, doc: &Html, work_id: &str) -> Vec<UnitRef> {
+        let needle = unit_needle(&self.source.manifest.unit_pattern);
         let mut out: Vec<(String, String)> = Vec::new();
 
         // A literal selector, compiled once per call rather than stored: it is
@@ -183,16 +183,16 @@ impl DeclarativeAdapter {
 
         // Ordinals are assigned after sorting by the source's own identifier, so
         // they are stable across runs for an unchanged work — which
-        // ChapterRef::ordinal requires, because progress and notes are mapped
+        // UnitRef::ordinal requires, because progress and notes are mapped
         // onto it across a re-import. Sorting by href order would renumber a work
-        // whose page listed chapters differently.
+        // whose page listed units differently.
         out.sort();
         out.dedup();
         out.into_iter()
             .enumerate()
-            .map(|(i, (key, title))| ChapterRef {
+            .map(|(i, (key, title))| UnitRef {
                 ordinal: i as u32 + 1,
-                source_chapter_key: key,
+                source_unit_key: key,
                 title,
             })
             .collect()
@@ -225,8 +225,8 @@ impl SourceAdapter for DeclarativeAdapter {
         let rate = self.source.manifest.rate_limit_per_second;
         SourceCapabilities {
             metadata: true,
-            chapters: true,
-            per_chapter_fetch: false,
+            units: true,
+            per_unit_fetch: false,
             bibliography: false,
             incremental: false,
             // A manifest declares *that* a login is needed; the credential itself
@@ -306,37 +306,37 @@ impl SourceAdapter for DeclarativeAdapter {
         self.preview_from_html(&fetched.body, url)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        let mut out = Vec::with_capacity(work.chapters.len());
-        for ch in &work.chapters {
+    ) -> SourceResult<Vec<SourceUnit>> {
+        let mut out = Vec::with_capacity(work.units.len());
+        for ch in &work.units {
             let url = self
-                .chapter_url(&work.source_url, &work.source_work_key, ch.ordinal)
+                .unit_url(&work.source_url, &work.source_work_key, ch.ordinal)
                 .ok_or_else(|| {
                     SourceError::Parse(format!(
-                        "chapter_pattern `{}` has no {{num}}",
-                        self.source.manifest.chapter_pattern
+                        "unit_pattern `{}` has no {{num}}",
+                        self.source.manifest.unit_pattern
                     ))
                 })?;
             let fetched = fetch.get(&url).await?;
-            out.push(self.chapter_from_html(&fetched.body, ch.ordinal, &ch.source_chapter_key)?);
+            out.push(self.unit_from_html(&fetched.body, ch.ordinal, &ch.source_unit_key)?);
         }
         Ok(out)
     }
 }
 
 impl DeclarativeAdapter {
-    /// Parse one chapter body, offline.
-    fn chapter_from_html(
+    /// Parse one unit body, offline.
+    fn unit_from_html(
         &self,
         html: &str,
         ordinal: u32,
-        source_chapter_key: &str,
-    ) -> SourceResult<SourceChapter> {
+        source_unit_key: &str,
+    ) -> SourceResult<SourceUnit> {
         let doc = Html::parse_document(html);
         // `Selector::select` lives on `ElementRef`, not on `Selector` — a
         // selector is a predicate, and applying it needs something to apply it
@@ -353,17 +353,17 @@ impl DeclarativeAdapter {
             .expect("`body` is one of the seven fields `all()` returns");
         let node = root.select(body).next().ok_or_else(|| {
             SourceError::Parse(format!(
-                "no chapter body: selectors.body `{}` matched nothing",
+                "no unit body: selectors.body `{}` matched nothing",
                 self.source.manifest.selectors.body
             ))
         })?;
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal,
-            source_chapter_key: source_chapter_key.to_string(),
+            source_unit_key: source_unit_key.to_string(),
             title: String::new(),
             content_html: sanitize_fragment(&node.inner_html(), Some(&self.source.origin)),
             // §55.3's schema has no image selector, and picking up whatever
-            // `<img>` tags a chapter page happens to carry would put third-party
+            // `<img>` tags a unit page happens to carry would put third-party
             // URLs into the import without anyone having reviewed them. Empty
             // here, and §30.2's hosting policy decides what happens to images a
             // reader imports by some other route.
@@ -378,10 +378,10 @@ fn pattern_prefix(pattern: &str) -> String {
     pattern[..cut].to_string()
 }
 
-/// The stable part of a `chapter_pattern` used to recognise a chapter link.
+/// The stable part of a `unit_pattern` used to recognise a unit link.
 ///
-/// `/works/{id}/chapters/{num}` contributes `chapters/`, which is what
-/// distinguishes a chapter link from the work link or an author's profile on the
+/// `/works/{id}/units/{num}` contributes `units/`, which is what
+/// distinguishes a unit link from the work link or an author's profile on the
 /// same page. Taken from the segment *after* `{id}` and *before* the one holding
 /// `{num}`, so the work's own id in the middle does not have to match.
 ///
@@ -389,13 +389,13 @@ fn pattern_prefix(pattern: &str) -> String {
 /// by the tests rather than by reading it:
 ///
 /// * taking only the last `/` before `{num}` yields `"/"`, which every absolute
-///   href contains — so `/users/ada` was read as a chapter;
-/// * taking the text from just after `{id}` to the end yields `"{id}/chapters/"`,
+///   href contains — so `/users/ada` was read as a unit;
+/// * taking the text from just after `{id}` to the end yields `"{id}/units/"`,
 ///   still carrying the placeholder — so no real href matched and the work had no
-///   chapters at all.
+///   units at all.
 ///
 /// What is wanted is the one *segment* between the two placeholders.
-fn chapter_needle(pattern: &str) -> String {
+fn unit_needle(pattern: &str) -> String {
     let Some(num_at) = pattern.find("{num}") else {
         return String::new();
     };
@@ -481,12 +481,12 @@ name: "AO3 Like"
 base_url: "https://ao3-like.org"
 rate_limit_per_second: 2
 work_pattern: "/works/{id}"
-chapter_pattern: "/works/{id}/chapters/{num}"
+unit_pattern: "/works/{id}/units/{num}"
 selectors:
   title: "h1.work-title"
   author: ".byline a"
   summary: ".summary blockquote"
-  body: ".chapter-content"
+  body: ".unit-content"
   tags: ".tags li"
   word_count: ".stats .words"
   date_published: "meta[property='article:published_time']"
@@ -504,15 +504,15 @@ auth:
   <div class="summary"><blockquote>Borrow-checker as romance.</blockquote></div>
   <ul class="tags"><li>angst</li><li>fluff</li></ul>
   <div class="stats"><span class="words">12,345</span></div>
-  <a href="/works/99999/chapters/1">Ch 1</a>
-  <a href="/works/99999/chapters/2">Ch 2</a>
-  <a href="/works/99999/chapters/3">Ch 3</a>
+  <a href="/works/99999/units/1">Ch 1</a>
+  <a href="/works/99999/units/2">Ch 2</a>
+  <a href="/works/99999/units/3">Ch 3</a>
   <a href="/users/ada">Ada</a>
 </body></html>
 "#;
 
-    const CHAPTER_PAGE: &str = r#"
-<html><body><div class="chapter-content"><p>The borrow checker.</p></div></body></html>
+    const UNIT_PAGE: &str = r#"
+<html><body><div class="unit-content"><p>The borrow checker.</p></div></body></html>
 "#;
 
     fn adapter() -> DeclarativeAdapter {
@@ -532,25 +532,25 @@ auth:
         assert_eq!(w.word_count, Some(12_345), "commas are tolerated");
         assert_eq!(w.tags, vec!["angst", "fluff"]);
         assert_eq!(w.source_work_key, "99999");
-        assert_eq!(w.chapters.len(), 3);
-        assert_eq!(w.chapters[0].ordinal, 1);
-        assert_eq!(w.chapters[2].source_chapter_key, "3");
+        assert_eq!(w.units.len(), 3);
+        assert_eq!(w.units[0].ordinal, 1);
+        assert_eq!(w.units[2].source_unit_key, "3");
     }
 
-    /// The property §11.1's `chapter_pattern` is the authority for: a link to
-    /// the author's profile is not a chapter, and neither is the work's own link.
+    /// The property §11.1's `unit_pattern` is the authority for: a link to
+    /// the author's profile is not a unit, and neither is the work's own link.
     #[test]
-    fn it_takes_only_chapter_links() {
+    fn it_takes_only_unit_links() {
         let a = adapter();
         let url = Url::parse("https://ao3-like.org/works/99999").unwrap();
         let w = a.preview_from_html(WORK_PAGE, &url).unwrap();
         assert_eq!(
-            w.chapters
+            w.units
                 .iter()
-                .map(|c| c.source_chapter_key.as_str())
+                .map(|c| c.source_unit_key.as_str())
                 .collect::<Vec<_>>(),
             ["1", "2", "3"],
-            "the byline link and the work link are not chapters"
+            "the byline link and the work link are not units"
         );
     }
 
@@ -560,8 +560,8 @@ auth:
         let url = Url::parse("https://ao3-like.org/works/99999").unwrap();
         let first = a.preview_from_html(WORK_PAGE, &url).unwrap();
         let second = a.preview_from_html(WORK_PAGE, &url).unwrap();
-        assert_eq!(first.chapters, second.chapters, "two runs agree");
-        assert_eq!(first.chapters[0].ordinal, 1, "never 0");
+        assert_eq!(first.units, second.units, "two runs agree");
+        assert_eq!(first.units[0].ordinal, 1, "never 0");
     }
 
     #[test]
@@ -594,7 +594,7 @@ auth:
         // so this compares the contract they all honour rather than one of them.
         assert_eq!(declarative.title, "A Study in Rust");
         assert_eq!(declarative.source_work_key, "99999");
-        assert!(declarative.chapter_count() > 0);
+        assert!(declarative.unit_count() > 0);
         assert!(!declarative.summary.is_empty());
     }
 
@@ -632,55 +632,55 @@ auth:
     }
 
     #[tokio::test]
-    async fn chapters_are_fetched_and_sanitised() {
+    async fn units_are_fetched_and_sanitised() {
         let a = adapter();
         let url = Url::parse("https://ao3-like.org/works/99999").unwrap();
         let f = FixtureFetcher::new().with_page(url.as_str(), WORK_PAGE);
         let w = a.preview(&f, &url, None).await.unwrap();
 
         let mut bodies = FixtureFetcher::new();
-        for ch in &w.chapters {
+        for ch in &w.units {
             let u = a
-                .chapter_url(&w.source_url, &w.source_work_key, ch.ordinal)
+                .unit_url(&w.source_url, &w.source_work_key, ch.ordinal)
                 .unwrap();
-            bodies = bodies.with_page(&u, CHAPTER_PAGE);
+            bodies = bodies.with_page(&u, UNIT_PAGE);
         }
 
-        let chapters = a.fetch_chapters(&bodies, &w, None).await.unwrap();
-        assert_eq!(chapters.len(), 3);
-        assert_eq!(chapters[0].ordinal, 1);
-        assert!(chapters[0].content_html.contains("borrow checker"));
+        let units = a.fetch_units(&bodies, &w, None).await.unwrap();
+        assert_eq!(units.len(), 3);
+        assert_eq!(units[0].ordinal, 1);
+        assert!(units[0].content_html.contains("borrow checker"));
     }
 
-    /// A hostile chapter body must not reach a reader as markup. §11.1 says
+    /// A hostile unit body must not reach a reader as markup. §11.1 says
     /// sanitisation happens in the adapter because only the adapter knows which
     /// parts of a foreign page are the work.
     #[tokio::test]
-    async fn a_chapter_body_is_sanitised() {
+    async fn a_unit_body_is_sanitised() {
         let a = adapter();
         let url = Url::parse("https://ao3-like.org/works/99999").unwrap();
         let f = FixtureFetcher::new().with_page(url.as_str(), WORK_PAGE);
         let w = a.preview(&f, &url, None).await.unwrap();
 
-        // Every chapter the work claims, not just the first: an earlier version
-        // registered only chapter 1 and failed on chapter 2 with "no fixture
+        // Every unit the work claims, not just the first: an earlier version
+        // registered only unit 1 and failed on unit 2 with "no fixture
         // recorded", which reads like a bug in the adapter and was a bug in the
         // test. A fetcher that serves recorded pages is exact, not lenient.
-        let hostile_body = r#"<html><body><div class="chapter-content"><script>alert(1)</script><p>text</p></div></body></html>"#;
+        let hostile_body = r#"<html><body><div class="unit-content"><script>alert(1)</script><p>text</p></div></body></html>"#;
         let mut hostile = FixtureFetcher::new();
-        for ch in &w.chapters {
+        for ch in &w.units {
             let u = a
-                .chapter_url(&w.source_url, &w.source_work_key, ch.ordinal)
+                .unit_url(&w.source_url, &w.source_work_key, ch.ordinal)
                 .unwrap();
             hostile = hostile.with_page(&u, hostile_body);
         }
 
-        let chapters = a.fetch_chapters(&hostile, &w, None).await.unwrap();
-        assert_eq!(chapters.len(), 3, "all three were fetched");
-        for (i, ch) in chapters.iter().enumerate() {
+        let units = a.fetch_units(&hostile, &w, None).await.unwrap();
+        assert_eq!(units.len(), 3, "all three were fetched");
+        for (i, ch) in units.iter().enumerate() {
             assert!(
                 !ch.content_html.contains("<script"),
-                "chapter {} kept a script: {}",
+                "unit {} kept a script: {}",
                 i + 1,
                 ch.content_html
             );

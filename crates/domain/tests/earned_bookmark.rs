@@ -131,7 +131,7 @@ fn usable_is_false_for_every_undefined_ratio() {
 fn the_basis_is_a_completion_and_not_four_stars() {
     // The decision, stated as an assertion so it cannot drift silently. §53.5 defines
     // "hit" as finished OR rated >=4; §53.6 deliberately does not reuse it, because a
-    // four-star rating on chapter one costs exactly the one click this ratio is
+    // four-star rating on unit one costs exactly the one click this ratio is
     // measured against.
     let got = EarnedBookmark::compute(&signals(10, 5));
     assert_eq!(

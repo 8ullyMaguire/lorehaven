@@ -571,7 +571,7 @@ async fn removing_an_item_and_deleting_its_copy_are_different_operations() {
     let mut client = harness.client();
     let account = register(&mut client, "modes@example.com", "modes").await;
 
-    // Two items, each holding one stored chapter of known size.
+    // Two items, each holding one stored unit of known size.
     let kept = seed_item(&harness, &account, "4001", "Keep The Copy").await;
     let deleted = seed_item(&harness, &account, "4002", "Delete The Copy").await;
     let store = harness.store();
@@ -888,7 +888,7 @@ async fn storage_usage_matches_the_sum_of_the_items() {
     let second = seed_item(&harness, &account, "7002", "Second").await;
 
     let store = harness.store();
-    let bodies: [&[u8]; 3] = [b"chapter one", b"chapter two", b"a shared chapter"];
+    let bodies: [&[u8]; 3] = [b"unit one", b"unit two", b"a shared unit"];
     let mut checksums = Vec::new();
     for body in bodies {
         let (checksum, _key) = store
@@ -926,7 +926,7 @@ async fn storage_usage_matches_the_sum_of_the_items() {
     assert_eq!(
         body["imported_bytes"],
         json!(expected),
-        "the shared chapter must be counted once, not twice: {body}"
+        "the shared unit must be counted once, not twice: {body}"
     );
     assert_eq!(
         body["blob_count"],

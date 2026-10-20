@@ -4,7 +4,7 @@
 //! Eight public functions with no test touching them. Three properties are
 //! load-bearing and are asserted here rather than assumed:
 //!
-//! **`link_topic` is idempotent per work.** The doc says a chapter-publish hook
+//! **`link_topic` is idempotent per work.** The doc says a unit-publish hook
 //! that fires twice creates exactly one topic. That claim is what stops a
 //! retried publish from littering the forum, so it is tested by calling it twice
 //! and comparing topic ids — not by counting rows.
@@ -353,7 +353,7 @@ async fn linking_creates_a_topic_and_a_link_row() {
         .unwrap();
 
     assert_eq!(link.work_id, work);
-    assert!(link.chapter_id.is_none());
+    assert!(link.unit_id.is_none());
     let found = wd::linked_topic(h.db(), &work)
         .await
         .unwrap()
@@ -364,7 +364,7 @@ async fn linking_creates_a_topic_and_a_link_row() {
 
 #[tokio::test]
 async fn linking_the_same_work_twice_returns_the_same_topic() {
-    // The doc's reason for this being idempotent: a chapter-publish hook that
+    // The doc's reason for this being idempotent: a unit-publish hook that
     // fires twice must create exactly one topic, not two.
     let h = Db::new("link-idem").await;
     let work = h.work().await;
@@ -386,21 +386,21 @@ async fn linking_the_same_work_twice_returns_the_same_topic() {
 }
 
 #[tokio::test]
-async fn a_second_link_keeps_the_original_chapter_and_title() {
+async fn a_second_link_keeps_the_original_unit_and_title() {
     // Idempotent means "returned unchanged", not "updated": a later call with a
-    // different chapter must not repoint the existing thread.
+    // different unit must not repoint the existing thread.
     let h = Db::new("link-idem-args").await;
     let work = h.work().await;
     let category = h.category().await;
     let author = h.pseud("linker").await;
-    let chapter = uuid::Uuid::new_v4().to_string();
+    let unit = uuid::Uuid::new_v4().to_string();
     h.exec(&format!(
-        "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
-         VALUES ('{chapter}', '{work}', 'One', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+        "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
+         VALUES ('{unit}', '{work}', 'One', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
     ))
     .await;
 
-    let first = wd::link_topic(h.db(), &work, Some(&chapter), &category, &author, "First")
+    let first = wd::link_topic(h.db(), &work, Some(&unit), &category, &author, "First")
         .await
         .unwrap();
     let second = wd::link_topic(h.db(), &work, None, &category, &author, "Second")
@@ -409,42 +409,42 @@ async fn a_second_link_keeps_the_original_chapter_and_title() {
 
     assert_eq!(second.topic_id, first.topic_id);
     assert_eq!(
-        second.chapter_id, first.chapter_id,
-        "the chapter recorded the first time is kept"
+        second.unit_id, first.unit_id,
+        "the unit recorded the first time is kept"
     );
 }
 
 #[tokio::test]
-async fn a_chapter_scoped_link_records_the_chapter() {
-    let h = Db::new("link-chapter").await;
+async fn a_unit_scoped_link_records_the_unit() {
+    let h = Db::new("link-unit").await;
     let work = h.work().await;
     let category = h.category().await;
     let author = h.pseud("linker").await;
-    let chapter = uuid::Uuid::new_v4().to_string();
+    let unit = uuid::Uuid::new_v4().to_string();
     h.exec(&format!(
-        "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
-         VALUES ('{chapter}', '{work}', 'One', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+        "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
+         VALUES ('{unit}', '{work}', 'One', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
     ))
     .await;
 
     let link = wd::link_topic(
         h.db(),
         &work,
-        Some(&chapter),
+        Some(&unit),
         &category,
         &author,
         "Ch thread",
     )
     .await
     .unwrap();
-    assert_eq!(link.chapter_id.as_deref(), Some(chapter.as_str()));
+    assert_eq!(link.unit_id.as_deref(), Some(unit.as_str()));
     assert_eq!(
         wd::linked_topic(h.db(), &work)
             .await
             .unwrap()
             .unwrap()
-            .chapter_id,
-        Some(chapter)
+            .unit_id,
+        Some(unit)
     );
 }
 

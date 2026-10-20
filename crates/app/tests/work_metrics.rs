@@ -171,25 +171,25 @@ impl Client {
         body["id"].as_str().expect("work id").to_owned()
     }
 
-    async fn add_chapter(&mut self, work_id: &str) {
+    async fn add_unit(&mut self, work_id: &str) {
         let (status, body) = self
             .post(
                 &format!("/api/v1/works/{work_id}/chapters"),
                 json!({ "title": "One" }),
             )
             .await;
-        assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-        let chapter = body["id"].as_str().expect("chapter id").to_owned();
-        let chapter_version = body["version"].as_i64().expect("chapter version");
-        let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+        assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+        let unit = body["id"].as_str().expect("unit id").to_owned();
+        let unit_version = body["version"].as_i64().expect("unit version");
+        let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A unit with enough words to have a middle." }] }] });
         let (status, body) = self
             .request(
                 "PATCH",
-                &format!("/api/v1/chapters/{chapter}"),
-                Some(json!({ "expected_version": chapter_version, "document": doc })),
+                &format!("/api/v1/chapters/{unit}"),
+                Some(json!({ "expected_version": unit_version, "document": doc })),
             )
             .await;
-        assert_eq!(status, StatusCode::OK, "save chapter: {body}");
+        assert_eq!(status, StatusCode::OK, "save unit: {body}");
     }
 
     async fn publish_work(&mut self, work_id: &str) {
@@ -213,7 +213,7 @@ async fn public_work_excludes_metrics_when_owner_opted_out() {
     let mut owner = h.client();
     owner.register("owner-o@example.test", "opted-out").await;
     let work_id = owner.create_work("Opted Out").await;
-    owner.add_chapter(&work_id).await;
+    owner.add_unit(&work_id).await;
     owner.publish_work(&work_id).await;
 
     // Opt out of public ratings.
@@ -244,7 +244,7 @@ async fn public_work_shows_metrics_when_allowed() {
     let mut owner = h.client();
     owner.register("owner-i@example.test", "opted-in").await;
     let work_id = owner.create_work("Opted In").await;
-    owner.add_chapter(&work_id).await;
+    owner.add_unit(&work_id).await;
     owner.publish_work(&work_id).await;
 
     // Read as anonymous: metrics present (all zero).
@@ -286,7 +286,7 @@ async fn kudos_requires_authentication() {
     let mut owner = h.client();
     owner.register("owner-a@example.test", "auth-req").await;
     let work_id = owner.create_work("Auth Required").await;
-    owner.add_chapter(&work_id).await;
+    owner.add_unit(&work_id).await;
     owner.publish_work(&work_id).await;
 
     let mut anon = h.client();

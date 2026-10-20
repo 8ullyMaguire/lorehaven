@@ -2,7 +2,7 @@
 //!
 //! Orphaning marks a work as ownerless — its creator has relinquished it.
 //! A successor may later claim it. Orphaning is not deletion: the work,
-//! its chapters, its revisions and its publication history remain. Only
+//! its units, its revisions and its publication history remain. Only
 //! the ownership link is severed.
 
 use serde::{Deserialize, Serialize};

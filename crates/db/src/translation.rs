@@ -142,7 +142,7 @@ pub async fn transition_job(
 pub async fn upsert_unit(
     db: &Database,
     job_id: &str,
-    chapter_id: &str,
+    unit_id: &str,
     paragraph_index: i64,
     source_text: &str,
     target_text: Option<&str>,
@@ -155,22 +155,22 @@ pub async fn upsert_unit(
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(
-                "INSERT INTO translation_units (id, job_id, chapter_id, paragraph_index, source_text, target_text, state, memory_hit, created_at, updated_at)
+                "INSERT INTO translation_units (id, job_id, unit_id, paragraph_index, source_text, target_text, state, memory_hit, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(job_id, chapter_id, paragraph_index) DO UPDATE SET
+                 ON CONFLICT(job_id, unit_id, paragraph_index) DO UPDATE SET
                     target_text = excluded.target_text, state = excluded.state, memory_hit = excluded.memory_hit, updated_at = excluded.updated_at"
             )
-            .bind(&id).bind(job_id).bind(chapter_id).bind(paragraph_index).bind(source_text).bind(target_text).bind(state.as_str()).bind(memory_hit).bind(&now).bind(&now)
+            .bind(&id).bind(job_id).bind(unit_id).bind(paragraph_index).bind(source_text).bind(target_text).bind(state.as_str()).bind(memory_hit).bind(&now).bind(&now)
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO translation_units (id, job_id, chapter_id, paragraph_index, source_text, target_text, state, memory_hit, created_at, updated_at)
+                "INSERT INTO translation_units (id, job_id, unit_id, paragraph_index, source_text, target_text, state, memory_hit, created_at, updated_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                 ON CONFLICT(job_id, chapter_id, paragraph_index) DO UPDATE SET
+                 ON CONFLICT(job_id, unit_id, paragraph_index) DO UPDATE SET
                     target_text = EXCLUDED.target_text, state = EXCLUDED.state, memory_hit = EXCLUDED.memory_hit, updated_at = EXCLUDED.updated_at"
             )
-            .bind(&id).bind(job_id).bind(chapter_id).bind(paragraph_index).bind(source_text).bind(target_text).bind(state.as_str()).bind(memory_hit).bind(&now).bind(&now)
+            .bind(&id).bind(job_id).bind(unit_id).bind(paragraph_index).bind(source_text).bind(target_text).bind(state.as_str()).bind(memory_hit).bind(&now).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
     }
@@ -182,7 +182,7 @@ async fn units_for_job_sqlite(
     job_id: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT * FROM translation_units WHERE job_id = ? ORDER BY chapter_id, paragraph_index",
+        "SELECT * FROM translation_units WHERE job_id = ? ORDER BY unit_id, paragraph_index",
     )
     .bind(job_id)
     .fetch_all(pool)
@@ -193,7 +193,7 @@ async fn units_for_job_sqlite(
             serde_json::json!({
                 "id": r.get::<String, _>("id"),
                 "job_id": r.get::<String, _>("job_id"),
-                "chapter_id": r.get::<String, _>("chapter_id"),
+                "unit_id": r.get::<String, _>("unit_id"),
                 "paragraph_index": r.get::<i32, _>("paragraph_index"),
                 "source_text": r.get::<String, _>("source_text"),
                 "target_text": r.get::<Option<String>, _>("target_text"),
@@ -209,7 +209,7 @@ async fn units_for_job_postgres(
     job_id: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT * FROM translation_units WHERE job_id = $1 ORDER BY chapter_id, paragraph_index",
+        "SELECT * FROM translation_units WHERE job_id = $1 ORDER BY unit_id, paragraph_index",
     )
     .bind(job_id)
     .fetch_all(pool)
@@ -220,7 +220,7 @@ async fn units_for_job_postgres(
             serde_json::json!({
                 "id": r.get::<String, _>("id"),
                 "job_id": r.get::<String, _>("job_id"),
-                "chapter_id": r.get::<String, _>("chapter_id"),
+                "unit_id": r.get::<String, _>("unit_id"),
                 "paragraph_index": r.get::<i32, _>("paragraph_index"),
                 "source_text": r.get::<String, _>("source_text"),
                 "target_text": r.get::<Option<String>, _>("target_text"),

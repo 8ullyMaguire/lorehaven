@@ -7,7 +7,7 @@
  *
  * Returns `undefined` — and the caller renders nothing — only when the count is ABSENT.
  * `word_count` is required on `SurfaceWork` and COALESCEd to 0 by the server, so 0 is a real
- * value: a work with no chapters says "no words yet" rather than nothing, which tells the
+ * value: a work with no units says "no words yet" rather than nothing, which tells the
  * reader the work exists but is unwritten. Silently omitting it would make an unwritten
  * work look the same as one the server failed to measure.
  *

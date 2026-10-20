@@ -69,12 +69,12 @@ async function publishWork(page: Page, title: string): Promise<string> {
   await page.fill('input[id^=field-]', title);
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type('A short chapter for the extended test suite.');
+  await page.keyboard.type('A short unit for the extended test suite.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -243,7 +243,7 @@ test('reader: the reader page renders without error', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`/works/${workId}`);
-  await page.locator('ol.chapters li a').first().click();
+  await page.locator('ol.units li a').first().click();
   await expect(page.locator('.prose').first()).toBeVisible();
   await page.waitForLoadState('networkidle');
   expect(errors).toEqual([]);

@@ -7,7 +7,7 @@
 //! {
 //!   "error": {
 //!     "code": "REVISION_CONFLICT",
-//!     "message": "This chapter changed since you opened it.",
+//!     "message": "This unit changed since you opened it.",
 //!     "field_errors": {},
 //!     "request_id": "..."
 //!   }

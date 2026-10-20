@@ -17,7 +17,7 @@
 //! export's output must therefore be referenced** while it is alive, or the next
 //! collection run deletes a file the reader is about to download. The reference
 //! is what [`record_output`] writes, and [`purge_expired`] is what takes it away
-//! again — a two-step shape that mirrors how imported chapters are kept alive.
+//! again — a two-step shape that mirrors how imported units are kept alive.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

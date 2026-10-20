@@ -1,6 +1,6 @@
-//! Sanitation of imported chapter bodies (spec §11.4's "sanitation" step).
+//! Sanitation of imported unit bodies (spec §11.4's "sanitation" step).
 //!
-//! A chapter body is HTML written by a stranger, on a site we do not control,
+//! A unit body is HTML written by a stranger, on a site we do not control,
 //! and about to be stored and then rendered to a reader. It is therefore treated
 //! as hostile input, and this module is the only thing that turns it into
 //! storage-ready markup.
@@ -242,7 +242,7 @@ pub fn sanitize_fragment(html: &str, base: Option<&Url>) -> String {
         if closing {
             // Close only a tag we actually opened, and close the ones nested
             // inside it that the source forgot — an unclosed `<em>` must not
-            // swallow the rest of the chapter.
+            // swallow the rest of the unit.
             if let Some(position) = open.iter().rposition(|tag| tag == &name) {
                 for stale in open.drain(position..).rev() {
                     out.push_str("</");
@@ -442,8 +442,8 @@ fn escape_attribute(out: &mut String, value: &str) {
 
 /// Whether sanitised output contains no markup at all.
 ///
-/// Used by the import to notice a chapter whose body a source's own "chapter is
-/// empty" placeholder was, so an import does not store a blank chapter as
+/// Used by the import to notice a unit whose body a source's own "unit is
+/// empty" placeholder was, so an import does not store a blank unit as
 /// though it were content.
 #[must_use]
 pub fn is_blank(html: &str) -> bool {
@@ -601,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn a_realistic_chapter_survives_intact() {
+    fn a_realistic_unit_survives_intact() {
         let fragment = "<p>In the shadowed annals of the world&rsquo;s monsters, few ambitions \
              burned as fiercely.</p>\n<p>He <em>waited</em>.</p>\n<blockquote><p>Quoted.</p>\
              </blockquote>\n<hr />\n<p>Fin.</p>";

@@ -96,7 +96,7 @@ fn a_chapter_url_previews_the_whole_work() {
     // would refuse a URL the site itself links to.
     let work = recorded_work("tgstorytime-work.html", TG_WORK_FROM_CHAPTER);
     assert_eq!(work.source_url, TG_WORK);
-    assert_eq!(work.chapters.len(), 19);
+    assert_eq!(work.units.len(), 19);
 }
 
 #[test]
@@ -128,11 +128,11 @@ fn a_member_that_emits_its_action_box_early_is_still_read_correctly() {
 fn tgstorytime_chapters_are_read_from_its_own_container() {
     let work = recorded_work("tgstorytime-work.html", TG_WORK);
 
-    assert_eq!(work.chapters.len(), 19);
-    assert_eq!(work.chapters[0].ordinal, 1);
-    assert_eq!(work.chapters[0].title, "In the beginning - Chapter 1");
-    assert_eq!(work.chapters[18].ordinal, 19);
-    assert_eq!(work.chapters[18].title, "Getting my mojo back - Chapter 19");
+    assert_eq!(work.units.len(), 19);
+    assert_eq!(work.units[0].ordinal, 1);
+    assert_eq!(work.units[0].title, "In the beginning - Chapter 1");
+    assert_eq!(work.units[18].ordinal, 19);
+    assert_eq!(work.units[18].title, "Getting my mojo back - Chapter 19");
 }
 
 #[test]
@@ -143,9 +143,9 @@ fn giantessworld_chapters_are_read_without_any_chapter_container() {
     // directory exists to catch.
     let work = recorded_work("giantessworld-work.html", GW_WORK);
 
-    assert_eq!(work.chapters.len(), 13);
-    assert_eq!(work.chapters[0].title, "Chapter 1");
-    assert_eq!(work.chapters[12].ordinal, 13);
+    assert_eq!(work.units.len(), 13);
+    assert_eq!(work.units[0].title, "Chapter 1");
+    assert_eq!(work.units[12].ordinal, 13);
 }
 
 #[test]
@@ -153,21 +153,21 @@ fn the_chapter_key_is_the_members_own_chapid_on_both_members() {
     // Not the ordinal: a chapter's position changes when the author inserts one
     // before it, and a reader's progress and notes are keyed on this.
     let tg = recorded_work("tgstorytime-work.html", TG_WORK);
-    assert_eq!(tg.chapters[0].source_chapter_key, "32368");
-    assert_eq!(tg.chapters[18].source_chapter_key, "50151");
+    assert_eq!(tg.units[0].source_unit_key, "32368");
+    assert_eq!(tg.units[18].source_unit_key, "50151");
 
     let gw = recorded_work("giantessworld-work.html", GW_WORK);
-    assert_eq!(gw.chapters[0].source_chapter_key, "51874");
-    assert_eq!(gw.chapters[12].source_chapter_key, "51886");
+    assert_eq!(gw.units[0].source_unit_key, "51874");
+    assert_eq!(gw.units[12].source_unit_key, "51886");
     assert!(
-        gw.chapters.iter().all(|chapter| chapter
-            .source_chapter_key
+        gw.units.iter().all(|chapter| chapter
+            .source_unit_key
             .chars()
             .all(|c| c.is_ascii_digit())),
         "every chapter key must be a chapid, never an ordinal fallback: {:?}",
-        gw.chapters
+        gw.units
             .iter()
-            .map(|chapter| chapter.source_chapter_key.as_str())
+            .map(|chapter| chapter.source_unit_key.as_str())
             .collect::<Vec<_>>()
     );
 }
@@ -178,7 +178,7 @@ fn the_printable_whole_work_link_is_not_a_chapter() {
     // it would add a fourteenth entry to a thirteen-chapter work, and the count
     // check would then refuse a page that is entirely correct.
     let work = recorded_work("giantessworld-work.html", GW_WORK);
-    assert_eq!(work.chapters.len(), 13);
+    assert_eq!(work.units.len(), 13);
 }
 
 #[test]
@@ -440,18 +440,18 @@ async fn a_chapter_is_addressed_at_the_reading_view_and_not_the_print_view() {
         .expect("the recorded work page reads");
 
     let chapter = adapter
-        .fetch_chapter(&fetch, &work, 1, None)
+        .fetch_unit(&fetch, &work, 1, None)
         .await
         .expect("chapter 1 reads on its own");
     assert_eq!(chapter.ordinal, 1);
-    assert_eq!(chapter.source_chapter_key, "51874");
+    assert_eq!(chapter.source_unit_key, "51874");
     assert!(
         chapter.content_html.contains("Sunspeak"),
         "the prose is there"
     );
 
     let second = adapter
-        .fetch_chapter(&fetch, &work, 2, None)
+        .fetch_unit(&fetch, &work, 2, None)
         .await
         .expect_err("chapter 2 has no recorded body");
     assert!(
@@ -477,7 +477,7 @@ async fn a_chapter_the_work_does_not_have_is_refused_rather_than_invented() {
         .await
         .expect("the recorded work page reads");
 
-    let missing = adapter.fetch_chapter(&fetch, &work, 5000, None).await;
+    let missing = adapter.fetch_unit(&fetch, &work, 5000, None).await;
     assert!(matches!(missing, Err(SourceError::NotFound)), "{missing:?}");
 }
 
@@ -494,7 +494,7 @@ async fn a_whole_work_read_that_cannot_finish_does_not_report_success_on_part() 
         .await
         .expect("the recorded work page reads");
 
-    let result = adapter.fetch_chapters(&fetch, &work, None).await;
+    let result = adapter.fetch_units(&fetch, &work, None).await;
     assert!(
         result.is_err(),
         "a partial read reported as success: {:?} chapters",
@@ -522,7 +522,7 @@ async fn a_member_answering_with_its_print_template_still_yields_the_prose() {
         .await
         .expect("the recorded work page reads");
     let from_reading = adapter
-        .fetch_chapter(&reading_fetch, &reading_work, 1, None)
+        .fetch_unit(&reading_fetch, &reading_work, 1, None)
         .await
         .expect("chapter 1 reads from the reading view");
 
@@ -535,14 +535,14 @@ async fn a_member_answering_with_its_print_template_still_yields_the_prose() {
         .await
         .expect("the recorded work page reads");
     let from_print = adapter
-        .fetch_chapter(&print_fetch, &print_work, 1, None)
+        .fetch_unit(&print_fetch, &print_work, 1, None)
         .await
         .expect("chapter 1 reads from the print template");
 
     assert_eq!(from_reading.ordinal, from_print.ordinal);
     assert_eq!(
-        from_reading.source_chapter_key,
-        from_print.source_chapter_key
+        from_reading.source_unit_key,
+        from_print.source_unit_key
     );
     assert!(
         from_print.content_html.contains("Back in January 2020"),
@@ -561,12 +561,12 @@ fn a_chapter_page_yields_one_chapter_with_its_work_page_identity() {
     // URL to take the ordinal from.
     let work = recorded_work("tgstorytime-work.html", TG_WORK);
     let chapters = Efiction::new()
-        .chapters_from_html(&fixture("tgstorytime-chapter-1.html"), &work)
+        .units_from_html(&fixture("tgstorytime-chapter-1.html"), &work)
         .expect("the recorded chapter page parses");
 
     assert_eq!(chapters.len(), 1);
     assert_eq!(chapters[0].ordinal, 1);
-    assert_eq!(chapters[0].source_chapter_key, "32368");
+    assert_eq!(chapters[0].source_unit_key, "32368");
     assert_eq!(chapters[0].title, "In the beginning - Chapter 1");
 }
 
@@ -574,25 +574,25 @@ fn a_chapter_page_yields_one_chapter_with_its_work_page_identity() {
 fn a_chapters_position_is_recovered_from_the_pages_own_heading() {
     let work = recorded_work("giantessworld-work.html", GW_WORK);
     let chapters = Efiction::new()
-        .chapters_from_html(&fixture("giantessworld-chapter-2.html"), &work)
+        .units_from_html(&fixture("giantessworld-chapter-2.html"), &work)
         .expect("the recorded chapter page parses");
 
     assert_eq!(chapters[0].ordinal, 2);
-    assert_eq!(chapters[0].source_chapter_key, "51875");
+    assert_eq!(chapters[0].source_unit_key, "51875");
     assert_eq!(chapters[0].title, "Chapter 2");
 }
 
 #[test]
 fn a_chapter_page_that_does_not_name_itself_is_refused_with_that_reason() {
     // The reading view carries no `div.chaptertitle`, so a page of it cannot say
-    // which chapter it is — which is fine for `fetch_chapter`, whose caller knows
+    // which chapter it is — which is fine for `fetch_unit`, whose caller knows
     // the ordinal, and impossible for the `*_from_html` seam, which does not. The
     // failure has to say *that* rather than claim the work does not list it: one
     // is a page that needs its ordinal supplied and the other is a work that has
     // changed underneath a reader.
     let work = recorded_work("tgstorytime-work.html", TG_WORK);
     let error = Efiction::new()
-        .chapters_from_html(&fixture("tgstorytime-story-1.html"), &work)
+        .units_from_html(&fixture("tgstorytime-story-1.html"), &work)
         .expect_err("the reading view cannot be placed without an ordinal");
 
     match error {
@@ -608,7 +608,7 @@ fn a_chapter_page_that_does_not_name_itself_is_refused_with_that_reason() {
 fn the_prose_is_the_chapter_and_not_the_pages_furniture() {
     let work = recorded_work("giantessworld-work.html", GW_WORK);
     let chapters = Efiction::new()
-        .chapters_from_html(&fixture("giantessworld-chapter-1.html"), &work)
+        .units_from_html(&fixture("giantessworld-chapter-1.html"), &work)
         .expect("the recorded chapter page parses");
     let body = &chapters[0].content_html;
 
@@ -627,7 +627,7 @@ fn a_chapters_author_notes_are_not_folded_into_its_prose() {
     // markup to delimit it inside prose the author wrote.
     let work = recorded_work("tgstorytime-work.html", TG_WORK);
     let chapters = Efiction::new()
-        .chapters_from_html(&fixture("tgstorytime-chapter-1.html"), &work)
+        .units_from_html(&fixture("tgstorytime-chapter-1.html"), &work)
         .expect("the recorded chapter page parses");
 
     assert!(
@@ -642,7 +642,7 @@ fn a_chapters_author_notes_are_not_folded_into_its_prose() {
 fn the_prose_is_sanitised_on_the_way_out() {
     let work = recorded_work("giantessworld-work.html", GW_WORK);
     let chapters = Efiction::new()
-        .chapters_from_html(&fixture("giantessworld-chapter-1.html"), &work)
+        .units_from_html(&fixture("giantessworld-chapter-1.html"), &work)
         .expect("the recorded chapter page parses");
     let body = chapters[0].content_html.to_ascii_lowercase();
 

@@ -73,18 +73,18 @@ test('author publishes and prices, buyer buys and reads, the author is notified,
   await page.fill('input[id^=field-]', 'The E2E Odyssey');
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type('Chapter One. Written by a test, read by a test.');
+  await page.keyboard.type('Unit One. Written by a test, read by a test.');
   // The save request is the deterministic sync point: the revision counter
-  // in the chapter list renders its label across a whitespace break, so text
+  // in the unit list renders its label across a whitespace break, so text
   // matching is unreliable there.
-  const chapterSaved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+  const unitSaved = page.waitForResponse(
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
-  await chapterSaved;
+  await unitSaved;
 
   await page.click('button:text-is("Publish")');
   await expect(page.getByText('Republish')).toBeVisible();

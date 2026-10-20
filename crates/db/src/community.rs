@@ -31,13 +31,13 @@ pub struct Comment {
     pub anchor_kind: Option<String>,
     /// The anchor value (e.g., "3" paragraph offset, "42" timestamp).
     pub anchor_value: Option<String>,
-    /// The chapter id for paragraph anchors.
-    pub anchor_chapter_id: Option<String>,
+    /// The unit id for paragraph anchors.
+    pub anchor_unit_id: Option<String>,
 }
 
 /// Insert a comment. The positivity classification is done by the caller
 /// (route layer) before this insert, and the classification_id is stored
-/// on the comment row. Anchor fields (kind, value, chapter_id) are stored
+/// on the comment row. Anchor fields (kind, value, unit_id) are stored
 /// for anchored comments and NULL for whole-work comments.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_comment(
@@ -49,14 +49,14 @@ pub async fn insert_comment(
     classification_id: Option<&str>,
     anchor_kind: Option<&str>,
     anchor_value: Option<&str>,
-    anchor_chapter_id: Option<&str>,
+    anchor_unit_id: Option<&str>,
 ) -> Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
-        "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, anchor_kind, anchor_value, anchor_chapter_id, created_at, edited_at, deleted_at)
+        "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, anchor_kind, anchor_value, anchor_unit_id, created_at, edited_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, 'v1', ?, ?, ?, ?, ?, NULL, NULL)",
-        "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, anchor_kind, anchor_value, anchor_chapter_id, created_at, edited_at, deleted_at)
+        "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, anchor_kind, anchor_value, anchor_unit_id, created_at, edited_at, deleted_at)
          VALUES ($1, $2, $3, $4, $5, 'v1', $6, $7, $8, $9::uuid, $10, NULL, NULL)",
     );
     match db.backend() {
@@ -70,7 +70,7 @@ pub async fn insert_comment(
                 .bind(classification_id)
                 .bind(anchor_kind)
                 .bind(anchor_value)
-                .bind(anchor_chapter_id)
+                .bind(anchor_unit_id)
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
@@ -85,7 +85,7 @@ pub async fn insert_comment(
                 .bind(classification_id)
                 .bind(anchor_kind)
                 .bind(anchor_value)
-                .bind(anchor_chapter_id)
+                .bind(anchor_unit_id)
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -127,7 +127,7 @@ struct CommentRow {
     deleted_at: Option<String>,
     anchor_kind: Option<String>,
     anchor_value: Option<String>,
-    anchor_chapter_id: Option<String>,
+    anchor_unit_id: Option<String>,
 }
 
 impl From<CommentRow> for Comment {
@@ -143,7 +143,7 @@ impl From<CommentRow> for Comment {
             deleted_at: r.deleted_at,
             anchor_kind: r.anchor_kind,
             anchor_value: r.anchor_value,
-            anchor_chapter_id: r.anchor_chapter_id,
+            anchor_unit_id: r.anchor_unit_id,
         }
     }
 }
@@ -164,7 +164,7 @@ pub async fn list_comments(
     // block in the comments scope stops seeing the other.
     let sql = if cursor.is_some() {
         db.sql(
-            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_unit_id
              FROM comments c
              JOIN pseuds pa ON pa.id = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
@@ -173,7 +173,7 @@ pub async fn list_comments(
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?4 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT ?5",
-            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id::text AS anchor_chapter_id
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_unit_id::text AS anchor_unit_id
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
@@ -185,7 +185,7 @@ pub async fn list_comments(
         )
     } else {
         db.sql(
-            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_unit_id
              FROM comments c
              JOIN pseuds pa ON pa.id = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
@@ -194,7 +194,7 @@ pub async fn list_comments(
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?3 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT ?4",
-            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id::text AS anchor_chapter_id
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_unit_id::text AS anchor_unit_id
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id

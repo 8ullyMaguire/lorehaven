@@ -185,13 +185,13 @@ async fn reading_value(state: &AppState, account_id: &str) -> ApiResult<Value> {
     // The named fields are nested under the capability's own key rather than
     // laid out flat. Two capabilities with different value shapes share one
     // `value` object, and flat fields would collide by name -- the second
-    // metric to land would have to be called `chapters_read_weekly` or the
+    // metric to land would have to be called `units_read_weekly` or the
     // client would have to know which shape it is looking at.
     Ok(json!({
         "status": "ok",
         "reading": {
             "finished_works": totals.finished_works,
-            "chapters_read": totals.chapters_read,
+            "units_read": totals.units_read,
             "words_read": totals.words_read,
             "reading_seconds": totals.reading_seconds,
         },

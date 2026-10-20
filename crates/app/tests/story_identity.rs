@@ -349,7 +349,7 @@ async fn an_external_member_grants_no_access_to_any_body() {
     // CARRY another edition's text, and a substring rule is the only test that
     // survives someone naming it `body`, `body_excerpt` or `text_body`.
     for column in &columns {
-        for forbidden in ["body", "content", "text", "excerpt", "chapter"] {
+        for forbidden in ["body", "content", "text", "excerpt", "unit"] {
             assert!(
                 !column.contains(forbidden),
                 "story_identity_members has a `{column}` column, and must not grow one: \

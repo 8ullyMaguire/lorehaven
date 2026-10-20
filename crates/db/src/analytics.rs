@@ -168,7 +168,7 @@ pub struct CreatorTotals {
     pub works: i64,
     pub published: i64,
     pub unpublished: i64,
-    pub chapters: i64,
+    pub units: i64,
     pub words: i64,
     pub ratings: i64,
     pub rating_stars: i64,
@@ -194,7 +194,7 @@ pub async fn creator_totals(db: &Database, owner_pseud: &str) -> anyhow::Result<
         works: works.0,
         published: works.1,
         unpublished: works.2,
-        chapters: works.3,
+        units: works.3,
         words: works.4,
         ratings: readers.0,
         rating_stars: readers.1,
@@ -209,12 +209,12 @@ const WORK_TOTALS_SQLITE: &str = "SELECT
      COUNT(*) AS works,
      COALESCE(SUM(CASE WHEN w.lifecycle = 'published' THEN 1 ELSE 0 END), 0) AS published,
      COALESCE(SUM(CASE WHEN w.lifecycle != 'published' THEN 1 ELSE 0 END), 0) AS unpublished,
-     (SELECT COUNT(*) FROM chapters c
+     (SELECT COUNT(*) FROM units c
         JOIN works w2 ON w2.id = c.work_id
-       WHERE w2.owner_pseud_id = ?) AS chapters,
+       WHERE w2.owner_pseud_id = ?) AS units,
      (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
-        FROM chapters c
-        JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+        FROM units c
+        JOIN revisions cr ON cr.id = c.current_revision_id
         JOIN works w2 ON w2.id = c.work_id
        WHERE w2.owner_pseud_id = ?) AS words
  FROM works w
@@ -224,18 +224,18 @@ const WORK_TOTALS_POSTGRES: &str = "SELECT
      COUNT(*) AS works,
      COALESCE(SUM(CASE WHEN w.lifecycle = 'published' THEN 1 ELSE 0 END), 0) AS published,
      COALESCE(SUM(CASE WHEN w.lifecycle != 'published' THEN 1 ELSE 0 END), 0) AS unpublished,
-     (SELECT COUNT(*) FROM chapters c
+     (SELECT COUNT(*) FROM units c
         JOIN works w2 ON w2.id = c.work_id
-       WHERE w2.owner_pseud_id = ?::uuid) AS chapters,
+       WHERE w2.owner_pseud_id = ?::uuid) AS units,
      (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
-        FROM chapters c
-        JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+        FROM units c
+        JOIN revisions cr ON cr.id = c.current_revision_id
         JOIN works w2 ON w2.id = c.work_id
        WHERE w2.owner_pseud_id = ?::uuid) AS words
  FROM works w
  WHERE w.owner_pseud_id = ?::uuid";
 
-/// Works, chapters and words owned by the acting pseud.
+/// Works, units and words owned by the acting pseud.
 async fn work_totals(
     db: &Database,
     owner_pseud: &str,
@@ -257,7 +257,7 @@ async fn work_totals(
                 row.get::<i64, _>("works"),
                 row.get::<i64, _>("published"),
                 row.get::<i64, _>("unpublished"),
-                row.get::<i64, _>("chapters"),
+                row.get::<i64, _>("units"),
                 row.get::<i64, _>("words"),
             ))
         }
@@ -272,7 +272,7 @@ async fn work_totals(
                 row.get::<i64, _>("works"),
                 row.get::<i64, _>("published"),
                 row.get::<i64, _>("unpublished"),
-                row.get::<i64, _>("chapters"),
+                row.get::<i64, _>("units"),
                 row.get::<i64, _>("words"),
             ))
         }
@@ -409,7 +409,7 @@ async fn comment_totals(db: &Database, owner_pseud: &str) -> anyhow::Result<(i64
 ///
 /// §9.6 asks for "approximate reading time" and the method for
 /// `own.reading.basic` documents the approximation as "wall-clock between two
-/// progress updates on the same chapter, capped at 30 minutes per gap". The
+/// progress updates on the same unit, capped at 30 minutes per gap". The
 /// cap is not a rounding convenience: a reader who left a tab open overnight,
 /// or closed a laptop with the reader still open, has contributed zero reading
 /// and eight hours of wall-clock, and a dashboard that reports the second is
@@ -425,9 +425,9 @@ pub const READING_GAP_CAP_SECONDS: i64 = 30 * 60;
 pub struct ReadingTotals {
     /// Works the reader marked finished. A decision, not an open (§9.6).
     pub finished_works: i64,
-    /// Chapters the reader advanced progress through.
-    pub chapters_read: i64,
-    /// Estimated words in those chapters. An estimate: it is the word count
+    /// Units the reader advanced progress through.
+    pub units_read: i64,
+    /// Estimated words in those units. An estimate: it is the word count
     /// of the revision as stored now, not as read then.
     pub words_read: i64,
     /// Capped wall-clock between progress updates. An estimate, per the cap.
@@ -467,11 +467,11 @@ const READING_TOTALS_SQLITE: &str = "SELECT
           AND rs.status = 'finished') AS finished_works,
      (SELECT COUNT(*) FROM reading_progress rp
         WHERE rp.account_id = ?
-          AND rp.subject_type = 'work') AS chapters_read,
+          AND rp.subject_type = 'work') AS units_read,
      (SELECT COALESCE(CAST(SUM(word_total) AS BIGINT), 0) FROM (
         SELECT (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
-                  FROM chapters c
-                  JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                  FROM units c
+                  JOIN revisions cr ON cr.id = c.current_revision_id
                  WHERE c.work_id = rp.subject_id) AS word_total
           FROM reading_progress rp
          WHERE rp.account_id = ?
@@ -493,11 +493,11 @@ const READING_TOTALS_POSTGRES: &str = "SELECT
           AND rs.status = 'finished') AS finished_works,
      (SELECT COUNT(*) FROM reading_progress rp
         WHERE rp.account_id = $2::uuid
-          AND rp.subject_type = 'work') AS chapters_read,
+          AND rp.subject_type = 'work') AS units_read,
      (SELECT COALESCE(CAST(SUM(word_total) AS BIGINT), 0) FROM (
         SELECT (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
-                  FROM chapters c
-                  JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                  FROM units c
+                  JOIN revisions cr ON cr.id = c.current_revision_id
                  WHERE c.work_id = rp.subject_id) AS word_total
           FROM reading_progress rp
          WHERE rp.account_id = $3::uuid
@@ -544,7 +544,7 @@ pub async fn reading_totals(db: &Database, account_id: &str) -> anyhow::Result<R
                 .await?;
             Ok(totals_from(
                 row.get::<i64, _>("finished_works"),
-                row.get::<i64, _>("chapters_read"),
+                row.get::<i64, _>("units_read"),
                 row.get::<i64, _>("words_read"),
                 row.get::<i64, _>("reading_seconds"),
             ))
@@ -559,7 +559,7 @@ pub async fn reading_totals(db: &Database, account_id: &str) -> anyhow::Result<R
                 .await?;
             Ok(totals_from(
                 row.get::<i64, _>("finished_works"),
-                row.get::<i64, _>("chapters_read"),
+                row.get::<i64, _>("units_read"),
                 row.get::<i64, _>("words_read"),
                 row.get::<i64, _>("reading_seconds"),
             ))
@@ -575,13 +575,13 @@ pub async fn reading_totals(db: &Database, account_id: &str) -> anyhow::Result<R
 /// two dialects agree.
 fn totals_from(
     finished_works: i64,
-    chapters_read: i64,
+    units_read: i64,
     words_read: i64,
     reading_seconds: i64,
 ) -> ReadingTotals {
     ReadingTotals {
         finished_works,
-        chapters_read,
+        units_read,
         words_read,
         reading_seconds,
     }

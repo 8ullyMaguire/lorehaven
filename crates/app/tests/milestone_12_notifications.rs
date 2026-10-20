@@ -325,7 +325,7 @@ async fn notify_writes_a_row_with_the_fields_it_was_given() {
         &account,
         "reply",
         "Someone replied",
-        "Nice chapter",
+        "Nice unit",
         Some(&work),
     )
     .await

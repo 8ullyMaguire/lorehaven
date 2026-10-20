@@ -13,11 +13,11 @@
 //! # Why this adapter does not look like the others
 //!
 //! Every other adapter in this crate reads a chapter body out of the same page
-//! that lists the chapters. Royal Road does not work that way: the work page
+//! that lists the units. Royal Road does not work that way: the work page
 //! carries the metadata and a table of chapter *links*, and each chapter is its
 //! own document. So [`RoyalRoad::fetch_chapters`] is a loop, and a work of 109
-//! chapters costs 110 requests. That is the site's shape, not a shortcut, and it
-//! is why [`SourceCapabilities::per_chapter_fetch`] is true here — the import can
+//! units costs 110 requests. That is the site's shape, not a shortcut, and it
+//! is why [`SourceCapabilities::per_unit_fetch`] is true here — the import can
 //! re-read one failed chapter without repeating the other 108.
 //!
 //! # What the markup actually is
@@ -32,8 +32,8 @@
 //!   match nothing on the live site. Metadata comes from the page's
 //!   `application/ld+json` block instead, which is the site's own structured
 //!   description of the work and is far less likely to drift than its CSS.
-//! * The chapter list is `#chapters tbody tr.chapter-row`, each row carrying its
-//!   chapter's `data-url`. The table's `data-chapters` attribute states the count;
+//! * The chapter list is `#units tbody tr.chapter-row`, each row carrying its
+//!   chapter's `data-url`. The table's `data-units` attribute states the count;
 //!   the fixture asserts the two agree, because a row list that silently drops
 //!   rows is the failure mode this whole crate exists to avoid.
 //! * `time[unixtime]` gives each chapter's real release date, so `published_at`
@@ -62,8 +62,8 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    collapse_whitespace, strip_tags, text_of, texts_of, ChapterRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult,
+    collapse_whitespace, strip_tags, text_of, texts_of, UnitRef, Credentials, Fetcher,
+    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
     SourceWork, WorkStatus,
 };
 
@@ -226,12 +226,12 @@ impl RoyalRoad {
             ));
         }
 
-        let chapters = rows
+        let units = rows
             .iter()
             .enumerate()
-            .map(|(index, row)| ChapterRef {
+            .map(|(index, row)| UnitRef {
                 ordinal: (index as u32) + 1,
-                source_chapter_key: row.chapter_id.clone(),
+                source_unit_key: row.chapter_id.clone(),
                 title: row.title.clone(),
             })
             .collect();
@@ -256,7 +256,7 @@ impl RoyalRoad {
             status: work_status(&document),
             published_at,
             updated_at,
-            chapters,
+            units,
             // Royal Road shows no content rating; its only related signal is
             // `isFamilyFriendly` in the structured block, and turning that into
             // one of Darkhold's ratings is a classification decision (spec
@@ -296,7 +296,7 @@ impl RoyalRoad {
         html: &str,
         work: &SourceWork,
         ordinal: Option<u32>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
         if is_not_found(&document) {
             return Err(SourceError::NotFound);
@@ -326,13 +326,13 @@ impl RoyalRoad {
         // site puts on a numbered chapter's title. A chapter page whose position
         // cannot be established at all is a parse failure rather than chapter 1.
         let referenced = work
-            .chapters
+            .units
             .iter()
             .find(|candidate| !title.is_empty() && candidate.title == title);
-        let (ordinal, source_chapter_key, title) = match (ordinal, referenced) {
+        let (ordinal, source_unit_key, title) = match (ordinal, referenced) {
             (Some(ordinal), Some(reference)) => (
                 ordinal,
-                reference.source_chapter_key.clone(),
+                reference.source_unit_key.clone(),
                 if title.is_empty() {
                     reference.title.clone()
                 } else {
@@ -342,7 +342,7 @@ impl RoyalRoad {
             (Some(ordinal), None) => (ordinal, format!("ordinal:{ordinal}"), title),
             (None, Some(reference)) => (
                 reference.ordinal,
-                reference.source_chapter_key.clone(),
+                reference.source_unit_key.clone(),
                 if title.is_empty() {
                     reference.title.clone()
                 } else {
@@ -358,18 +358,18 @@ impl RoyalRoad {
                     ))
                 })?;
                 let key = work
-                    .chapters
+                    .units
                     .iter()
                     .find(|candidate| candidate.ordinal == ordinal)
-                    .map(|candidate| candidate.source_chapter_key.clone())
+                    .map(|candidate| candidate.source_unit_key.clone())
                     .unwrap_or_else(|| format!("ordinal:{ordinal}"));
                 (ordinal, key, title)
             }
         };
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal,
-            source_chapter_key,
+            source_unit_key,
             title,
             content_html,
             image_urls,
@@ -409,11 +409,11 @@ impl SourceAdapter for RoyalRoad {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             // Each chapter is its own document, so a retry can re-read one
             // without repeating the others. This is the capability the plan's
             // retry criterion needs, and it is genuinely available here.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             // Author profiles exist but their markup has not been recorded.
             bibliography: false,
             // The structured block carries `dateModified`, so "has this changed?"
@@ -451,12 +451,12 @@ impl SourceAdapter for RoyalRoad {
         self.parse_work(&page.body, &parsed)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // The work page is re-read first so the chapter URLs are the site's
         // current ones rather than whatever a preview saw some time ago.
         let listing = fetch.get(&work.source_url).await?;
@@ -464,37 +464,37 @@ impl SourceAdapter for RoyalRoad {
 
         // The ordinal is the page's order, and the chapter's own id is carried
         // in the row — so a retry can find this chapter again by id even if the
-        // work has gained chapters since.
-        let mut chapters = Vec::with_capacity(rows.len());
+        // work has gained units since.
+        let mut units = Vec::with_capacity(rows.len());
         for (index, row) in rows.iter().enumerate() {
             let ordinal = (index as u32) + 1;
             let page = fetch.get(&absolute(&row.path)).await?;
             let mut chapter = self.parse_chapter_page(&page.body, work, Some(ordinal))?;
             chapter.ordinal = ordinal;
-            chapter.source_chapter_key = row.chapter_id.clone();
+            chapter.source_unit_key = row.chapter_id.clone();
             if chapter.title.is_empty() {
                 chapter.title = row.title.clone();
             }
             let _ = row.released;
-            chapters.push(chapter);
+            units.push(chapter);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         // The chapter id comes from the work's own list, but its URL needs the
         // slug the site generates from the chapter's title — and a slug-less
         // chapter URL is a 404. So the work page is read once to resolve id to
         // path, and then exactly one chapter body is fetched. The rest of the
         // work is not touched: that is the whole point of the capability.
         let wanted = work
-            .chapters
+            .units
             .iter()
             .find(|candidate| candidate.ordinal == ordinal)
             .ok_or_else(|| {
@@ -508,13 +508,13 @@ impl SourceAdapter for RoyalRoad {
         let rows = self.parse_rows_or_error(&listing.body, work)?;
         let row = rows
             .iter()
-            .find(|row| row.chapter_id == wanted.source_chapter_key)
+            .find(|row| row.chapter_id == wanted.source_unit_key)
             .ok_or(SourceError::NotFound)?;
 
         let page = fetch.get(&absolute(&row.path)).await?;
         let mut chapter = self.parse_chapter_page(&page.body, work, Some(ordinal))?;
         chapter.ordinal = ordinal;
-        chapter.source_chapter_key = wanted.source_chapter_key.clone();
+        chapter.source_unit_key = wanted.source_unit_key.clone();
         if chapter.title.is_empty() {
             chapter.title = wanted.title.clone();
         }
@@ -525,11 +525,11 @@ impl SourceAdapter for RoyalRoad {
         self.parse_work(html, url)
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // A chapter document holds one chapter, so this returns a list of one.
         // The ordinal is recovered by matching the page's title against the
         // work's chapter list, which is what makes the fixture test able to
@@ -672,7 +672,7 @@ fn json_str(value: &Value, field: &str) -> Option<String> {
         .filter(|raw| !raw.is_empty())
 }
 
-/// The chapter count the table states in its `data-chapters` attribute.
+/// The chapter count the table states in its `data-units` attribute.
 fn stated_chapter_count(document: &Html) -> Option<i64> {
     let selector = Selector::parse("#chapters").ok()?;
     document
@@ -933,8 +933,8 @@ mod tests {
     fn the_capability_that_a_retry_needs_is_advertised() {
         let capabilities = adapter().capabilities();
         assert!(capabilities.metadata);
-        assert!(capabilities.chapters);
-        assert!(capabilities.per_chapter_fetch);
+        assert!(capabilities.units);
+        assert!(capabilities.per_unit_fetch);
     }
 
     #[test]

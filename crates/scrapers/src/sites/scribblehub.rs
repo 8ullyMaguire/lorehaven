@@ -1,4 +1,4 @@
-//! Scribble Hub: a site that will hand over the list of chapters but keeps the
+//! Scribble Hub: a site that will hand over the list of units but keeps the
 //! prose behind an interactive challenge.
 //!
 //! # Two doors, and they are not the same door
@@ -10,7 +10,7 @@
 //! | `/series/{id}/{slug}/` | refused | refused | 33 KB |
 //! | `/read/.../chapter/{id}/` | refused | refused | ~71 KB |
 //! | `/wp-json/fictionapp/v1/stories/{id}` | **200** | — | — |
-//! | `/wp-json/fictionapp/v1/stories/{id}/chapters` | **200** | — | — |
+//! | `/wp-json/fictionapp/v1/stories/{id}/units` | **200** | — | — |
 //!
 //! The site's own mobile-app API answers a plain request while every reading
 //! page needs a driven browser. So this adapter reads **metadata and the chapter
@@ -20,7 +20,7 @@
 //!
 //! # Why the API, and not the series page the reader sees
 //!
-//! The series page a reader loads shows the **newest fifteen chapters in
+//! The series page a reader loads shows the **newest fifteen units in
 //! descending order** (`ol.toc_ol > li.toc_w`, fifteen per page) beside a header
 //! reading *Table of Contents 113*. The rest is behind `?toc=N` pagination —
 //! which this site's challenge refuses to clear: three attempts through the
@@ -29,7 +29,7 @@
 //! *same path without a query* solved in about seven.
 //!
 //! An adapter built on that page would therefore import fifteen of a hundred and
-//! thirteen chapters and report the work as having a hundred and thirteen — a
+//! thirteen units and report the work as having a hundred and thirteen — a
 //! partial import that looks complete, which is the one failure this codebase
 //! treats as unacceptable. The API answers the whole list plainly, so that is
 //! what this reads. The recorded series page is kept in the fixtures as the
@@ -37,7 +37,7 @@
 //!
 //! # Fifty at a time, and the count is checked
 //!
-//! `/stories/{id}/chapters` returns **fifty** chapters and accepts `page=N`
+//! `/stories/{id}/units` returns **fifty** units and accepts `page=N`
 //! (`per_page`, `offset` and `limit` are ignored — measured, not assumed). The
 //! story object states `chapterCount`, so the adapter pages until it has that
 //! many and refuses if the pages do not add up: `113` arrives as `50 + 50 + 13`,
@@ -47,7 +47,7 @@
 //! # The API's chapter number is not the ordinal
 //!
 //! Each chapter carries a `number`, and it **has gaps**: the recorded work runs
-//! `1, 3, 4, 5, …` because chapter 2 was deleted. The import's [`ChapterRef`]
+//! `1, 3, 4, 5, …` because chapter 2 was deleted. The import's [`UnitRef`]
 //! ordinal is dense and is what a reader's progress and notes are mapped onto,
 //! so the ordinal is the chapter's position in the site's own order and the
 //! site's `number` is left where it is — in the chapter title, which already
@@ -73,8 +73,8 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, html_of, AuthKind, ChapterRef, Credentials, Fetcher, SourceAdapter,
-    SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult, SourceWork, Wall,
+    attr_of, html_of, AuthKind, UnitRef, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult, SourceWork, Wall,
     WorkStatus,
 };
 
@@ -97,7 +97,7 @@ const ORIGIN: &str = "https://www.scribblehub.com";
 /// Reachable with a plain request, unlike every reading page.
 const API: &str = "wp-json/fictionapp/v1";
 
-/// How many chapters the API returns to one request.
+/// How many units the API returns to one request.
 ///
 /// Measured: `per_page`, `offset` and `limit` are all ignored and the page size
 /// is fixed. Paging past the end returns an empty list rather than an error.
@@ -240,7 +240,7 @@ impl ScribbleHub {
     ///
     /// # Errors
     ///
-    /// [`SourceError::Parse`] when the page is not a list of chapters.
+    /// [`SourceError::Parse`] when the page is not a list of units.
     pub fn parse_chapter_page(&self, json: &str) -> SourceResult<Vec<ApiChapter>> {
         let envelope: Envelope = serde_json::from_str(json).map_err(|error| {
             SourceError::Parse(format!("scribblehub chapter list is not a list: {error}"))
@@ -261,7 +261,7 @@ impl ScribbleHub {
         pages: &[Vec<ApiChapter>],
         story_id: &str,
         declared: u32,
-    ) -> SourceResult<Vec<ChapterRef>> {
+    ) -> SourceResult<Vec<UnitRef>> {
         let listed: Vec<&ApiChapter> = pages.iter().flatten().collect();
         if declared != 0 && listed.len() != declared as usize {
             return Err(SourceError::Parse(format!(
@@ -280,9 +280,9 @@ impl ScribbleHub {
         Ok(listed
             .iter()
             .enumerate()
-            .map(|(index, chapter)| ChapterRef {
+            .map(|(index, chapter)| UnitRef {
                 ordinal: (index as u32) + 1,
-                source_chapter_key: chapter.id.to_string(),
+                source_unit_key: chapter.id.to_string(),
                 title: chapter.title.clone(),
             })
             .collect())
@@ -300,7 +300,7 @@ impl ScribbleHub {
         html: &str,
         work: &SourceWork,
         chapter_id: &str,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
 
         if let Some(served) = canonical_chapter(&document) {
@@ -321,13 +321,13 @@ impl ScribbleHub {
         })?;
 
         let entry = work
-            .chapters
+            .units
             .iter()
-            .find(|entry| entry.source_chapter_key == chapter_id);
+            .find(|entry| entry.source_unit_key == chapter_id);
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal: entry.map_or(0, |entry| entry.ordinal),
-            source_chapter_key: chapter_id.to_owned(),
+            source_unit_key: chapter_id.to_owned(),
             title: entry.map(|entry| entry.title.clone()).unwrap_or_default(),
             content_html: sanitize_fragment(&body, Url::parse(&work.source_url).ok().as_ref()),
             image_urls: crate::sanitize::extract_image_urls(
@@ -340,9 +340,9 @@ impl ScribbleHub {
     /// The chapter a reading page states as its own address.
     fn chapter_of(&self, work: &SourceWork, document: &Html) -> Option<String> {
         canonical_chapter(document).filter(|id| {
-            work.chapters
+            work.units
                 .iter()
-                .any(|entry| &entry.source_chapter_key == id)
+                .any(|entry| &entry.source_unit_key == id)
         })
     }
 }
@@ -366,8 +366,8 @@ impl SourceAdapter for ScribbleHub {
             metadata: true,
             // True, and gated on a solver: the text is only on the reading
             // pages, which is why `wall` below is declared.
-            chapters: true,
-            per_chapter_fetch: true,
+            units: true,
+            per_unit_fetch: true,
             // The API has `/authors/{id}` and `/users/{id}/stories`; their
             // shapes have not been recorded.
             bibliography: false,
@@ -419,43 +419,43 @@ impl SourceAdapter for ScribbleHub {
         let pages = self
             .read_chapter_pages(fetch, &story_id, story.chapter_count)
             .await?;
-        let chapters = self.assemble_chapters(&pages, &story_id, story.chapter_count)?;
+        let units = self.assemble_chapters(&pages, &story_id, story.chapter_count)?;
 
         let url = self.story_url(&story_id);
-        Ok(story.into_work(self.key.clone(), url, chapters))
+        Ok(story.into_work(self.key.clone(), url, units))
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        if work.chapters.is_empty() {
+    ) -> SourceResult<Vec<SourceUnit>> {
+        if work.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "scribblehub story {} lists no chapters",
                 work.source_work_key
             )));
         }
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for entry in &work.chapters {
+        let mut units = Vec::with_capacity(work.units.len());
+        for entry in &work.units {
             let page = fetch
-                .get(&self.read_url(work, &entry.source_chapter_key))
+                .get(&self.read_url(work, &entry.source_unit_key))
                 .await?;
-            chapters.push(self.parse_chapter(&page.body, work, &entry.source_chapter_key)?);
+            units.push(self.parse_chapter(&page.body, work, &entry.source_unit_key)?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let entry = work
-            .chapters
+            .units
             .iter()
             .find(|entry| entry.ordinal == ordinal)
             .ok_or_else(|| {
@@ -465,9 +465,9 @@ impl SourceAdapter for ScribbleHub {
                 ))
             })?;
         let page = fetch
-            .get(&self.read_url(work, &entry.source_chapter_key))
+            .get(&self.read_url(work, &entry.source_unit_key))
             .await?;
-        self.parse_chapter(&page.body, work, &entry.source_chapter_key)
+        self.parse_chapter(&page.body, work, &entry.source_unit_key)
     }
 
     fn preview_from_html(&self, html: &str, url: &Url) -> SourceResult<SourceWork> {
@@ -482,11 +482,11 @@ impl SourceAdapter for ScribbleHub {
         Ok(story.into_work(self.key.clone(), self.story_url(&story_id), Vec::new()))
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         let document = Html::parse_document(html);
         let chapter_id = self.chapter_of(work, &document).ok_or_else(|| {
             SourceError::Parse(format!(
@@ -512,10 +512,10 @@ impl ScribbleHub {
 
         loop {
             let response = fetch.get(&self.api_chapters(story_id, page)).await?;
-            let chapters = self.parse_chapter_page(&response.body)?;
-            let short = chapters.len() < PER_PAGE;
-            collected += chapters.len();
-            pages.push(chapters);
+            let units = self.parse_chapter_page(&response.body)?;
+            let short = units.len() < PER_PAGE;
+            collected += units.len();
+            pages.push(units);
 
             // Stop on a short page — the API's way of saying it has no more —
             // or as soon as the story's own count is met, whichever is first.
@@ -633,7 +633,7 @@ pub struct Story {
     /// `ongoing` or `completed`, in the two recorded cases.
     #[serde(default)]
     pub status: String,
-    /// How many chapters the site says the story has.
+    /// How many units the site says the story has.
     #[serde(default)]
     pub chapter_count: u32,
     /// The site's own word count for the whole story.
@@ -691,7 +691,7 @@ pub struct ApiChapter {
     /// The title.
     #[serde(default)]
     pub title: String,
-    /// The site's own chapter number, which **has gaps** where chapters were
+    /// The site's own chapter number, which **has gaps** where units were
     /// deleted and is therefore not the import's ordinal.
     #[serde(default)]
     pub number: u32,
@@ -715,7 +715,7 @@ pub struct ApiChapter {
 impl Story {
     /// Turn a story object and its chapter list into the domain's shape.
     #[must_use]
-    pub fn into_work(self, key: SourceKey, url: String, chapters: Vec<ChapterRef>) -> SourceWork {
+    pub fn into_work(self, key: SourceKey, url: String, units: Vec<UnitRef>) -> SourceWork {
         SourceWork {
             source_key: key,
             source_work_key: self.id.to_string(),
@@ -728,7 +728,7 @@ impl Story {
             )),
             summary: self.description.clone(),
             // The site's own count for the whole story, not a sum of the
-            // chapters' — the list's counts cover only the chapters listed.
+            // units' — the list's counts cover only the units listed.
             word_count: Some(self.word_count),
             // The story object carries no language field, so none is reported
             // rather than inferred from the prose.
@@ -736,7 +736,7 @@ impl Story {
             status: status_of(&self.status),
             published_at: None,
             updated_at: parse_rfc3339(self.last_updated.as_deref()),
-            chapters,
+            units,
             // The site publishes a boolean rather than a scale, and `Mature` is
             // its own word for it — it is the name of its own account setting.
             rating_text: self.is_mature.then(|| "Mature".to_owned()),
@@ -787,8 +787,8 @@ fn canonical_chapter(document: &Html) -> Option<String> {
 /// the work's publication — the story object carries no created date, so this is
 /// the only place it exists.
 #[must_use]
-pub fn first_published(chapters: &[ApiChapter]) -> Option<time::OffsetDateTime> {
-    chapters
+pub fn first_published(units: &[ApiChapter]) -> Option<time::OffsetDateTime> {
+    units
         .iter()
         .filter_map(|chapter| parse_rfc3339(chapter.published_at.as_deref()))
         .min()
@@ -870,7 +870,7 @@ mod tests {
         // The recorded work runs 1, 3, 4, 5 … because chapter 2 was deleted.
         // The import's ordinal is dense; a gap would put a chapter in the wrong
         // place in a reader's progress.
-        let chapters: Vec<ApiChapter> = (0..4)
+        let units: Vec<ApiChapter> = (0..4)
             .map(|index| ApiChapter {
                 id: 100 + index,
                 title: format!("Chapter {}", index + 1),
@@ -882,20 +882,20 @@ mod tests {
             .collect();
 
         let refs = adapter()
-            .assemble_chapters(&[chapters], "2357420", 4)
+            .assemble_chapters(&[units], "2357420", 4)
             .expect("four chapters and a stated count of four");
         assert_eq!(
             refs.iter().map(|entry| entry.ordinal).collect::<Vec<_>>(),
             vec![1, 2, 3, 4]
         );
-        assert_eq!(refs[1].source_chapter_key, "101");
+        assert_eq!(refs[1].source_unit_key, "101");
         // The site's own number is not carried as the ordinal.
         assert_ne!(refs[1].ordinal, 3);
     }
 
     #[test]
     fn a_list_that_does_not_add_up_to_the_stated_count_is_refused() {
-        let chapters: Vec<ApiChapter> = (0..3)
+        let units: Vec<ApiChapter> = (0..3)
             .map(|index| ApiChapter {
                 id: index,
                 title: String::new(),
@@ -909,13 +909,13 @@ mod tests {
         // The story says 113; the pages produced 3. Importing the three would
         // import part of a work and report success.
         let error = adapter()
-            .assemble_chapters(std::slice::from_ref(&chapters), "2357420", 113)
+            .assemble_chapters(std::slice::from_ref(&units), "2357420", 113)
             .expect_err("a short list must not be imported");
         assert!(format!("{error}").contains("113"), "{error}");
 
         // An exact list of the stated size is fine.
         assert!(adapter()
-            .assemble_chapters(&[chapters], "2357420", 3)
+            .assemble_chapters(&[units], "2357420", 3)
             .is_ok());
     }
 

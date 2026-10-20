@@ -330,7 +330,7 @@ mod tests {
     fn an_annotated_reason_with_only_a_note_has_no_reason() {
         let annotated = AnnotatedReason {
             reason: None,
-            note: Some("the second chapter undoes it".to_owned()),
+            note: Some("the second unit undoes it".to_owned()),
         };
         assert_eq!(annotated.reason_str(), None);
         assert!(annotated.note_str().is_some());

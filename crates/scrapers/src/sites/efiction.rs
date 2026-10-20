@@ -127,8 +127,8 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    collapse_whitespace, strip_tags, ChapterRef, Credentials, Fetcher, SourceAdapter,
-    SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult, SourceWork,
+    collapse_whitespace, strip_tags, UnitRef, Credentials, Fetcher, SourceAdapter,
+    SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult, SourceWork,
     WorkStatus,
 };
 
@@ -296,7 +296,7 @@ impl Efiction {
             .filter(|sid| !sid.is_empty() && sid.chars().all(|c| c.is_ascii_digit()))
     }
 
-    /// The canonical page for a work: its first page of chapters.
+    /// The canonical page for a work: its first page of units.
     ///
     /// Normalising here rather than at each call site is what lets a reader
     /// paste a chapter URL, or the printable view of a chapter, and be shown the
@@ -372,7 +372,7 @@ impl Efiction {
             })?;
 
         let summary = summary_of(&document, &labels);
-        let chapters = chapter_refs(&document, &labels)?;
+        let units = chapter_refs(&document, &labels)?;
 
         let key = format!("{}{}/{sid}", member.host, member.archive_path);
         let source_url = Self::work_url(url)
@@ -394,7 +394,7 @@ impl Efiction {
                 .unwrap_or(WorkStatus::Unknown),
             published_at: label_value(&labels, "Published").and_then(|value| parse_date(&value)),
             updated_at: label_value(&labels, "Updated").and_then(|value| parse_date(&value)),
-            chapters,
+            units,
             rating_text: label_value(&labels, "Rated").or_else(|| label_value(&labels, "Rating")),
             warning_texts: warnings_of(&labels),
             tags: tags_of(&labels),
@@ -412,7 +412,7 @@ impl Efiction {
         url: &Url,
         work: &SourceWork,
         ordinal: Option<u32>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
         match classify(&document) {
             Page::Work | Page::Chapter => {}
@@ -444,9 +444,9 @@ impl Efiction {
         // a lookup rather than a guess. A heading that matches nothing keeps the
         // ordinal it was given, or zero, and the caller sees an empty key.
         let reference = ordinal
-            .and_then(|ordinal| work.chapters.iter().find(|c| c.ordinal == ordinal))
+            .and_then(|ordinal| work.units.iter().find(|c| c.ordinal == ordinal))
             .or_else(|| {
-                work.chapters
+                work.units
                     .iter()
                     .find(|candidate| candidate.title == title)
             });
@@ -464,14 +464,14 @@ impl Efiction {
             } else {
                 format!(
                     "the chapter at {url} is not in the work's chapter list ({} chapters)",
-                    work.chapters.len()
+                    work.units.len()
                 )
             }));
         };
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal: reference.ordinal,
-            source_chapter_key: reference.source_chapter_key.clone(),
+            source_unit_key: reference.source_unit_key.clone(),
             title: if title.is_empty() {
                 reference.title.clone()
             } else {
@@ -496,10 +496,10 @@ impl SourceAdapter for Efiction {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             // `&chapter=n` addresses one chapter, so a failed chapter is retried
             // without re-reading the rest of the work.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             bibliography: false,
             // No revision marker is published per work. `Updated:` is a displayed
             // date, and a date is not a validator: two revisions can share one.
@@ -564,12 +564,12 @@ impl SourceAdapter for Efiction {
         }
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // The work page is re-read first, so the chapter list and its keys are
         // the member's current ones rather than whatever a preview saw some time
         // ago. A re-read that fails falls back to the stored list rather than
@@ -593,32 +593,32 @@ impl SourceAdapter for Efiction {
             .unwrap_or_default()
             .to_owned();
 
-        let mut chapters = Vec::with_capacity(refreshed.chapters.len());
-        for reference in &refreshed.chapters {
+        let mut units = Vec::with_capacity(refreshed.units.len());
+        for reference in &refreshed.units {
             let target = Self::chapter_url(member, &host, &scheme, &sid, reference.ordinal);
             let page = fetch.get(&target).await?;
             let url = Url::parse(&page.final_url).unwrap_or_else(|_| {
                 Url::parse(&target).expect("a chapter URL this adapter built must parse")
             });
-            chapters.push(self.parse_chapter(
+            units.push(self.parse_chapter(
                 &page.body,
                 &url,
                 &refreshed,
                 Some(reference.ordinal),
             )?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let reference = work
-            .chapters
+            .units
             .iter()
             .find(|candidate| candidate.ordinal == ordinal)
             .ok_or(SourceError::NotFound)?;
@@ -636,7 +636,7 @@ impl SourceAdapter for Efiction {
         });
 
         let mut chapter = self.parse_chapter(&page.body, &url, work, Some(ordinal))?;
-        chapter.source_chapter_key = reference.source_chapter_key.clone();
+        chapter.source_unit_key = reference.source_unit_key.clone();
         Ok(chapter)
     }
 
@@ -644,11 +644,11 @@ impl SourceAdapter for Efiction {
         self.parse_work(html, url)
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // A chapter page holds one chapter, so this returns a list of one. The
         // ordinal is recovered by matching the page's own heading against the
         // work's chapter list, which is what lets the fixture test assert a
@@ -1249,7 +1249,7 @@ fn split_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// The work's chapters, from the page's own chapter links.
+/// The work's units, from the page's own chapter links.
 ///
 /// # Why the list comes from links rather than from a container
 ///
@@ -1269,10 +1269,10 @@ fn split_list(value: &str) -> Vec<String> {
 /// positionally — and the pairing is checked against the count the page states,
 /// because a positional pairing that silently loses its place produces the
 /// failure this whole crate exists to avoid: an import that looks complete.
-fn chapter_refs(document: &Html, labels: &[Label]) -> SourceResult<Vec<ChapterRef>> {
+fn chapter_refs(document: &Html, labels: &[Label]) -> SourceResult<Vec<UnitRef>> {
     let anchors = Selector::parse("a[href]").expect("a constant selector parses");
 
-    let mut refs: Vec<ChapterRef> = Vec::new();
+    let mut refs: Vec<UnitRef> = Vec::new();
     for anchor in document.select(&anchors) {
         let Some(href) = anchor.value().attr("href") else {
             continue;
@@ -1302,21 +1302,21 @@ fn chapter_refs(document: &Html, labels: &[Label]) -> SourceResult<Vec<ChapterRe
         // the list's own order.
         if refs
             .iter()
-            .any(|existing| existing.source_chapter_key == key)
+            .any(|existing| existing.source_unit_key == key)
         {
             continue;
         }
 
-        refs.push(ChapterRef {
+        refs.push(UnitRef {
             ordinal,
-            source_chapter_key: key,
+            source_unit_key: key,
             title,
         });
     }
 
     refs.sort_by_key(|reference| reference.ordinal);
 
-    // The page states how many chapters the work has. When it states a number
+    // The page states how many units the work has. When it states a number
     // and the number of links found disagrees, this adapter has not understood
     // the page, and importing what it did find would produce a truncated work
     // that looks whole. Refused loudly, naming both numbers.
@@ -1867,8 +1867,8 @@ mod tests {
     fn the_capability_flags_say_what_the_adapter_can_do() {
         let capabilities = Efiction::new().capabilities();
         assert!(capabilities.metadata);
-        assert!(capabilities.chapters);
-        assert!(capabilities.per_chapter_fetch);
+        assert!(capabilities.units);
+        assert!(capabilities.per_unit_fetch);
         assert!(!capabilities.bibliography);
         assert!(!capabilities.incremental);
     }

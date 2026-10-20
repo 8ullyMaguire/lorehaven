@@ -12,7 +12,7 @@
     completion: 'in_progress' | 'complete' | 'hiatus' | 'abandoned';
     rating: 'general' | 'teen' | 'mature' | 'explicit';
     wordCount?: number;
-    chapters?: number;
+    units?: number;
     mainCharacters?: string[];
     centralRelationships?: string[];
     /** Whether the reader has saved this work. */
@@ -192,8 +192,8 @@
     {#if variant !== 'compact'}
       <MetadataChip label={RATING_LABEL[work.rating]} />
     {/if}
-    {#if work.chapters !== undefined}
-      <MetadataChip label="Chapters" value={work.chapters} />
+    {#if work.units !== undefined}
+      <MetadataChip label="Units" value={work.units} />
     {/if}
     {#if formatWords(work.wordCount)}
       <MetadataChip label={formatWords(work.wordCount)!} />

@@ -1,12 +1,12 @@
 <script lang="ts">
   /**
-   * The reading surface: one chapter, with position awareness (spec §9).
+   * The reading surface: one unit, with position awareness (spec §9).
    *
    * Three things the milestone plan asks for are implemented here rather than
    * left to a component:
    *
-   *  * **One chapter at a time.** Spec §9.2: "Long works must not require
-   *    rendering every paragraph at once." Following *next chapter* is a
+   *  * **One unit at a time.** Spec §9.2: "Long works must not require
+   *    rendering every paragraph at once." Following *next unit* is a
    *    navigation, not an append, so the DOM never grows without bound. Do not
    *    "simplify" this into rendering the whole work.
    *  * **Position is saved on scroll-end and on `visibilitychange`**, debounced,
@@ -22,7 +22,7 @@
    * signed-out reader keeps it in `localStorage` and it is never uploaded.
    */
   import {
-    apiFetch, createBookmark, fetchChapter, fetchTypography, saveProgress, type ChapterContent } from '../lib/api';
+    apiFetch, createBookmark, fetchUnit, fetchTypography, saveProgress, type UnitContent } from '../lib/api';
   import {
     DEFAULT_TYPOGRAPHY,
     PositionFlusher,
@@ -41,12 +41,12 @@
 
   interface Props {
     workId: string;
-    chapterId: string;
+    unitId: string;
   }
 
-  let { workId, chapterId }: Props = $props();
+  let { workId, unitId }: Props = $props();
 
-  let chapter = $state<ChapterContent | null>(null);
+  let unit = $state<UnitContent | null>(null);
   let error = $state<unknown>(null);
   let loading = $state(true);
   let showSettings = $state(false);
@@ -102,7 +102,7 @@
       await saveProgress({
         subject_type: 'work',
         subject_id: position.workId,
-        chapter_id: position.chapterId,
+        unit_id: position.unitId,
         content_revision: position.revision,
         paragraph_anchor: position.anchor,
         position_permille: position.fraction,
@@ -118,24 +118,24 @@
   async function load() {
     loading = true;
     error = null;
-    chapter = null;
+    unit = null;
     showSettings = false;
-    // A new chapter restarts what whole-work mode has appended: the address
-    // names where the reader is, and carrying the previous chapter's tail into
+    // A new unit restarts what whole-work mode has appended: the address
+    // names where the reader is, and carrying the previous unit's tail into
     // a different starting point would draw a work out of order.
     extra = [];
     appendError = null;
     bookmarked = false;
     try {
-      chapter = await fetchChapter(workId, chapterId);
-      // Arriving in a chapter is itself a reading: it is recorded even if the
+      unit = await fetchUnit(workId, unitId);
+      // Arriving in a unit is itself a reading: it is recorded even if the
       // reader never scrolls, which is what puts an opened work in `/library`
       // and in the history list. The write is debounced, so the restore below
       // replaces it with the position actually landed on.
       remember();
-      // Restore a remembered place in this chapter, when there is one.
+      // Restore a remembered place in this unit, when there is one.
       const cached = readCachedPosition(workId);
-      if (cached && cached.chapterId === chapterId) {
+      if (cached && cached.unitId === unitId) {
         requestAnimationFrame(() => {
           const fraction = cached.position.position_permille / 1000;
           window.scrollTo({ top: document.body.scrollHeight * fraction });
@@ -161,7 +161,7 @@
     }
   }
 
-  /** Where the reader is, as a permille of the whole chapter. */
+  /** Where the reader is, as a permille of the whole unit. */
   function currentFraction(): number {
     const scrollable = document.body.scrollHeight - window.innerHeight;
     if (scrollable <= 0) return 1000;
@@ -169,13 +169,13 @@
   }
 
   function remember() {
-    // The *focused* chapter, not the one the address names: in whole-work mode
-    // the reader is past that, and recording the first chapter of the work
+    // The *focused* unit, not the one the address names: in whole-work mode
+    // the reader is past that, and recording the first unit of the work
     // would put them back at its start next time.
     if (!focused) return;
     flusher.schedule({
       workId,
-      chapterId: focused.chapter.id,
+      unitId: focused.unit.id,
       revision: focused.revision_id,
       anchor: null,
       fraction: currentFraction(),
@@ -213,13 +213,13 @@
   // -------------------------------------------------------------------------
 
   /**
-   * Whether to keep reading past the end of this chapter.
+   * Whether to keep reading past the end of this unit.
    *
    * Spec §9.2 asks for a way to read a work through and, in the same breath,
    * that long works must not require rendering every paragraph at once. Those
-   * two are only compatible if the mode *pages*: this renders the chapter the
+   * two are only compatible if the mode *pages*: this renders the unit the
    * reader asked for, and then appends the next one — and only the next one —
-   * as they approach the end of what is loaded. A work of two hundred chapters
+   * as they approach the end of what is loaded. A work of two hundred units
    * is two hundred fetches the reader never notices and never pays for at once.
    *
    * The choice is remembered in this browser, because a reader who prefers to
@@ -228,8 +228,8 @@
   const WHOLE_WORK_KEY = 'darkhold.reader.whole-work';
 
   let wholeWork = $state(readWholeWork());
-  /** Chapters appended after the one the address names. */
-  let extra = $state<ChapterContent[]>([]);
+  /** Units appended after the one the address names. */
+  let extra = $state<UnitContent[]>([]);
   let appending = $state(false);
   let appendError = $state<unknown>(null);
   /** The sentinel the append watches; `null` until it is in the document. */
@@ -246,7 +246,7 @@
   function toggleWholeWork() {
     wholeWork = !wholeWork;
     if (!wholeWork) {
-      // Turning it off drops what it appended, so the page is the chapter the
+      // Turning it off drops what it appended, so the page is the unit the
       // address names rather than a partial work whose address disagrees.
       extra = [];
       appendError = null;
@@ -258,16 +258,16 @@
     }
   }
 
-  /** The chapter furthest down the page, which is the one being read. */
-  let focused = $derived(extra.length > 0 ? extra[extra.length - 1] : chapter);
+  /** The unit furthest down the page, which is the one being read. */
+  let focused = $derived(extra.length > 0 ? extra[extra.length - 1] : unit);
 
-  /** The chapter after everything loaded, if there is one. */
+  /** The unit after everything loaded, if there is one. */
   let pending = $derived(
-    focused ? focused.next_chapter_id : null,
+    focused ? focused.next_unit_id : null,
   );
 
   /**
-   * Append the next chapter.
+   * Append the next unit.
    *
    * Guarded so a reader who scrolls to the sentinel during a fetch does not
    * start a second one, and so a failure is reported once rather than retried
@@ -277,9 +277,9 @@
     if (!wholeWork || appending || appendError || !pending) return;
     appending = true;
     try {
-      const next = await fetchChapter(workId, pending);
+      const next = await fetchUnit(workId, pending);
       extra = [...extra, next];
-      // An appended chapter is one the reader is now looking at, so it counts
+      // An appended unit is one the reader is now looking at, so it counts
       // as a reading the same way arriving at one does.
       remember();
     } catch (failure) {
@@ -295,7 +295,7 @@
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) void appendNext();
       },
-      // A margin, so the next chapter is usually there before the reader
+      // A margin, so the next unit is usually there before the reader
       // reaches the end — the mode should not feel like it is loading.
       { rootMargin: '600px' },
     );
@@ -314,18 +314,18 @@
    * Save this place, privately.
    *
    * Private unless the reader says otherwise, and the body does not say
-   * otherwise (spec §14.1). The position is the fraction of the chapter the
+   * otherwise (spec §14.1). The position is the fraction of the unit the
    * reader is at, so the bookmark points where they were rather than at the
-   * chapter's start.
+   * unit's start.
    */
   async function bookmarkHere() {
-    if (!chapter) return;
+    if (!unit) return;
     bookmarkError = null;
     try {
       await createBookmark({
         subjectType: 'work',
         subjectId: workId,
-        chapterId: focused?.chapter.id ?? chapterId,
+        unitId: focused?.unit.id ?? unitId,
         positionPermille: currentFraction(),
         note: '',
         isPublic: false,
@@ -347,21 +347,21 @@
       Back to the work
     </a>
   </p>
-{:else if chapter}
+{:else if unit}
   <nav class="crumbs">
     <a href={`/works/${workId}`} onclick={(event) => handleLinkClick(event, `/works/${workId}`)}>
-      {chapter.work.title.trim() === '' ? 'Untitled' : chapter.work.title}
+      {unit.work.title.trim() === '' ? 'Untitled' : unit.work.title}
     </a>
   </nav>
 
-  <h1>{chapter.chapter.title.trim() === '' ? 'Untitled chapter' : chapter.chapter.title}</h1>
+  <h1>{unit.unit.title.trim() === '' ? 'Untitled unit' : unit.unit.title}</h1>
 
   <p class="meta">
-    {chapter.word_count} words
+    {unit.word_count} words
     <!-- An estimate, and labelled as one: 200 words per minute (spec §3.2). -->
-    · about {Math.max(1, Math.ceil(chapter.word_count / 200))} min read
-    {#if chapter.revision_number !== null}· revision {chapter.revision_number}{/if}
-    {#if chapter.editable}
+    · about {Math.max(1, Math.ceil(unit.word_count / 200))} min read
+    {#if unit.revision_number !== null}· revision {unit.revision_number}{/if}
+    {#if unit.editable}
       · <a href={`/write/${workId}`} onclick={(event) => handleLinkClick(event, `/write/${workId}`)}>Edit</a>
     {/if}
     · <button type="button" class="link-button" onclick={() => (showSettings = !showSettings)}>
@@ -373,7 +373,7 @@
       aria-pressed={wholeWork}
       onclick={toggleWholeWork}
     >
-      {wholeWork ? 'One chapter at a time' : 'Read on without stopping'}
+      {wholeWork ? 'One unit at a time' : 'Read on without stopping'}
     </button>
   </p>
 
@@ -392,7 +392,7 @@
 
   <div class="reader-body">
     <!-- Server-sanitized HTML; see the module note. -->
-    <article class="prose">{@html chapter.sanitized_html}</article>
+    <article class="prose">{@html unit.sanitized_html}</article>
 
     {#if session.isSignedIn}
       <NotePanel subjectType="work" subjectId={workId} signedIn={session.isSignedIn} />
@@ -400,18 +400,18 @@
   </div>
 
   {#if wholeWork}
-    <!-- Everything past the chapter the address names. Appended one at a time
+    <!-- Everything past the unit the address names. Appended one at a time
          as the sentinel below comes into view, so the browser never lays out a
          work the reader has not read. -->
-    {#each extra as appended (appended.chapter.id)}
-      <hr class="chapter-break" />
+    {#each extra as appended (appended.unit.id)}
+      <hr class="unit-break" />
       <h2 class="appended-title">
         <a
-          href={`/works/${workId}/chapters/${appended.chapter.id}`}
+          href={`/works/${workId}/units/${appended.unit.id}`}
           onclick={(event) =>
-            handleLinkClick(event, `/works/${workId}/chapters/${appended.chapter.id}`)}
+            handleLinkClick(event, `/works/${workId}/units/${appended.unit.id}`)}
         >
-          {appended.chapter.title.trim() === '' ? 'Untitled chapter' : appended.chapter.title}
+          {appended.unit.title.trim() === '' ? 'Untitled unit' : appended.unit.title}
         </a>
       </h2>
       <div class="reader-body">
@@ -420,7 +420,7 @@
     {/each}
 
     {#if appending}
-      <p class="appending" role="status">Loading the next chapter…</p>
+      <p class="appending" role="status">Loading the next unit…</p>
     {/if}
     {#if appendError}
       <!-- A fetch that failed is a dead end unless it says so and offers the
@@ -428,12 +428,12 @@
       <ErrorSummary error={appendError} />
       <p>
         <button type="button" class="link-button" onclick={() => { appendError = null; void appendNext(); }}>
-          Try the next chapter again
+          Try the next unit again
         </button>
         ·
         <a
-          href={`/works/${workId}/chapters/${pending}`}
-          onclick={(event) => handleLinkClick(event, `/works/${workId}/chapters/${pending}`)}
+          href={`/works/${workId}/units/${pending}`}
+          onclick={(event) => handleLinkClick(event, `/works/${workId}/units/${pending}`)}
         >
           Open it on its own page
         </a>
@@ -445,26 +445,26 @@
     {/if}
   {/if}
 
-  <nav class="pager" aria-label="Chapter navigation">
+  <nav class="pager" aria-label="Unit navigation">
     <!-- In whole-work mode "next" is what the reader has already been given
-         automatically, so the link steps them into the chapter's own page
+         automatically, so the link steps them into the unit's own page
          rather than pretending there is more below. The previous link still
-         goes back a chapter, which is the only way to go up. -->
-    {#if chapter.previous_chapter_id}
+         goes back a unit, which is the only way to go up. -->
+    {#if unit.previous_unit_id}
       <!--
         A `{@const}` per link, because a `let` binding is not narrowed inside an
-        `onclick` closure. `chapter` is a `let`, so TypeScript rejected the read
+        `onclick` closure. `unit` is a `let`, so TypeScript rejected the read
         in the callback while allowing it in the `href` beside it.
       -->
-      {@const previousHref = `/works/${workId}/chapters/${chapter.previous_chapter_id}`}
+      {@const previousHref = `/works/${workId}/units/${unit.previous_unit_id}`}
       <a href={previousHref} onclick={(event) => handleLinkClick(event, previousHref)}>
-        ← Previous chapter
+        ← Previous unit
       </a>
     {/if}
-    {#if focused?.next_chapter_id}
-      {@const nextHref = `/works/${workId}/chapters/${focused.next_chapter_id}`}
+    {#if focused?.next_unit_id}
+      {@const nextHref = `/works/${workId}/units/${focused.next_unit_id}`}
       <a class="next" href={nextHref} onclick={(event) => handleLinkClick(event, nextHref)}>
-        Next chapter →
+        Next unit →
       </a>
     {:else}
       <!-- The end-of-work actions (spec §9.8). Bookmark is M8 and download is
@@ -473,17 +473,17 @@
     {/if}
   </nav>
 
-  {#if !focused?.next_chapter_id}
+  {#if !focused?.next_unit_id}
     <ul class="end-actions">
       <li>
         <a href={`/works/${workId}`} onclick={(event) => handleLinkClick(event, `/works/${workId}`)}>
-          Back to the chapter list
+          Back to the unit list
         </a>
       </li>
       <li><a href={`/works/${workId}#rate`}>Rate this work</a></li>
       <li>
         <!-- Private unless the reader says otherwise, and this says nothing, so
-             it is private. The place is where they are, not the chapter start. -->
+             it is private. The place is where they are, not the unit start. -->
         {#if bookmarked}
           <span role="status">Bookmarked this place.</span>
         {:else}
@@ -497,7 +497,7 @@
           href={`/exports?${new URLSearchParams({
             subject_type: 'work',
             subject_id: workId,
-            title: chapter.work.title,
+            title: unit.work.title,
           }).toString()}`}
         >
           Download this work
@@ -511,7 +511,7 @@
 {/if}
 
 <style>
-  .chapter-break {
+  .unit-break {
     border: 0;
     border-top: var(--border-width) solid var(--color-border);
     margin: var(--space-5) 0;

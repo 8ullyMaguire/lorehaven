@@ -84,7 +84,7 @@ pub async fn run(state: &AppState, copy_id: &str) -> Result<(), HandlerError> {
         return Ok(());
     }
 
-    let url = body_url(&copy.source_key, &copy.chapter_key);
+    let url = body_url(&copy.source_key, &copy.unit_key);
     let response = state.reqwest_client().get(&url).send().await;
 
     let response = match response {
@@ -138,16 +138,16 @@ pub async fn run(state: &AppState, copy_id: &str) -> Result<(), HandlerError> {
     Ok(())
 }
 
-/// The URL to fetch, built from the source key and the chapter key the copy
+/// The URL to fetch, built from the source key and the unit key the copy
 /// recorded.
 ///
 /// Recorded at request time rather than looked up at fetch time, so a work
 /// re-imported from a different source between the two does not re-point an
-/// in-flight request at another site's terms. That is why `chapter_key` is a
+/// in-flight request at another site's terms. That is why `unit_key` is a
 /// column and not a join.
-fn body_url(source_key: &str, chapter_key: &str) -> String {
+fn body_url(source_key: &str, unit_key: &str) -> String {
     // `archive:example.org` is the spelling `library_items.source_key` uses, and
-    // the chapter key is `chapters:<n>`. The path is the source's own; this
+    // the unit key is `units:<n>`. The path is the source's own; this
     // instance is not a mirror proxy and does not know an adapter's URL layout
     // for every site, so the fetch is bounded to the source root unless a future
     // adapter contributes a URL. See `body_url_is_built_from_the_recorded_source`
@@ -156,7 +156,7 @@ fn body_url(source_key: &str, chapter_key: &str) -> String {
         .split_once(':')
         .map(|(_, host)| host)
         .unwrap_or(source_key);
-    format!("https://{host}/{chapter_key}")
+    format!("https://{host}/{unit_key}")
 }
 
 /// Very small HTML → text, for the copy's `plain_text`.

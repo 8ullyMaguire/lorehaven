@@ -19,9 +19,9 @@
 //! | a canon-dependent work is distinguishable from an unmeasured one | `a_canon_dependent_work_is_not_an_unmeasured_one` |
 //! | absent is not canon-agnostic, at every level | `an_unmeasured_work_is_absent_not_canon_agnostic` |
 //! | too-short is unclassified, not canon-agnostic | `a_work_too_short_to_classify_is_unclassified_not_agnostic` |
-//! | a work with no text writes no row at all | `a_work_with_no_chapters_writes_no_row` |
+//! | a work with no text writes no row at all | `a_work_with_no_units_writes_no_row` |
 //! | eligibility asks "known to be", not "not known to be otherwise" | `eligibility_distinguishes_unclassified_from_agnostic` |
-//! | the class is measured from the work's own stored text | `the_class_is_measured_from_the_work_s_own_stored_chapters` |
+//! | the class is measured from the work's own stored text | `the_class_is_measured_from_the_work_s_own_stored_units` |
 //! | re-measuring replaces rather than duplicating | `a_recomputation_replaces_the_previous_row` |
 //! | the reason survives the round trip | `the_unclassified_reason_survives_the_round_trip` |
 //! | the measures survive the round trip, for an audit | `the_measures_survive_the_round_trip` |
@@ -58,7 +58,7 @@ async fn exec_bound_mixed(db: &TestDb, sqlite_sql: &str, postgres_sql: &str, bin
     // time. That is the whole point of the helper. An earlier version took
     // `&[String]` plus `&[i64]` and applied all the strings before the integers,
     // which is wrong whenever the integer is not the last parameter --
-    // `chapters.order_key` is `$4`, in the middle. PostgreSQL binds by `$n`, so
+    // `units.order_key` is `$4`, in the middle. PostgreSQL binds by `$n`, so
     // that version sent a `String` to `$4` and produced
     //
     //     column "order_key" is of type bigint but expression is of type text
@@ -96,7 +96,7 @@ async fn exec_bound_mixed(db: &TestDb, sqlite_sql: &str, postgres_sql: &str, bin
 
 /// One bound parameter, in the position the statement expects it.
 ///
-/// `Int` exists because `chapters.order_key` is BIGINT on PostgreSQL and INTEGER
+/// `Int` exists because `units.order_key` is BIGINT on PostgreSQL and INTEGER
 /// on SQLite: binding a string is a type error on one engine and accepted on the
 /// other, and the error names the column rather than the fixture.
 #[derive(Debug, Clone)]
@@ -193,18 +193,18 @@ async fn fixture_work(db: &TestDb, work_id: &str) -> String {
     )
     .await;
 
-    // The pseud is returned because `chapter_revisions.created_by_pseud_id` is
-    // NOT NULL and references it, so a chapter fixture cannot be written without
+    // The pseud is returned because `revisions.created_by_pseud_id` is
+    // NOT NULL and references it, so a unit fixture cannot be written without
     // knowing it. Returning it beats looking it up again from a deterministic hash.
     pseud
 }
 
-/// `chapters` + `chapter_revisions` rows whose prose is `text`.
+/// `units` + `revisions` rows whose prose is `text`.
 ///
 /// The generated-prose helper above cannot express this suite's subject, which is
 /// proper nouns: it emits `w0 w1 w2 ...`, which has none. So this takes the prose
 /// directly, and the caller builds it.
-async fn fixture_chapter_with_text(
+async fn fixture_unit_with_text(
     db: &TestDb,
     work_id: &str,
     author_pseud: &str,
@@ -212,19 +212,19 @@ async fn fixture_chapter_with_text(
     word_count: usize,
 ) {
     let now = "2026-10-01T12:00:00Z".to_string();
-    let chapter_id = id(&format!("canon-chapter-{work_id}"));
+    let unit_id = id(&format!("canon-unit-{work_id}"));
     let revision_id = id(&format!("canon-revision-{work_id}"));
 
     exec_bound_mixed(
         db,
-        "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
+        "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
          VALUES (?, ?, ?, ?, ?, ?)",
-        "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
+        "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
         &[
-            Bind::Text(chapter_id.clone()),
+            Bind::Text(unit_id.clone()),
             Bind::Text(work_id.to_string()),
-            Bind::Text("Chapter 0".to_string()),
+            Bind::Text("Unit 0".to_string()),
             Bind::Int(0),
             Bind::Text(now.clone()),
             Bind::Text(now.clone()),
@@ -234,17 +234,17 @@ async fn fixture_chapter_with_text(
 
     exec_bound_mixed(
         db,
-        "INSERT INTO chapter_revisions \
-         (id, chapter_id, revision_number, document_json, sanitized_html, \
+        "INSERT INTO revisions \
+         (id, unit_id, revision_number, document_json, sanitized_html, \
           plain_text, word_count, created_by_pseud_id, created_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        "INSERT INTO chapter_revisions \
-         (id, chapter_id, revision_number, document_json, sanitized_html, \
+        "INSERT INTO revisions \
+         (id, unit_id, revision_number, document_json, sanitized_html, \
           plain_text, word_count, created_by_pseud_id, created_at) \
          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid, $9)",
         &[
             Bind::Text(revision_id),
-            Bind::Text(chapter_id),
+            Bind::Text(unit_id),
             Bind::Int(1),
             Bind::Text("{\"type\":\"doc\",\"content\":[]}".to_string()),
             Bind::Text(format!("<p>{}</p>", text)),
@@ -303,12 +303,12 @@ async fn a_canon_agnostic_work_reads_back_identically() {
     let pseud = fixture_work(&db, &work).await;
     // Above the threshold with no names in it: measured, and canon-agnostic.
     let text = prose_with_names(1000, 0);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 1000).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 1000).await;
 
     let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
         .expect("measure")
-        .expect("a work with chapters is measured");
+        .expect("a work with units is measured");
 
     assert_eq!(
         stored.verdict.class(),
@@ -337,7 +337,7 @@ async fn a_canon_dependent_work_is_not_an_unmeasured_one() {
     let work = id("canon-dependent-work");
     let pseud = fixture_work(&db, &work).await;
     let text = prose_with_names(1000, 100);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 1000).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 1000).await;
 
     let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
@@ -386,7 +386,7 @@ async fn a_work_too_short_to_classify_is_unclassified_not_agnostic() {
     let work = id("canon-too-short-work");
     let pseud = fixture_work(&db, &work).await;
     let text = prose_with_names(100, 0);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 100).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 100).await;
 
     let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
@@ -404,12 +404,12 @@ async fn a_work_too_short_to_classify_is_unclassified_not_agnostic() {
 }
 
 #[tokio::test]
-async fn a_work_with_no_chapters_writes_no_row() {
+async fn a_work_with_no_units_writes_no_row() {
     // `measure_work_and_store` returns None for a work with no text rather than
     // recording "unclassified". Storing a reason here would be a claim that somebody
     // looked at a work that has nothing to look at.
-    let db = scratch("canon-no-chapters").await;
-    let work = id("canon-no-chapters-work");
+    let db = scratch("canon-no-units").await;
+    let work = id("canon-no-units-work");
     fixture_work(&db, &work).await;
 
     let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
@@ -434,7 +434,7 @@ async fn eligibility_distinguishes_unclassified_from_agnostic() {
     let short = id("canon-eligibility-short");
     let short_pseud = fixture_work(&db, &short).await;
     let text = prose_with_names(100, 0);
-    fixture_chapter_with_text(&db, &short, &short_pseud, &text, 100).await;
+    fixture_unit_with_text(&db, &short, &short_pseud, &text, 100).await;
     canon_store::measure_work_and_store(db.db(), &short, "2026-10-01T12:00:00Z")
         .await
         .expect("measure")
@@ -449,16 +449,16 @@ async fn eligibility_distinguishes_unclassified_from_agnostic() {
 }
 
 #[tokio::test]
-async fn the_class_is_measured_from_the_work_s_own_stored_chapters() {
+async fn the_class_is_measured_from_the_work_s_own_stored_units() {
     // The gap this closes. `classify` is a pure function over text, so a test that
     // only called it proved nothing about the store; the point is that the TEXT IS
     // READ FROM THE DATABASE, which is why the fixture writes prose and the test
     // never mentions a Corpus.
-    let db = scratch("canon-from-chapters").await;
-    let work = id("canon-from-chapters-work");
+    let db = scratch("canon-from-units").await;
+    let work = id("canon-from-units-work");
     let pseud = fixture_work(&db, &work).await;
     let text = prose_with_names(1000, 60);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 1000).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 1000).await;
 
     let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
@@ -492,7 +492,7 @@ async fn a_recomputation_replaces_the_previous_row() {
     let work = id("canon-recompute-work");
     let pseud = fixture_work(&db, &work).await;
     let text = prose_with_names(1000, 0);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 1000).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 1000).await;
 
     canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
@@ -526,26 +526,26 @@ async fn a_recomputation_can_change_the_class() {
     let work = id("canon-class-flip-work");
     let pseud = fixture_work(&db, &work).await;
     let clean = prose_with_names(1000, 0);
-    fixture_chapter_with_text(&db, &work, &pseud, &clean, 1000).await;
+    fixture_unit_with_text(&db, &work, &pseud, &clean, 1000).await;
     let first = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
         .expect("first")
         .expect("measured");
     assert_eq!(first.verdict.class(), Some(CanonClass::CanonAgnostic));
 
-    // A second chapter full of names changes the answer for the same work.
+    // A second unit full of names changes the answer for the same work.
     let dense = prose_with_names(1000, 400);
-    let chapter = id(&format!("canon-flip-chapter-{work}"));
+    let unit = id(&format!("canon-flip-unit-{work}"));
     exec_bound_mixed(
         &db,
-        "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
+        "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
          VALUES (?, ?, ?, ?, ?, ?)",
-        "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
+        "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
         &[
-            Bind::Text(chapter),
+            Bind::Text(unit),
             Bind::Text(work.clone()),
-            Bind::Text("Chapter 1".into()),
+            Bind::Text("Unit 1".into()),
             Bind::Int(1),
             Bind::Text("2026-10-01T12:00:00Z".into()),
             Bind::Text("2026-10-01T12:00:00Z".into()),
@@ -555,15 +555,15 @@ async fn a_recomputation_can_change_the_class() {
     let rev = id(&format!("canon-flip-revision-{work}"));
     exec_bound_mixed(
         &db,
-        "INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, \
+        "INSERT INTO revisions (id, unit_id, revision_number, document_json, \
          sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        "INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, \
+        "INSERT INTO revisions (id, unit_id, revision_number, document_json, \
          sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) \
          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid, $9)",
         &[
             Bind::Text(rev),
-            Bind::Text(id(&format!("canon-flip-chapter-{work}"))),
+            Bind::Text(id(&format!("canon-flip-unit-{work}"))),
             Bind::Int(1),
             Bind::Text("{\"type\":\"doc\",\"content\":[]}".into()),
             Bind::Text(format!("<p>{dense}</p>")),
@@ -597,7 +597,7 @@ async fn the_unclassified_reason_survives_the_round_trip() {
     let work = id("canon-reason-work");
     let pseud = fixture_work(&db, &work).await;
     let text = prose_with_names(100, 0);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 100).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 100).await;
     canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
         .expect("measure")
@@ -630,7 +630,7 @@ async fn the_measures_survive_the_round_trip() {
     let work = id("canon-measures-work");
     let pseud = fixture_work(&db, &work).await;
     let text = prose_with_names(1000, 30);
-    fixture_chapter_with_text(&db, &work, &pseud, &text, 1000).await;
+    fixture_unit_with_text(&db, &work, &pseud, &text, 1000).await;
     let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
         .await
         .expect("measure")
@@ -664,7 +664,7 @@ async fn both_engines_report_the_same_class() {
         let work = id(&format!("canon-both-work-{names}"));
         let pseud = fixture_work(&db, &work).await;
         let text = prose_with_names(1000, names);
-        fixture_chapter_with_text(&db, &work, &pseud, &text, 1000).await;
+        fixture_unit_with_text(&db, &work, &pseud, &text, 1000).await;
 
         let stored = canon_store::measure_work_and_store(db.db(), &work, "2026-10-01T12:00:00Z")
             .await

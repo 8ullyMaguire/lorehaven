@@ -154,7 +154,7 @@
     {:else if works && works.length === 0}
       <EmptyState
         title="Nothing here yet"
-        description="Start a draft above, and it will appear here with its chapters and revision history."
+        description="Start a draft above, and it will appear here with its units and revision history."
       />
     {:else if works}
       <ul class="works">
@@ -166,8 +166,8 @@
               </a>
               <span class="meta">
                 {describeLifecycle(work.lifecycle)} · {describeVisibility(work.visibility)} ·
-                {work.chapter_count}
-                {work.chapter_count === 1 ? 'chapter' : 'chapters'} · {work.word_count} words ·
+                {work.unit_count}
+                {work.unit_count === 1 ? 'unit' : 'units'} · {work.word_count} words ·
                 role: {work.role}
               </span>
               {#if work.lifecycle === 'published'}

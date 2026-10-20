@@ -643,7 +643,7 @@ fn parse_query_date(value: &str) -> Option<String> {
 /// The SQL expression for a works-surface numeric field.
 ///
 /// `words` and `kudos` are both computed rather than stored on `works`, so both
-/// are subqueries. Each coalesces to 0: a work with no chapters sums to NULL
+/// are subqueries. Each coalesces to 0: a work with no units sums to NULL
 /// and a work never kudosed has no row in the aggregate table, and a
 /// `words:>0` / `kudos:>0` that excluded them would be silently wrong.
 fn numeric_column(field: &QueryField) -> Result<&'static str, QueryError> {
@@ -652,11 +652,11 @@ fn numeric_column(field: &QueryField) -> Result<&'static str, QueryError> {
         QueryField::Kudos => {
             "COALESCE((SELECT wma.kudos FROM work_metric_aggregates wma WHERE wma.work_id = works.id), 0)"
         }
-        // Summed over live chapters' current revisions, matching the `word_count`
+        // Summed over live units' current revisions, matching the `word_count`
         // the search row reports in `search/ast_search.rs`.
         QueryField::Words => {
-            "COALESCE((SELECT SUM(CAST(cr.word_count AS BIGINT)) FROM chapters c \
-             JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
+            "COALESCE((SELECT SUM(CAST(cr.word_count AS BIGINT)) FROM units c \
+             JOIN revisions cr ON cr.id = c.current_revision_id \
              WHERE c.work_id = works.id AND c.deleted_at IS NULL), 0)"
         }
         other => {
@@ -1117,7 +1117,7 @@ mod tests {
             "expected a > comparison: {}",
             frag.sql
         );
-        assert!(frag.sql.contains("chapter_revisions"), "{}", frag.sql);
+        assert!(frag.sql.contains("revisions"), "{}", frag.sql);
     }
 
     #[test]
@@ -1140,7 +1140,7 @@ mod tests {
 
     #[test]
     fn a_numeric_comparison_coalesces_to_zero() {
-        // A work with no chapters must still satisfy `words:>=0`, and a work
+        // A work with no units must still satisfy `words:>=0`, and a work
         // never kudosed must still satisfy `kudos:>=0`. Without COALESCE both
         // sum/select to NULL and the comparison is NULL, so neither matches.
         for query in ["words:>=0", "kudos:>=0"] {

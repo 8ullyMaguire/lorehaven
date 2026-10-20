@@ -160,10 +160,10 @@ async fn exec(tdb: &TestDb, tmpl: &str, binds: &[&str]) {
 }
 
 /// Give `count` works to the instance, published, complete and public, each with one
-/// chapter of `words` words so a duration estimate exists.
+/// unit of `words` words so a duration estimate exists.
 ///
-/// The chapter and revision rows are not decoration. `duration_estimates` reads
-/// `chapter_revisions.word_count`; a work with no chapters has NO estimate, and
+/// The unit and revision rows are not decoration. `duration_estimates` reads
+/// `revisions.word_count`; a work with no units has NO estimate, and
 /// §54.4 then charges it the queue's midpoint — correct behaviour, but it makes
 /// every budget assertion in this file untestable, because the total stops being
 /// predictable. So every work seeded here has a real length.
@@ -174,7 +174,7 @@ async fn seed_works(tdb: &TestDb, count: usize, words: u32) -> Vec<String> {
         let account = uuid::Uuid::new_v4().to_string();
         let pseud = uuid::Uuid::new_v4().to_string();
         let work = uuid::Uuid::new_v4().to_string();
-        let chapter = uuid::Uuid::new_v4().to_string();
+        let unit = uuid::Uuid::new_v4().to_string();
         let revision = uuid::Uuid::new_v4().to_string();
 
         // One statement per table: sqlx refuses a multi-statement batch on
@@ -200,36 +200,36 @@ async fn seed_works(tdb: &TestDb, count: usize, words: u32) -> Vec<String> {
             &[&work, &pseud, &format!("Seed work {n}"), T0],
         )
         .await;
-        // The chapter goes in FIRST with a NULL `current_revision_id`, then the
+        // The unit goes in FIRST with a NULL `current_revision_id`, then the
         // revision, then the link is closed.
         //
         // Inserting them the other way round fails, and only on the engine that
-        // enforces the FK: `chapters.current_revision_id` REFERENCES
-        // `chapter_revisions(id)`, and SQLite does not check that on insert by
-        // default while PostgreSQL always does. The chapter's own migration comment
+        // enforces the FK: `units.current_revision_id` REFERENCES
+        // `revisions(id)`, and SQLite does not check that on insert by
+        // default while PostgreSQL always does. The unit's own migration comment
         // notes the cycle ("SQLite resolves a foreign key target when it is used
         // rather than when it is declared") — which is exactly why the safe order is
         // the three-step one and not the two-step one that reads more naturally.
         exec(
             tdb,
-            "INSERT INTO chapters (id, work_id, order_key, title, current_revision_id, created_at, updated_at)
+            "INSERT INTO units (id, work_id, order_key, title, current_revision_id, created_at, updated_at)
              VALUES (?1#u, ?2#u, ?3#i, 'One', NULL, ?4#t, ?4#t)",
-            &[&chapter, &work, "10", T0],
+            &[&unit, &work, "10", T0],
         )
         .await;
         // `created_by_pseud_id` is NOT NULL and FK-constrained: a revision records
         // who saved it, which is the pseud that owns the work here.
         exec(
             tdb,
-            "INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at)
+            "INSERT INTO revisions (id, unit_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at)
              VALUES (?1#u, ?2#u, 1, '{}', '<p>x</p>', 'x', ?3#i, ?4#u, ?5#t)",
-            &[&revision, &chapter, &words.to_string(), &pseud, T0],
+            &[&revision, &unit, &words.to_string(), &pseud, T0],
         )
         .await;
         exec(
             tdb,
-            "UPDATE chapters SET current_revision_id = ?2#u WHERE id = ?1#u",
-            &[&chapter, &revision],
+            "UPDATE units SET current_revision_id = ?2#u WHERE id = ?1#u",
+            &[&unit, &revision],
         )
         .await;
         ids.push(work);

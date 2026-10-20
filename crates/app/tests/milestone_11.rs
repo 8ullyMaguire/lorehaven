@@ -195,18 +195,18 @@ async fn published_work(harness: &Harness, email: &str, handle: &str, title: &st
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter").to_owned();
-    let chapter_version = body["version"].as_i64().expect("version");
-    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+    assert_eq!(status, StatusCode::CREATED, "unit: {body}");
+    let unit = body["id"].as_str().expect("unit").to_owned();
+    let unit_version = body["version"].as_i64().expect("version");
+    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, _) = author
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "save chapter");
+    assert_eq!(status, StatusCode::OK, "save unit");
     let (status, _) = author
         .post(
             &format!("/api/v1/works/{work_id}/publish"),

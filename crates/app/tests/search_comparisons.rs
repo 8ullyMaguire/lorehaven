@@ -4,10 +4,10 @@
 //! `words:>10000` is the motivating query. It has to (a) parse, (b) render to
 //! SQL, (c) run, and (d) return the right rows — and the unit tests in
 //! `crates/domain/src/query.rs` only cover (a) and (b). These cover (c) and
-//! (d), which is where the dialect faults live: `chapter_revisions.word_count`
+//! (d), which is where the dialect faults live: `revisions.word_count`
 //! is `BIGINT` in both, but the `CAST` that makes a text bind legal against it
 //! only exists on one path, and a `COALESCE` that is forgotten drops every
-//! work with no chapters from a `words:>=0` query without any error.
+//! work with no units from a `words:>=0` query without any error.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -18,16 +18,16 @@ use darkhold_db::search::{search_works_ast, SearchError};
 use test_support::id;
 use tower::ServiceExt;
 
-/// One published work with a single chapter of exactly `words` words.
+/// One published work with a single unit of exactly `words` words.
 ///
-/// `word_count` lives on `chapter_revisions`, and the search row sums it over
-/// live chapters, so seeding the chapter *and* pointing `current_revision_id`
+/// `word_count` lives on `revisions`, and the search row sums it over
+/// live units, so seeding the unit *and* pointing `current_revision_id`
 /// at it is the minimum that makes a word-count filter meaningful.
 async fn seed_work(db: &darkhold_db::Database, slug: &str, title: &str, words: i64) -> String {
     let work_id = id(slug);
     let pseud_id = id(&format!("{slug}-pseud"));
     let account_id = id(&format!("{slug}-acct"));
-    let chapter_id = id(&format!("{slug}-ch1"));
+    let unit_id = id(&format!("{slug}-ch1"));
     let revision_id = id(&format!("{slug}-rev1"));
 
     match db.backend() {
@@ -41,15 +41,15 @@ async fn seed_work(db: &darkhold_db::Database, slug: &str, title: &str, words: i
             sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, 'published', 'public', datetime('now'), datetime('now'))")
                 .bind(&work_id).bind(title).bind(&pseud_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-            sqlx::query("INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at) VALUES (?, ?, 10, 'One', datetime('now'), datetime('now'))")
-                .bind(&chapter_id).bind(&work_id)
+            sqlx::query("INSERT INTO units (id, work_id, order_key, title, created_at, updated_at) VALUES (?, ?, 10, 'One', datetime('now'), datetime('now'))")
+                .bind(&unit_id).bind(&work_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-            sqlx::query("INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES (?, ?, 1, '{}', '', '', ?, ?, datetime('now'))")
-                .bind(&revision_id).bind(&chapter_id).bind(words).bind(&pseud_id)
+            sqlx::query("INSERT INTO revisions (id, unit_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES (?, ?, 1, '{}', '', '', ?, ?, datetime('now'))")
+                .bind(&revision_id).bind(&unit_id).bind(words).bind(&pseud_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-            sqlx::query("UPDATE chapters SET current_revision_id = ? WHERE id = ?")
+            sqlx::query("UPDATE units SET current_revision_id = ? WHERE id = ?")
                 .bind(&revision_id)
-                .bind(&chapter_id)
+                .bind(&unit_id)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
@@ -64,15 +64,15 @@ async fn seed_work(db: &darkhold_db::Database, slug: &str, title: &str, words: i
             sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())")
                 .bind(&work_id).bind(title).bind(&pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 10, 'One', now(), now())")
-                .bind(&chapter_id).bind(&work_id)
+            sqlx::query("INSERT INTO units (id, work_id, order_key, title, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 10, 'One', now(), now())")
+                .bind(&unit_id).bind(&work_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES ($1::uuid, $2::uuid, 1, '{}', '', '', $3, $4::uuid, now())")
-                .bind(&revision_id).bind(&chapter_id).bind(words).bind(&pseud_id)
+            sqlx::query("INSERT INTO revisions (id, unit_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at) VALUES ($1::uuid, $2::uuid, 1, '{}', '', '', $3, $4::uuid, now())")
+                .bind(&revision_id).bind(&unit_id).bind(words).bind(&pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("UPDATE chapters SET current_revision_id = $1::uuid WHERE id = $2::uuid")
+            sqlx::query("UPDATE units SET current_revision_id = $1::uuid WHERE id = $2::uuid")
                 .bind(&revision_id)
-                .bind(&chapter_id)
+                .bind(&unit_id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
@@ -81,7 +81,7 @@ async fn seed_work(db: &darkhold_db::Database, slug: &str, title: &str, words: i
     work_id
 }
 
-/// A published work with *no* chapters at all.
+/// A published work with *no* units at all.
 ///
 /// The COALESCE case: its word count sums to NULL, so without a coalesce every
 /// comparison against it is NULL and it silently drops out of results.
@@ -126,7 +126,7 @@ async fn titles(db: &darkhold_db::Database, query: &str) -> Vec<String> {
         .collect()
 }
 
-/// Seed three works: 500, 5 000 and 50 000 words, plus one with no chapters.
+/// Seed three works: 500, 5 000 and 50 000 words, plus one with no units.
 async fn seed_spectrum(db: &darkhold_db::Database) {
     seed_work(db, "cmp-tiny", "Tiny", 500).await;
     seed_work(db, "cmp-mid", "Mid", 5_000).await;
@@ -181,13 +181,13 @@ async fn words_less_than_is_the_mirror_of_greater_than() {
     let tdb = test_support::TestDb::connect_with_dir("cmp-lt", &dir).await;
     seed_spectrum(tdb.db()).await;
 
-    // "Empty" has no chapters, so its word count is 0, and 0 < 5000. That is
+    // "Empty" has no units, so its word count is 0, and 0 < 5000. That is
     // the correct answer, and it is the same COALESCE behaviour the
     // `words:>=0` test pins from the other side.
     assert_eq!(
         titles(tdb.db(), "words:<5000").await,
         vec!["Empty".to_string(), "Tiny".to_string()],
-        "words:<5000 matches the 500-word work and the chapterless one"
+        "words:<5000 matches the 500-word work and the unitless one"
     );
     tdb.cleanup().await;
 }
@@ -214,7 +214,7 @@ async fn words_less_or_equal_includes_the_boundary() {
 }
 
 #[tokio::test]
-async fn a_work_with_no_chapters_still_matches_a_zero_threshold() {
+async fn a_work_with_no_units_still_matches_a_zero_threshold() {
     let dir = test_support::scratch_dir("cmp_coalesce");
     let tdb = test_support::TestDb::connect_with_dir("cmp-coalesce", &dir).await;
     seed_spectrum(tdb.db()).await;
@@ -224,7 +224,7 @@ async fn a_work_with_no_chapters_still_matches_a_zero_threshold() {
     let found = titles(tdb.db(), "words:>=0").await;
     assert!(
         found.contains(&"Empty".to_string()),
-        "a chapterless work has 0 words and must match words:>=0, got {found:?}"
+        "a unitless work has 0 words and must match words:>=0, got {found:?}"
     );
     tdb.cleanup().await;
 }

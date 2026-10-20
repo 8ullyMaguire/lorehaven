@@ -256,7 +256,7 @@ impl std::error::Error for PostureRefusal {}
 ///
 /// The rule that answers A3's farming problem. The paid-for action becomes "was
 /// this finished and read", which a generator cannot farm — generating the last
-/// chapter is not the expensive part, getting readers to finish it is.
+/// unit is not the expensive part, getting readers to finish it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreditVesting {
     /// A reader completed the work. §33's trust tiers decide whether they count.

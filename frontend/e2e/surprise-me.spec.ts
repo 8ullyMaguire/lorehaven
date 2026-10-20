@@ -62,17 +62,17 @@ async function signUp(page: Page, base: string): Promise<void> {
   await expectSignedIn(page);
 }
 
-/** Publish a one-chapter work so there is something for Surprise Me to serve. */
+/** Publish a one-unit work so there is something for Surprise Me to serve. */
 async function publish(page: Page, title: string): Promise<string> {
   await page.goto('/write');
   await page.fill('input[id^=field-]', title);
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   await page.locator('.tiptap.ProseMirror').click();
-  await page.keyboard.type(`A chapter for ${title}. It has enough words to be a chapter.`);
+  await page.keyboard.type(`A unit for ${title}. It has enough words to be a unit.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

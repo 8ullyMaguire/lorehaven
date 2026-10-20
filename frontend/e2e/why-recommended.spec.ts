@@ -47,18 +47,18 @@ async function ensureAccount(page: import('@playwright/test').Page, person: type
   await expectSignedIn(page);
 }
 
-/** Write, save and publish a one-chapter work; returns its id. */
+/** Write, save and publish a one-unit work; returns its id. */
 async function publish(page: import('@playwright/test').Page, title: string): Promise<string> {
   await page.goto('/write');
   await page.fill('input[id^=field-]', title);
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type(`A chapter written for ${title}, so the feed has something to explain.`);
+  await page.keyboard.type(`A unit written for ${title}, so the feed has something to explain.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

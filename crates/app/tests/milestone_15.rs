@@ -326,13 +326,13 @@ async fn usage_counters_increment_and_roll_over() {
     let day = "2026-09-14";
 
     let (count1, _cap) =
-        darkhold_db::economy::bump_counter(harness.tdb.db(), "alice", "read_chapter", day, 10)
+        darkhold_db::economy::bump_counter(harness.tdb.db(), "alice", "read_unit", day, 10)
             .await
             .expect("bump 1");
     assert_eq!(count1, 1);
 
     let (count2, _cap) =
-        darkhold_db::economy::bump_counter(harness.tdb.db(), "alice", "read_chapter", day, 10)
+        darkhold_db::economy::bump_counter(harness.tdb.db(), "alice", "read_unit", day, 10)
             .await
             .expect("bump 2");
     assert_eq!(count2, 2);
@@ -340,7 +340,7 @@ async fn usage_counters_increment_and_roll_over() {
     // Different day resets
     let day2 = "2026-09-15";
     let (count3, _cap) =
-        darkhold_db::economy::bump_counter(harness.tdb.db(), "alice", "read_chapter", day2, 10)
+        darkhold_db::economy::bump_counter(harness.tdb.db(), "alice", "read_unit", day2, 10)
             .await
             .expect("bump 3");
     assert_eq!(count3, 1);
@@ -350,7 +350,7 @@ async fn usage_counters_increment_and_roll_over() {
         .await
         .expect("usage");
     assert_eq!(usage.len(), 1);
-    assert_eq!(usage[0].0, "read_chapter");
+    assert_eq!(usage[0].0, "read_unit");
     assert_eq!(usage[0].1, 2);
 
     harness.cleanup().await;

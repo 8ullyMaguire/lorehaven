@@ -1,12 +1,12 @@
 /// A comment anchor: a specific position within a text or media unit.
 ///
 /// Anchored comments address a paragraph offset in text (identified by
-/// `chapter_id` + `paragraph`) or a timestamp in media (`timestamp`).
+/// `unit_id` + `paragraph`) or a timestamp in media (`timestamp`).
 /// The full shape is validated by [`validate_anchor`]; routes store the
-/// kind/value pair and the chapter id, all nullable for whole-work comments.
+/// kind/value pair and the unit id, all nullable for whole-work comments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AnchorKind {
-    /// A paragraph offset within a chapter's document.
+    /// A paragraph offset within a unit's document.
     Paragraph,
     /// A timestamp within a media unit.
     Timestamp,
@@ -38,20 +38,20 @@ impl std::fmt::Display for AnchorKind {
     }
 }
 
-/// Validate a (kind, value, optional chapter_id) triple.
+/// Validate a (kind, value, optional unit_id) triple.
 ///
-/// - `paragraph` anchors require a chapter id and a non-negative integer value.
+/// - `paragraph` anchors require a unit id and a non-negative integer value.
 /// - `timestamp` anchors require a value in `HH:MM:SS(.fff)?` or `SS(.fff)?` form.
 pub fn validate_anchor(
     kind: AnchorKind,
     value: &str,
-    chapter_id: Option<&str>,
+    unit_id: Option<&str>,
 ) -> Result<(), String> {
     match kind {
         AnchorKind::Paragraph => {
-            let chapter = chapter_id.ok_or("paragraph anchors require a chapter_id")?;
-            if uuid::Uuid::parse_str(chapter).is_err() {
-                return Err("invalid chapter_id".into());
+            let unit = unit_id.ok_or("paragraph anchors require a unit_id")?;
+            if uuid::Uuid::parse_str(unit).is_err() {
+                return Err("invalid unit_id".into());
             }
             let offset: u32 = value
                 .parse()
@@ -60,8 +60,8 @@ pub fn validate_anchor(
             Ok(())
         }
         AnchorKind::Timestamp => {
-            if chapter_id.is_some() {
-                return Err("timestamp anchors must not set a chapter_id".into());
+            if unit_id.is_some() {
+                return Err("timestamp anchors must not set a unit_id".into());
             }
             if !is_valid_timestamp(value) {
                 return Err("timestamp anchor must be HH:MM:SS(.fff) or SS(.fff)".into());
@@ -120,7 +120,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn paragraph_anchor_requires_chapter() {
+    fn paragraph_anchor_requires_unit() {
         assert!(validate_anchor(
             AnchorKind::Paragraph,
             "3",

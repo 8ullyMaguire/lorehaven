@@ -15,7 +15,7 @@
 //!
 //! | clause | test |
 //! |---|---|
-//! | a new instance forbids generated content | `an_instance_with_no_policy_row_forbids` |
+//! | a new instance accepts generated content | `an_instance_with_no_policy_row_allows` |
 //! | the operator can set each posture, and it sticks | `the_operator_can_set_each_posture` |
 //! | setting twice bumps the version, never duplicates | `setting_the_policy_twice_bumps_the_version` |
 //! | forbid refuses and no work row is created | `forbid_refuses_before_the_work_row_exists` |
@@ -153,22 +153,29 @@ async fn fixture_work(db: &TestDb, work_id: &str) -> String {
     )
     .await;
 
-    // The pseud is returned because `chapter_revisions.created_by_pseud_id` is
-    // NOT NULL and references it, so a chapter fixture cannot be written without
+    // The pseud is returned because `revisions.created_by_pseud_id` is
+    // NOT NULL and references it, so a unit fixture cannot be written without
     // knowing it. Returning it beats looking it up again from a deterministic hash.
     pseud
 }
 
 #[tokio::test]
-async fn an_instance_with_no_policy_row_forbids() {
-    // §51.1: `forbid` is the default. 0109 creates no policy row, so an instance
-    // that has never been configured reads `forbid` -- and reads it through the same
-    // function a configured one does, not through a separate "unset" path.
+async fn an_instance_with_no_policy_row_allows() {
+    // **§6.9: the default is `allow`** (D-4/N-4). The archive indexes and
+    // recommends AI-generated works, labelled as a declared attribute -- and
+    // the reason is about THIS archive and not about safety in the abstract:
+    // the owner's corpus has 8 of 54 works carrying `ai-generated text`, and
+    // he writes them. An archive whose default refuses the work its own
+    // author writes is an archive that refuses its author.
+    //
+    // 0109 creates no policy row, so an instance that has never been
+    // configured reads the default -- and reads it through the same function a
+    // configured one does, not through a separate "unset" path.
     let db = scratch("gen-no-policy").await;
     assert_eq!(
         gc::generated_content_policy(db.db()).await.expect("read"),
-        GeneratedContentPosture::Forbid,
-        "an instance that has never set a posture forbids generated content"
+        GeneratedContentPosture::Allow,
+        "an instance that has never set a posture accepts, and labels"
     );
     assert_eq!(
         gc::policy_version(db.db()).await.expect("version"),

@@ -230,23 +230,23 @@ async fn create_work(client: &mut Client, title: &str) -> String {
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work_id = body["id"].as_str().expect("work id").to_owned();
 
-    // Add a chapter so the work can be published.
+    // Add a unit so the work can be published.
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
-            json!({ "title": "Chapter 1" }),
+            json!({ "title": "Unit 1" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter_id = body["id"].as_str().expect("chapter id").to_owned();
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit_id = body["id"].as_str().expect("unit id").to_owned();
 
     let (status, body) = client
         .patch(
-            &format!("/api/v1/chapters/{chapter_id}"),
+            &format!("/api/v1/chapters/{unit_id}"),
             json!({ "expected_version": 1, "document": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Opening text." }] }] } }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "update chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "update unit: {body}");
 
     work_id
 }
@@ -274,25 +274,25 @@ async fn spoiler_scope_round_trips() {
     let category = harness.seed_category().await;
     let topic_id = create_topic(&mut client, &category, "Discussion Topic").await;
 
-    // Set spoiler scope to chapter 5.
+    // Set spoiler scope to unit 5.
     let (status, body) = client
         .put(
             &format!("/api/v1/topics/{topic_id}/spoiler-scope"),
-            json!({ "chapter": 5 }),
+            json!({ "unit": 5 }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "set spoiler scope: {body}");
-    assert_eq!(body["spoiler_scope_chapter"], 5);
+    assert_eq!(body["spoiler_scope_unit"], 5);
 
     // Clear spoiler scope.
     let (status, body) = client
         .put(
             &format!("/api/v1/topics/{topic_id}/spoiler-scope"),
-            json!({ "chapter": null }),
+            json!({ "unit": null }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "clear spoiler scope: {body}");
-    assert!(body["spoiler_scope_chapter"].is_null());
+    assert!(body["spoiler_scope_unit"].is_null());
 }
 
 #[tokio::test]
@@ -311,7 +311,7 @@ async fn spoiler_scope_refuses_non_author() {
     let (status, _body) = stranger
         .put(
             &format!("/api/v1/topics/{topic_id}/spoiler-scope"),
-            json!({ "chapter": 5 }),
+            json!({ "unit": 5 }),
         )
         .await;
     assert_eq!(
@@ -373,24 +373,24 @@ async fn reader_progress_round_trips() {
         .get(&format!("/api/v1/works/{work_id}/progress"))
         .await;
     assert_eq!(status, StatusCode::OK, "get progress: {body}");
-    assert_eq!(body["last_chapter"], 0);
+    assert_eq!(body["last_unit"], 0);
 
-    // Update progress to chapter 3.
+    // Update progress to unit 3.
     let (status, body) = client
         .put(
             &format!("/api/v1/works/{work_id}/progress"),
-            json!({ "last_chapter": 3 }),
+            json!({ "last_unit": 3 }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "update progress: {body}");
-    assert_eq!(body["last_chapter"], 3);
+    assert_eq!(body["last_unit"], 3);
 
     // Verify it persisted.
     let (status, body) = client
         .get(&format!("/api/v1/works/{work_id}/progress"))
         .await;
     assert_eq!(status, StatusCode::OK, "get progress again: {body}");
-    assert_eq!(body["last_chapter"], 3);
+    assert_eq!(body["last_unit"], 3);
 }
 
 // ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@
 
 use async_trait::async_trait;
 use darkhold_scrapers::{
-    ChapterRef, Credentials, Fetcher, Registry, SourceAdapter, SourceCapabilities, SourceChapter,
+    UnitRef, Credentials, Fetcher, Registry, SourceAdapter, SourceCapabilities, SourceUnit,
     SourceKey, SourceResult, SourceWork, VerificationStatus, Wall, WorkStatus,
 };
 use url::Url;
@@ -76,9 +76,9 @@ impl SourceAdapter for Fake {
             status: WorkStatus::Unknown,
             published_at: None,
             updated_at: None,
-            chapters: vec![ChapterRef {
+            units: vec![UnitRef {
                 ordinal: 1,
-                source_chapter_key: "1".to_owned(),
+                source_unit_key: "1".to_owned(),
                 title: "One".to_owned(),
             }],
             rating_text: None,
@@ -86,12 +86,12 @@ impl SourceAdapter for Fake {
             tags: Vec::new(),
         })
     }
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         _fetch: &dyn Fetcher,
         _work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         Ok(Vec::new())
     }
 }

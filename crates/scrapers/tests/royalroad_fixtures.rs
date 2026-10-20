@@ -156,14 +156,14 @@ fn every_chapter_the_table_lists_is_read() {
         "the fixture no longer states its chapter count, so the adapter's agreement check is vacuous"
     );
 
-    assert_eq!(work.chapter_count(), 109);
+    assert_eq!(work.unit_count(), 109);
 }
 
 #[test]
 fn the_chapters_are_numbered_from_one_without_gaps() {
     let work = recorded_work();
 
-    let ordinals: Vec<u32> = work.chapters.iter().map(|c| c.ordinal).collect();
+    let ordinals: Vec<u32> = work.units.iter().map(|c| c.ordinal).collect();
     let expected: Vec<u32> = (1..=109).collect();
     assert_eq!(ordinals, expected);
 }
@@ -172,18 +172,18 @@ fn the_chapters_are_numbered_from_one_without_gaps() {
 fn each_chapter_carries_the_sites_own_id() {
     let work = recorded_work();
 
-    let first = &work.chapters[0];
-    assert_eq!(first.source_chapter_key, "301778");
+    let first = &work.units[0];
+    assert_eq!(first.source_unit_key, "301778");
     assert_eq!(first.title, "1. Good Morning Brother");
 
     // The site's own numbering is punctuation-free on screen but is not in the
     // markup: this title carries a typographic apostrophe, and a chapter keyed
     // by an ASCII-normalised title would be a different chapter.
-    let second = &work.chapters[1];
-    assert_eq!(second.source_chapter_key, "301781");
+    let second = &work.units[1];
+    assert_eq!(second.source_unit_key, "301781");
     assert_eq!(second.title, "2. Life\u{2019}s Little Problems");
 
-    let last = &work.chapters[108];
+    let last = &work.units[108];
     assert_eq!(last.title, "New story is out - Zenith of Sorcery");
 }
 
@@ -192,9 +192,9 @@ fn no_two_chapters_share_a_key() {
     let work = recorded_work();
 
     let mut keys: Vec<&str> = work
-        .chapters
+        .units
         .iter()
-        .map(|chapter| chapter.source_chapter_key.as_str())
+        .map(|chapter| chapter.source_unit_key.as_str())
         .collect();
     let total = keys.len();
     keys.sort_unstable();
@@ -207,20 +207,20 @@ fn no_two_chapters_share_a_key() {
 fn every_chapter_has_a_key_and_a_title() {
     let work = recorded_work();
 
-    for chapter in &work.chapters {
+    for chapter in &work.units {
         assert!(
-            !chapter.source_chapter_key.is_empty(),
+            !chapter.source_unit_key.is_empty(),
             "chapter {} has no key",
             chapter.ordinal
         );
         assert!(
             chapter
-                .source_chapter_key
+                .source_unit_key
                 .chars()
                 .all(|c| c.is_ascii_digit()),
             "chapter {} has a key that is not the site's numeric id: {:?}",
             chapter.ordinal,
-            chapter.source_chapter_key
+            chapter.source_unit_key
         );
         assert!(
             !chapter.title.is_empty(),
@@ -234,7 +234,7 @@ fn every_chapter_has_a_key_and_a_title() {
 fn a_chapter_page_is_read_as_its_own_chapter() {
     let work = recorded_work();
     let chapters = RoyalRoad::new()
-        .chapters_from_html(&fixture("chapter-1.html"), &work)
+        .units_from_html(&fixture("chapter-1.html"), &work)
         .expect("the recorded chapter page must parse");
 
     // The ordinal is not on a chapter page, so it is recovered by matching the
@@ -243,7 +243,7 @@ fn a_chapter_page_is_read_as_its_own_chapter() {
     assert_eq!(chapters.len(), 1);
     let chapter = &chapters[0];
     assert_eq!(chapter.ordinal, 1);
-    assert_eq!(chapter.source_chapter_key, "301778");
+    assert_eq!(chapter.source_unit_key, "301778");
     assert_eq!(chapter.title, "1. Good Morning Brother");
 }
 
@@ -251,7 +251,7 @@ fn a_chapter_page_is_read_as_its_own_chapter() {
 fn the_prose_is_read_and_the_sites_furniture_is_not() {
     let work = recorded_work();
     let chapters = RoyalRoad::new()
-        .chapters_from_html(&fixture("chapter-1.html"), &work)
+        .units_from_html(&fixture("chapter-1.html"), &work)
         .expect("the recorded chapter page must parse");
     let body = &chapters[0].content_html;
 
@@ -288,7 +288,7 @@ fn a_chapter_body_carries_no_script() {
     let work = recorded_work();
     for name in ["chapter-1.html", "chapter-2.html"] {
         let chapters = RoyalRoad::new()
-            .chapters_from_html(&fixture(name), &work)
+            .units_from_html(&fixture(name), &work)
             .expect("the recorded chapter page must parse");
         let body = &chapters[0].content_html;
         assert!(
@@ -310,12 +310,12 @@ fn a_chapter_body_carries_no_script() {
 fn a_later_chapter_is_read_as_its_own_position() {
     let work = recorded_work();
     let chapters = RoyalRoad::new()
-        .chapters_from_html(&fixture("chapter-2.html"), &work)
+        .units_from_html(&fixture("chapter-2.html"), &work)
         .expect("the recorded chapter page must parse");
 
     let chapter = &chapters[0];
     assert_eq!(chapter.ordinal, 2);
-    assert_eq!(chapter.source_chapter_key, "301781");
+    assert_eq!(chapter.source_unit_key, "301781");
     assert_eq!(chapter.title, "2. Life\u{2019}s Little Problems");
     assert!(chapter.content_html.contains("academ"));
 }
@@ -356,7 +356,7 @@ fn a_chapter_url_previews_its_work() {
 
     assert_eq!(work.source_work_key, "21220");
     assert_eq!(work.source_url, WORK_URL);
-    assert_eq!(work.chapter_count(), 109);
+    assert_eq!(work.unit_count(), 109);
 }
 
 #[test]

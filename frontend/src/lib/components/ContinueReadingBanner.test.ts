@@ -10,8 +10,8 @@ function entry(over: Partial<ContinueReading> = {}): ContinueReading {
     title: 'Stars Fall Softly',
     positionPermille: 420,
     percent: 42,
-    chapterId: 'chapter-7',
-    chapterTitle: 'Chapter 7: The Turn',
+    unitId: 'unit-7',
+    unitTitle: 'Unit 7: The Turn',
     updatedAt: '2026-10-03T10:00:00Z',
     ...over,
   };
@@ -27,12 +27,12 @@ function mount(over: Partial<ContinueReadingBannerProps> = {}) {
 const banner = () => screen.queryByTestId('continue-reading-banner');
 
 describe('ContinueReadingBanner', () => {
-  it('shows the work, the chapter and the percentage', async () => {
+  it('shows the work, the unit and the percentage', async () => {
     mount({ load: vi.fn().mockResolvedValue(entry()) });
 
     await waitFor(() => expect(screen.getByTestId('continue-reading-title')).toBeTruthy());
     expect(screen.getByText('Stars Fall Softly')).toBeTruthy();
-    expect(screen.getByTestId('continue-reading-chapter').textContent).toContain('Chapter 7');
+    expect(screen.getByTestId('continue-reading-unit').textContent).toContain('Unit 7');
     expect(screen.getByTestId('continue-reading-percent').textContent).toContain('42%');
   });
 
@@ -96,11 +96,11 @@ describe('ContinueReadingBanner', () => {
     await waitFor(() => expect(banner()!.hasAttribute('hidden')).toBe(true));
   });
 
-  it('renders a work with no chapter without an empty chapter line', async () => {
-    mount({ load: vi.fn().mockResolvedValue(entry({ chapterId: null, chapterTitle: null })) });
+  it('renders a work with no unit without an empty unit line', async () => {
+    mount({ load: vi.fn().mockResolvedValue(entry({ unitId: null, unitTitle: null })) });
 
     await waitFor(() => expect(screen.getByTestId('continue-reading-title')).toBeTruthy());
-    expect(screen.queryByTestId('continue-reading-chapter')).toBeNull();
+    expect(screen.queryByTestId('continue-reading-unit')).toBeNull();
   });
 
   it('exposes the percentage to assistive technology, not just visually', async () => {

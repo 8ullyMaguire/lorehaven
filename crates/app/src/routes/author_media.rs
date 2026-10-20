@@ -25,7 +25,7 @@ pub struct PreferencesBody {
 #[derive(Debug, Deserialize)]
 pub struct TargetedBountyBody {
     pub work_id: String,
-    pub chapter_id: Option<String>,
+    pub unit_id: Option<String>,
     pub media_reference_id: Option<String>,
     pub reward: i64,
     pub description: Option<String>,
@@ -116,7 +116,7 @@ pub async fn post_targeted_bounty(
         state.db(),
         &bounty_id,
         &body.work_id,
-        body.chapter_id.as_deref(),
+        body.unit_id.as_deref(),
         body.media_reference_id.as_deref(),
         &account_id,
         body.reward,
@@ -165,7 +165,7 @@ pub async fn list_targeted_bounties(
             json!({
                 "bounty_id": b.id,
                 "work_id": b.work_id,
-                "chapter_id": b.chapter_id,
+                "unit_id": b.unit_id,
                 "media_reference_id": b.media_reference_id,
                 "reward": b.reward,
                 "status": b.status,

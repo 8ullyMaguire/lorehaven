@@ -25,7 +25,7 @@ export type RouteId =
   | 'write'
   | 'work-editor'
   | 'work-read'
-  | 'chapter-read'
+  | 'unit-read'
   | 'history'
   | 'import'
   | 'library'
@@ -146,19 +146,19 @@ export function matchRoute(path: string): RouteMatch {
   }
 
   /*
-   * `/works/<id>` and `/works/<id>/chapters/<chapterId>` are the reader's URLs,
+   * `/works/<id>` and `/works/<id>/units/<unitId>` are the reader's URLs,
    * and the same work URL answers its author with the editing view. The router
    * therefore resolves both to the work route and lets the page decide: which
    * view to render depends on the server's answer, not on the path.
    */
-  const chapterMatch = normalised.match(/^\/works\/([^/]+)\/chapters\/([^/]+)$/);
-  if (chapterMatch) {
+  const unitMatch = normalised.match(/^\/works\/([^/]+)\/units\/([^/]+)$/);
+  if (unitMatch) {
     return {
-      id: 'chapter-read',
+      id: 'unit-read',
       path: normalised,
       params: {
-        workId: decodeURIComponent(chapterMatch[1]),
-        chapterId: decodeURIComponent(chapterMatch[2]),
+        workId: decodeURIComponent(unitMatch[1]),
+        unitId: decodeURIComponent(unitMatch[2]),
       },
     };
   }

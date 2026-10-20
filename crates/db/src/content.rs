@@ -1,4 +1,4 @@
-//! Works, chapters, revisions and publication (spec §4.3, §8).
+//! Works, units, revisions and publication (spec §4.3, §8).
 //!
 //! The rules this module exists to hold:
 //!
@@ -27,7 +27,7 @@ use sqlx::FromRow;
 use darkhold_domain::content::{can_publish_work, publication_readiness, PublicationFacts};
 use darkhold_domain::document::Document;
 use darkhold_domain::policy::{Actor, Decision};
-use darkhold_domain::{AppError, ChapterId, PseudId, PublicationEventId, RevisionId, WorkId};
+use darkhold_domain::{AppError, UnitId, PseudId, PublicationEventId, RevisionId, WorkId};
 
 use crate::identity::now_rfc3339;
 use crate::{sql_owned, Backend, Database};
@@ -185,9 +185,9 @@ impl Work {
     }
 }
 
-/// A chapter row as stored, joined with its current revision's word count.
+/// A unit row as stored, joined with its current revision's word count.
 #[derive(Debug, Clone, FromRow)]
-struct ChapterRow {
+struct UnitRow {
     id: String,
     work_id: String,
     order_key: i64,
@@ -201,16 +201,16 @@ struct ChapterRow {
     version: i64,
 }
 
-/// A chapter.
+/// A unit.
 #[derive(Debug, Clone)]
-pub struct Chapter {
+pub struct Unit {
     /// Identifier.
-    pub id: ChapterId,
+    pub id: UnitId,
     /// The work it belongs to.
     pub work_id: WorkId,
     /// Position within the work, spaced by ten.
     pub order_key: i64,
-    /// Chapter title; an empty string means "untitled".
+    /// Unit title; an empty string means "untitled".
     pub title: String,
     /// The revision a reader is served, while one exists.
     pub current_revision_id: Option<RevisionId>,
@@ -228,8 +228,8 @@ pub struct Chapter {
     pub version: i64,
 }
 
-impl Chapter {
-    /// Whether anything has been written in this chapter.
+impl Unit {
+    /// Whether anything has been written in this unit.
     ///
     /// Word count is the test rather than "a revision exists", because saving
     /// an empty editor creates a revision and that is not a publishable story.
@@ -243,7 +243,7 @@ impl Chapter {
 #[derive(Debug, Clone, FromRow)]
 struct RevisionRow {
     id: String,
-    chapter_id: String,
+    unit_id: String,
     revision_number: i64,
     document_json: String,
     sanitized_html: String,
@@ -260,9 +260,9 @@ struct RevisionRow {
 pub struct Revision {
     /// Identifier.
     pub id: RevisionId,
-    /// The chapter it belongs to.
-    pub chapter_id: ChapterId,
-    /// 1 for the first save of a chapter, increasing from there.
+    /// The unit it belongs to.
+    pub unit_id: UnitId,
+    /// 1 for the first save of a unit, increasing from there.
     pub revision_number: i64,
     /// The canonical editor document, as JSON text.
     pub document_json: String,
@@ -355,8 +355,8 @@ pub struct OwnedWork {
     pub published_at: Option<String>,
     /// Optimistic-concurrency version.
     pub version: i64,
-    /// How many chapters it has.
-    pub chapter_count: i64,
+    /// How many units it has.
+    pub unit_count: i64,
     /// Words across the current revisions.
     pub word_count: i64,
     /// The acting pseud's role on it.
@@ -468,9 +468,9 @@ fn decode_work(row: WorkRow) -> ContentResult<Work> {
     })
 }
 
-fn decode_chapter(row: ChapterRow) -> ContentResult<Chapter> {
-    Ok(Chapter {
-        id: parse_id::<ChapterId>(&row.id, "chapter")?,
+fn decode_unit(row: UnitRow) -> ContentResult<Unit> {
+    Ok(Unit {
+        id: parse_id::<UnitId>(&row.id, "unit")?,
         work_id: parse_id::<WorkId>(&row.work_id, "work")?,
         order_key: row.order_key,
         title: row.title,
@@ -491,7 +491,7 @@ fn decode_chapter(row: ChapterRow) -> ContentResult<Chapter> {
 fn decode_revision(row: RevisionRow) -> ContentResult<Revision> {
     Ok(Revision {
         id: parse_id::<RevisionId>(&row.id, "revision")?,
-        chapter_id: parse_id::<ChapterId>(&row.chapter_id, "chapter")?,
+        unit_id: parse_id::<UnitId>(&row.unit_id, "unit")?,
         revision_number: row.revision_number,
         document_json: row.document_json,
         sanitized_html: row.sanitized_html,
@@ -511,7 +511,7 @@ fn decode_revision(row: RevisionRow) -> ContentResult<Revision> {
 /// Parse a stored identifier, refusing to invent one.
 ///
 /// The rest of the crate defaults a malformed stored id to a fresh UUID; that
-/// is survivable for a pseud, and not survivable for a chapter, because the
+/// is survivable for a pseud, and not survivable for a unit, because the
 /// invented id would then be used to address content.
 fn parse_id<T: std::str::FromStr>(raw: &str, what: &str) -> ContentResult<T> {
     raw.parse::<T>().map_err(|_| {
@@ -530,6 +530,23 @@ pub async fn create_work(
     owner: PseudId,
     title: &str,
     visibility: Option<&str>,
+) -> ContentResult<Work> {
+    create_work_with_discussion_mode(db, owner, title, visibility, None).await
+}
+
+/// Create a work, with the discussion mode the instance chose.
+///
+/// **The mode is the instance's**, and it is applied when the work is created
+/// rather than looked up at read time (spec §13.2): a work's discussion shape
+/// is a decision made when the work appears, and a later change of the
+/// instance's default must not rewrite it. `None` means "the instance's
+/// default", which the caller resolves.
+pub async fn create_work_with_discussion_mode(
+    db: &Database,
+    owner: PseudId,
+    title: &str,
+    visibility: Option<&str>,
+    discussion_mode: Option<&str>,
 ) -> ContentResult<Work> {
     let id = WorkId::new();
     let now = now_rfc3339();
@@ -557,18 +574,19 @@ pub async fn create_work(
     // SQLite cannot do and whose documented workaround has to switch foreign
     // keys off inside a transaction — which SQLite refuses. Migration 0119 says
     // the whole of it.
+    let discussion_mode = discussion_mode.unwrap_or("thread_only");
     let insert_work = db.sql(
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
                             lifecycle, completion, show_public_ratings, format, discussion_mode,
                             created_at, updated_at, version,
                             generated_content_posture)
-         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', 'thread_only', ?, ?, 1,
+         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', ?, ?, ?, 1,
                  COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'allow'))",
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
                             lifecycle, completion, show_public_ratings, format, discussion_mode,
                             created_at, updated_at, version,
                             generated_content_posture)
-         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', 'thread_only', ?, ?, 1,
+         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', $4, $5, $6, 1,
                  COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'allow'))",
     );
 
@@ -588,6 +606,7 @@ pub async fn create_work(
                 .bind(owner.to_string())
                 .bind(title)
                 .bind(visibility)
+                .bind(discussion_mode)
                 .bind(&now)
                 .bind(&now)
                 .execute(&mut *tx)
@@ -608,6 +627,7 @@ pub async fn create_work(
                 .bind(owner.to_string())
                 .bind(title)
                 .bind(visibility)
+                .bind(discussion_mode)
                 .bind(&now)
                 .bind(&now)
                 .execute(&mut *tx)
@@ -661,11 +681,11 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
                 w.published_at AS published_at, w.version AS version,
                 w.ai_training AS ai_training,
                 (w.generated_declared_at IS NOT NULL) AS generated_declared,
-                (SELECT COUNT(*) FROM chapters c
-                  WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS chapter_count,
+                (SELECT COUNT(*) FROM units c
+                  WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS unit_count,
                 (SELECT COALESCE(CAST(SUM(r.word_count) AS BIGINT), 0)
-                   FROM chapters c
-                   JOIN chapter_revisions r ON r.id = c.current_revision_id
+                   FROM units c
+                   JOIN revisions r ON r.id = c.current_revision_id
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count,
                 wc.role AS role
            FROM works w
@@ -677,11 +697,11 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
                 w.published_at, w.version,
                 w.ai_training,
                 (w.generated_declared_at IS NOT NULL) AS generated_declared,
-                (SELECT COUNT(*) FROM chapters c
-                  WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS chapter_count,
+                (SELECT COUNT(*) FROM units c
+                  WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS unit_count,
                 (SELECT COALESCE(SUM(r.word_count), 0)::bigint
-                   FROM chapters c
-                   JOIN chapter_revisions r ON r.id = c.current_revision_id
+                   FROM units c
+                   JOIN revisions r ON r.id = c.current_revision_id
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count,
                 wc.role AS role
            FROM works w
@@ -818,10 +838,10 @@ pub async fn update_work(
         // defect as a level that changed with no trust event (spec §6.7): the
         // record says one thing and the history says another.
         let event_sql = db.sql(
-            "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+            "INSERT INTO publication_events (id, work_id, unit_id, action, actor_pseud_id,
                                              idempotency_key, note, occurred_at)
              VALUES (?, ?, NULL, 'update', ?, NULL, NULL, ?)",
-            "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+            "INSERT INTO publication_events (id, work_id, unit_id, action, actor_pseud_id,
                                              idempotency_key, note, occurred_at)
              VALUES (?::uuid, ?::uuid, NULL, 'update', ?::uuid, NULL, NULL, ?)",
         );
@@ -999,45 +1019,45 @@ pub async fn list_public_works_by_freshness(
 }
 
 // ---------------------------------------------------------------------------
-// Chapters
+// Units
 // ---------------------------------------------------------------------------
 
-const CHAPTER_COLUMNS: &str = "c.id AS id, c.work_id AS work_id, c.order_key AS order_key, \
+const UNIT_COLUMNS: &str = "c.id AS id, c.work_id AS work_id, c.order_key AS order_key, \
     c.title AS title, c.current_revision_id AS current_revision_id, \
     r.word_count AS word_count, \
     r.plain_text AS plain_text, \
     c.created_at AS created_at, c.updated_at AS updated_at, \
     c.version AS version, \
-    (SELECT COUNT(*) FROM chapter_revisions cr WHERE cr.chapter_id = c.id) AS revision_count";
+    (SELECT COUNT(*) FROM revisions cr WHERE cr.unit_id = c.id) AS revision_count";
 
-const CHAPTER_COLUMNS_PG: &str = "c.id::text AS id, c.work_id::text AS work_id, c.order_key, \
+const UNIT_COLUMNS_PG: &str = "c.id::text AS id, c.work_id::text AS work_id, c.order_key, \
     c.title, c.current_revision_id::text AS current_revision_id, \
     r.word_count, \
     r.plain_text, \
     c.created_at, c.updated_at, c.version, \
-    (SELECT COUNT(*) FROM chapter_revisions cr WHERE cr.chapter_id = c.id) AS revision_count";
+    (SELECT COUNT(*) FROM revisions cr WHERE cr.unit_id = c.id) AS revision_count";
 
-/// Chapters of a work in reading order.
-pub async fn chapters_for_work(db: &Database, work: WorkId) -> ContentResult<Vec<Chapter>> {
+/// Units of a work in reading order.
+pub async fn units_for_work(db: &Database, work: WorkId) -> ContentResult<Vec<Unit>> {
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {CHAPTER_COLUMNS}
-               FROM chapters c
-               LEFT JOIN chapter_revisions r ON r.id = c.current_revision_id
+            "SELECT {UNIT_COLUMNS}
+               FROM units c
+               LEFT JOIN revisions r ON r.id = c.current_revision_id
               WHERE c.work_id = ? AND c.deleted_at IS NULL
               ORDER BY c.order_key ASC"
         ),
         format!(
-            "SELECT {CHAPTER_COLUMNS_PG}
-               FROM chapters c
-               LEFT JOIN chapter_revisions r ON r.id = c.current_revision_id
+            "SELECT {UNIT_COLUMNS_PG}
+               FROM units c
+               LEFT JOIN revisions r ON r.id = c.current_revision_id
               WHERE c.work_id::text = ? AND c.deleted_at IS NULL
               ORDER BY c.order_key ASC"
         ),
     );
 
-    let rows: Vec<ChapterRow> = match db.backend() {
+    let rows: Vec<UnitRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(work.to_string())
@@ -1052,28 +1072,28 @@ pub async fn chapters_for_work(db: &Database, work: WorkId) -> ContentResult<Vec
         }
     };
 
-    rows.into_iter().map(decode_chapter).collect()
+    rows.into_iter().map(decode_unit).collect()
 }
 
-/// Load a single chapter.
-pub async fn find_chapter(db: &Database, id: ChapterId) -> ContentResult<Option<Chapter>> {
+/// Load a single unit.
+pub async fn find_unit(db: &Database, id: UnitId) -> ContentResult<Option<Unit>> {
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {CHAPTER_COLUMNS}
-               FROM chapters c
-               LEFT JOIN chapter_revisions r ON r.id = c.current_revision_id
+            "SELECT {UNIT_COLUMNS}
+               FROM units c
+               LEFT JOIN revisions r ON r.id = c.current_revision_id
               WHERE c.id = ? AND c.deleted_at IS NULL"
         ),
         format!(
-            "SELECT {CHAPTER_COLUMNS_PG}
-               FROM chapters c
-               LEFT JOIN chapter_revisions r ON r.id = c.current_revision_id
+            "SELECT {UNIT_COLUMNS_PG}
+               FROM units c
+               LEFT JOIN revisions r ON r.id = c.current_revision_id
               WHERE c.id::text = ? AND c.deleted_at IS NULL"
         ),
     );
 
-    let row: Option<ChapterRow> = match db.backend() {
+    let row: Option<UnitRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(id.to_string())
@@ -1088,25 +1108,25 @@ pub async fn find_chapter(db: &Database, id: ChapterId) -> ContentResult<Option<
         }
     };
 
-    row.map(decode_chapter).transpose()
+    row.map(decode_unit).transpose()
 }
 
-/// Append a chapter to the end of a work.
+/// Append a unit to the end of a work.
 ///
-/// Positions are spaced by ten so that inserting between two chapters later is
+/// Positions are spaced by ten so that inserting between two units later is
 /// a single write rather than a renumbering of everything after it.
-pub async fn create_chapter(db: &Database, work: WorkId, title: &str) -> Result<Chapter> {
-    let id = ChapterId::new();
+pub async fn create_unit(db: &Database, work: WorkId, title: &str) -> Result<Unit> {
+    let id = UnitId::new();
     let now = now_rfc3339();
 
     let next_sql = db.sql(
-        "SELECT COALESCE(MAX(order_key), 0) + 10 FROM chapters WHERE work_id = ?",
-        "SELECT COALESCE(MAX(order_key), 0) + 10 FROM chapters WHERE work_id::text = ?",
+        "SELECT COALESCE(MAX(order_key), 0) + 10 FROM units WHERE work_id = ?",
+        "SELECT COALESCE(MAX(order_key), 0) + 10 FROM units WHERE work_id::text = ?",
     );
     let insert_sql = db.sql(
-        "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at, version)
+        "INSERT INTO units (id, work_id, order_key, title, created_at, updated_at, version)
          VALUES (?, ?, ?, ?, ?, ?, 1)",
-        "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at, version)
+        "INSERT INTO units (id, work_id, order_key, title, created_at, updated_at, version)
          VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, 1)",
     );
 
@@ -1149,24 +1169,24 @@ pub async fn create_chapter(db: &Database, work: WorkId, title: &str) -> Result<
         }
     }
 
-    find_chapter(db, id)
+    find_unit(db, id)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("chapter vanished after creation"))
+        .ok_or_else(|| anyhow::anyhow!("unit vanished after creation"))
 }
 
-/// Rename a chapter, if the caller's version is current.
-pub async fn update_chapter(
+/// Rename a unit, if the caller's version is current.
+pub async fn update_unit(
     db: &Database,
-    id: ChapterId,
+    id: UnitId,
     expected_version: i64,
     title: Option<&str>,
 ) -> Result<bool> {
     let now = now_rfc3339();
     let sql = db.sql(
-        "UPDATE chapters
+        "UPDATE units
             SET title = COALESCE(?, title), updated_at = ?, version = version + 1
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
-        "UPDATE chapters
+        "UPDATE units
             SET title = COALESCE(?, title), updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
@@ -1193,17 +1213,17 @@ pub async fn update_chapter(
     Ok(affected > 0)
 }
 
-/// Mark a chapter deleted.
+/// Mark a unit deleted.
 ///
-/// Chapters are soft-deleted because a reader's stored position may reference
-/// one, and because a revision history that outlives the chapter is what makes
+/// Units are soft-deleted because a reader's stored position may reference
+/// one, and because a revision history that outlives the unit is what makes
 /// an accidental deletion recoverable.
-pub async fn delete_chapter(db: &Database, id: ChapterId) -> Result<bool> {
+pub async fn delete_unit(db: &Database, id: UnitId) -> Result<bool> {
     let now = now_rfc3339();
     let sql = db.sql(
-        "UPDATE chapters SET deleted_at = ?, updated_at = ?, version = version + 1
+        "UPDATE units SET deleted_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND deleted_at IS NULL",
-        "UPDATE chapters SET deleted_at = ?, updated_at = ?, version = version + 1
+        "UPDATE units SET deleted_at = ?, updated_at = ?, version = version + 1
           WHERE id::text = ? AND deleted_at IS NULL",
     );
 
@@ -1227,30 +1247,30 @@ pub async fn delete_chapter(db: &Database, id: ChapterId) -> Result<bool> {
     Ok(affected > 0)
 }
 
-/// Reorder the chapters of a work.
+/// Reorder the units of a work.
 ///
-/// The supplied list must be exactly the work's live chapters; anything else is
+/// The supplied list must be exactly the work's live units; anything else is
 /// refused rather than partially applied, so a client with a stale list cannot
-/// silently drop a chapter that another tab added.
-pub async fn reorder_chapters(
+/// silently drop a unit that another tab added.
+pub async fn reorder_units(
     db: &Database,
     work: WorkId,
-    ordered: &[ChapterId],
+    ordered: &[UnitId],
 ) -> ContentResult<bool> {
-    let existing = chapters_for_work(db, work).await?;
-    let existing_ids: Vec<ChapterId> = existing.iter().map(|chapter| chapter.id).collect();
+    let existing = units_for_work(db, work).await?;
+    let existing_ids: Vec<UnitId> = existing.iter().map(|unit| unit.id).collect();
 
     if existing_ids.len() != ordered.len() || !ordered.iter().all(|id| existing_ids.contains(id)) {
         return Err(ContentError::Refused(AppError::field(
-            "chapters",
-            "The chapter list changed since this page was loaded. Reload and try again.",
+            "units",
+            "The unit list changed since this page was loaded. Reload and try again.",
         )));
     }
 
     let now = now_rfc3339();
     let sql = db.sql(
-        "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id = ?",
-        "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id::text = ?",
+        "UPDATE units SET order_key = ?, updated_at = ? WHERE id = ?",
+        "UPDATE units SET order_key = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -1291,10 +1311,10 @@ pub async fn reorder_chapters(
 // Revisions
 // ---------------------------------------------------------------------------
 
-/// Append a revision to a chapter, making it the current one.
+/// Append a revision to a unit, making it the current one.
 ///
-/// Three writes in one transaction: the immutable revision, the chapter's
-/// pointer to it, and an outbox row for the indexer. A chapter whose pointer
+/// Three writes in one transaction: the immutable revision, the unit's
+/// pointer to it, and an outbox row for the indexer. A unit whose pointer
 /// did not move, or an indexer that never heard about it, would be exactly the
 /// kind of half-applied state spec §8.4 forbids.
 ///
@@ -1304,7 +1324,7 @@ pub async fn reorder_chapters(
 /// the version it was racing.
 pub async fn append_revision(
     db: &Database,
-    chapter: ChapterId,
+    unit: UnitId,
     work: WorkId,
     author: PseudId,
     input: &RevisionInput,
@@ -1315,32 +1335,32 @@ pub async fn append_revision(
     let now = now_rfc3339();
 
     let next_number_sql = db.sql(
-        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM chapter_revisions WHERE chapter_id = ?",
-        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM chapter_revisions WHERE chapter_id::text = ?",
+        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM revisions WHERE unit_id = ?",
+        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM revisions WHERE unit_id::text = ?",
     );
     let insert_sql = db.sql(
-        "INSERT INTO chapter_revisions
-             (id, chapter_id, revision_number, document_json, sanitized_html, plain_text,
+        "INSERT INTO revisions
+             (id, unit_id, revision_number, document_json, sanitized_html, plain_text,
               word_count, note, created_by_pseud_id, restored_from_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        "INSERT INTO chapter_revisions
-             (id, chapter_id, revision_number, document_json, sanitized_html, plain_text,
+        "INSERT INTO revisions
+             (id, unit_id, revision_number, document_json, sanitized_html, plain_text,
               word_count, note, created_by_pseud_id, restored_from_id, created_at)
          VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?, ?::uuid, ?::uuid, ?)",
     );
     let move_pointer_sql = db.sql(
-        "UPDATE chapters
+        "UPDATE units
             SET current_revision_id = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
-        "UPDATE chapters
+        "UPDATE units
             SET current_revision_id = ?::uuid, updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let move_pointer_unchecked_sql = db.sql(
-        "UPDATE chapters
+        "UPDATE units
             SET current_revision_id = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND deleted_at IS NULL",
-        "UPDATE chapters
+        "UPDATE units
             SET current_revision_id = ?::uuid, updated_at = ?, version = version + 1
           WHERE id::text = ? AND deleted_at IS NULL",
     );
@@ -1350,32 +1370,32 @@ pub async fn append_revision(
     );
     let outbox_sql = db.sql(
         "INSERT INTO outbox_events (id, topic, payload, dedupe_key, created_at, available_at, attempts)
-         VALUES (?, 'chapter.revised', ?, NULL, ?, ?, 0)",
+         VALUES (?, 'unit.revised', ?, NULL, ?, ?, 0)",
         "INSERT INTO outbox_events (id, topic, payload, dedupe_key, created_at, available_at, attempts)
-         VALUES (?::uuid, 'chapter.revised', ?, NULL, ?, ?, 0)",
+         VALUES (?::uuid, 'unit.revised', ?, NULL, ?, ?, 0)",
     );
     let version_sql = db.sql(
-        "SELECT version FROM chapters WHERE id = ?",
-        "SELECT version FROM chapters WHERE id::text = ?",
+        "SELECT version FROM units WHERE id = ?",
+        "SELECT version FROM units WHERE id::text = ?",
     );
 
-    let payload = serde_json::json!({ "chapter_id": chapter, "revision_id": id, "work_id": work })
+    let payload = serde_json::json!({ "unit_id": unit, "revision_id": id, "work_id": work })
         .to_string();
 
     macro_rules! write_revision {
         ($tx:expr) => {{
             let mut tx = $tx;
             let number: i64 = sqlx::query_scalar(&next_number_sql)
-                .bind(chapter.to_string())
+                .bind(unit.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
 
-            // The revision is inserted first: `chapters.current_revision_id`
-            // references it, so pointing the chapter at a row that does not
+            // The revision is inserted first: `units.current_revision_id`
+            // references it, so pointing the unit at a row that does not
             // exist yet would violate the foreign key.
             sqlx::query(&insert_sql)
                 .bind(id.to_string())
-                .bind(chapter.to_string())
+                .bind(unit.to_string())
                 .bind(number)
                 .bind(&input.document_json)
                 .bind(&input.sanitized_html)
@@ -1392,7 +1412,7 @@ pub async fn append_revision(
                 sqlx::query(&move_pointer_sql)
                     .bind(id.to_string())
                     .bind(&now)
-                    .bind(chapter.to_string())
+                    .bind(unit.to_string())
                     .bind(expected)
                     .execute(&mut *tx)
                     .await?
@@ -1401,7 +1421,7 @@ pub async fn append_revision(
                 sqlx::query(&move_pointer_unchecked_sql)
                     .bind(id.to_string())
                     .bind(&now)
-                    .bind(chapter.to_string())
+                    .bind(unit.to_string())
                     .execute(&mut *tx)
                     .await?
                     .rows_affected()
@@ -1412,7 +1432,7 @@ pub async fn append_revision(
                 // is dropped rather than committed: a stale save writes nothing
                 // at all, not even a revision nobody asked for.
                 let actual: Option<i64> = sqlx::query_scalar(&version_sql)
-                    .bind(chapter.to_string())
+                    .bind(unit.to_string())
                     .fetch_optional(&mut *tx)
                     .await?;
                 return Err(ContentError::Refused(AppError::RevisionConflict {
@@ -1458,14 +1478,14 @@ pub async fn append_revision(
 /// Load a revision.
 pub async fn find_revision(db: &Database, id: RevisionId) -> ContentResult<Option<Revision>> {
     let sql = db.sql(
-        "SELECT id, chapter_id, revision_number, document_json, sanitized_html, plain_text,
+        "SELECT id, unit_id, revision_number, document_json, sanitized_html, plain_text,
                 word_count, note, created_by_pseud_id, restored_from_id, created_at
-           FROM chapter_revisions WHERE id = ?",
-        "SELECT id::text AS id, chapter_id::text AS chapter_id, revision_number, document_json,
+           FROM revisions WHERE id = ?",
+        "SELECT id::text AS id, unit_id::text AS unit_id, revision_number, document_json,
                 sanitized_html, plain_text, word_count, note,
                 created_by_pseud_id::text AS created_by_pseud_id,
                 restored_from_id::text AS restored_from_id, created_at
-           FROM chapter_revisions WHERE id::text = ?",
+           FROM revisions WHERE id::text = ?",
     );
 
     let row: Option<RevisionRow> = match db.backend() {
@@ -1486,37 +1506,37 @@ pub async fn find_revision(db: &Database, id: RevisionId) -> ContentResult<Optio
     row.map(decode_revision).transpose()
 }
 
-/// A chapter's revisions, newest first.
-pub async fn revisions_for_chapter(
+/// A unit's revisions, newest first.
+pub async fn revisions_for_unit(
     db: &Database,
-    chapter: ChapterId,
+    unit: UnitId,
 ) -> Result<Vec<RevisionSummary>> {
     let sql = db.sql(
         "SELECT r.id AS id, r.revision_number AS revision_number, r.word_count AS word_count,
                 r.note AS note, r.created_at AS created_at, r.restored_from_id AS restored_from_id,
                 p.handle AS author_handle
-           FROM chapter_revisions r
+           FROM revisions r
            JOIN pseuds p ON p.id = r.created_by_pseud_id
-          WHERE r.chapter_id = ?
+          WHERE r.unit_id = ?
           ORDER BY r.revision_number DESC",
         "SELECT r.id::text AS id, r.revision_number, r.word_count, r.note, r.created_at,
                 r.restored_from_id::text AS restored_from_id, p.handle AS author_handle
-           FROM chapter_revisions r
+           FROM revisions r
            JOIN pseuds p ON p.id = r.created_by_pseud_id
-          WHERE r.chapter_id::text = ?
+          WHERE r.unit_id::text = ?
           ORDER BY r.revision_number DESC",
     );
 
     let rows: Vec<RevisionSummary> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
-                .bind(chapter.to_string())
+                .bind(unit.to_string())
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
             sqlx::query_as(&sql)
-                .bind(chapter.to_string())
+                .bind(unit.to_string())
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
@@ -1531,16 +1551,16 @@ pub async fn revisions_for_chapter(
 /// records where it came from (ADR 0002, spec §8 acceptance).
 pub async fn restore_revision(
     db: &Database,
-    chapter: Chapter,
+    unit: Unit,
     revision: RevisionId,
     author: PseudId,
 ) -> ContentResult<Revision> {
     let source = find_revision(db, revision).await?;
 
-    // A revision belonging to another chapter is not found, rather than found
+    // A revision belonging to another unit is not found, rather than found
     // and refused: the caller learns nothing about content it cannot reach.
     let source = source
-        .filter(|revision| revision.chapter_id == chapter.id)
+        .filter(|revision| revision.unit_id == unit.id)
         .ok_or(ContentError::Refused(AppError::NotFound {
             resource: "revision",
         }))?;
@@ -1555,11 +1575,11 @@ pub async fn restore_revision(
 
     // Restoring is not an optimistic-concurrency operation: the caller picked a
     // revision from the history, and the new revision lands on top of whatever
-    // the chapter holds now.
+    // the unit holds now.
     append_revision(
         db,
-        chapter.id,
-        chapter.work_id,
+        unit.id,
+        unit.work_id,
         author,
         &input,
         None,
@@ -1572,23 +1592,23 @@ pub async fn restore_revision(
 // Publication
 // ---------------------------------------------------------------------------
 
-/// How many chapters a work has, and how many of them are not empty.
-pub async fn chapter_facts(db: &Database, work: WorkId) -> Result<(usize, usize)> {
-    let chapters = chapters_for_work(db, work).await?;
-    let with_content = chapters
+/// How many units a work has, and how many of them are not empty.
+pub async fn unit_facts(db: &Database, work: WorkId) -> Result<(usize, usize)> {
+    let units = units_for_work(db, work).await?;
+    let with_content = units
         .iter()
-        .filter(|chapter| chapter.has_content())
+        .filter(|unit| unit.has_content())
         .count();
-    Ok((chapters.len(), with_content))
+    Ok((units.len(), with_content))
 }
 
 /// Everything a publication decision needs, loaded from storage.
 pub async fn publication_facts<'a>(db: &Database, work: &'a Work) -> Result<PublicationFacts<'a>> {
-    let (count, with_content) = chapter_facts(db, work.id).await?;
+    let (count, with_content) = unit_facts(db, work.id).await?;
     Ok(PublicationFacts {
         title: &work.title,
-        chapter_count: count,
-        chapters_with_content: with_content,
+        unit_count: count,
+        units_with_content: with_content,
         lifecycle: work.lifecycle_state(),
     })
 }
@@ -1633,10 +1653,10 @@ pub async fn publish_work(
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let event_sql = db.sql(
-        "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+        "INSERT INTO publication_events (id, work_id, unit_id, action, actor_pseud_id,
                                          idempotency_key, note, occurred_at)
          VALUES (?, ?, NULL, 'publish', ?, ?, NULL, ?)",
-        "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+        "INSERT INTO publication_events (id, work_id, unit_id, action, actor_pseud_id,
                                          idempotency_key, note, occurred_at)
          VALUES (?::uuid, ?::uuid, NULL, 'publish', ?::uuid, ?, NULL, ?)",
     );
@@ -1766,10 +1786,10 @@ pub async fn withdraw_work(
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let event_sql = db.sql(
-        "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+        "INSERT INTO publication_events (id, work_id, unit_id, action, actor_pseud_id,
                                          idempotency_key, note, occurred_at)
          VALUES (?, ?, NULL, 'withdraw', ?, ?, NULL, ?)",
-        "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+        "INSERT INTO publication_events (id, work_id, unit_id, action, actor_pseud_id,
                                          idempotency_key, note, occurred_at)
          VALUES (?::uuid, ?::uuid, NULL, 'withdraw', ?::uuid, ?, NULL, ?)",
     );
@@ -1949,9 +1969,9 @@ pub async fn wipe_content(db: &Database) -> Result<()> {
         "DELETE FROM outbox_events",
         "DELETE FROM publication_events",
         "DELETE FROM collaboration_invites",
-        "UPDATE chapters SET current_revision_id = NULL",
-        "DELETE FROM chapter_revisions",
-        "DELETE FROM chapters",
+        "UPDATE units SET current_revision_id = NULL",
+        "DELETE FROM revisions",
+        "DELETE FROM units",
         "DELETE FROM work_contributors",
         "DELETE FROM works",
     ];
@@ -2032,7 +2052,7 @@ mod tests {
 
     #[test]
     fn a_malformed_stored_identifier_is_a_fault_rather_than_an_invention() {
-        let error = parse_id::<ChapterId>("not-a-uuid", "chapter").expect_err("must refuse");
+        let error = parse_id::<UnitId>("not-a-uuid", "unit").expect_err("must refuse");
         assert!(matches!(error, ContentError::Fault(_)));
     }
 }

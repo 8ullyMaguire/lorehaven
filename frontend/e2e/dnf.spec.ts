@@ -54,17 +54,17 @@ async function signUp(page: Page, base: string): Promise<void> {
   await expectSignedIn(page);
 }
 
-/** Publish a one-chapter work so there is a page to mark. Returns its id. */
+/** Publish a one-unit work so there is a page to mark. Returns its id. */
 async function publish(page: Page, title: string): Promise<string> {
   await page.goto('/write');
   await page.fill('input[id^=field-]', title);
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   await page.locator('.tiptap.ProseMirror').click();
-  await page.keyboard.type(`A chapter for ${title}. It has enough words to be a chapter.`);
+  await page.keyboard.type(`A unit for ${title}. It has enough words to be a unit.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -174,21 +174,21 @@ test('opting in shares the REASON, and still not the note', async ({ page }) => 
   await page.goto(`/works/${workId}`);
   await page.getByTestId('dnf-open').click();
   await page.getByRole('radio', { name: /author abandoned it/i }).check();
-  await page.getByLabel(/note to yourself/i).fill('gave up in chapter two');
+  await page.getByLabel(/note to yourself/i).fill('gave up in unit two');
   await page.getByLabel(/share the reason with the author/i).check();
   await page.getByRole('button', { name: /^save$/i }).click();
   await expect(page.getByTestId('dnf-current')).toBeVisible();
 
   const row = await storedDnf(page, workId);
   expect(row.is_public).toBe(true);
-  expect(row.note).toBe('gave up in chapter two');
+  expect(row.note).toBe('gave up in unit two');
 
   // The reason reaches the author's aggregate; the note does not. This is the whole design
   // of 0073: a structured reason is countable, a reader's words are not.
   const agg = await page.request.get(`/api/v1/works/${workId}/dnf/reasons`);
   const body = await agg.json();
   expect(body.reasons).toEqual([{ reason: 'abandoned_by_author', count: 1 }]);
-  expect(JSON.stringify(body)).not.toContain('gave up in chapter two');
+  expect(JSON.stringify(body)).not.toContain('gave up in unit two');
 });
 
 test('the aggregate is rendered with a correct singular', async ({ page }) => {

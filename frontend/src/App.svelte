@@ -261,9 +261,9 @@
     } catch {
       // A browser that cannot keep files has nothing to offer about them.
     }
-    // The chapter cache goes unconditionally, and is not offered: those responses
+    // The unit cache goes unconditionally, and is not offered: those responses
     // are the reader's own content that they never chose to keep, and a cached
-    // chapter left behind for whoever uses this browser next is a leak. The
+    // unit left behind for whoever uses this browser next is a leak. The
     // exported files above are different — they *were* chosen, which is why the
     // reader is asked.
     navigator.serviceWorker?.controller?.postMessage({ type: 'clear-reads' });
@@ -460,8 +460,8 @@
     <WorkEditor workId={route.params?.workId ?? ''} />
   {:else if route.id === 'work-read'}
     <WorkPage workId={route.params?.workId ?? ''} />
-  {:else if route.id === 'chapter-read'}
-    <Reader workId={route.params?.workId ?? ''} chapterId={route.params?.chapterId ?? ''} />
+  {:else if route.id === 'unit-read'}
+    <Reader workId={route.params?.workId ?? ''} unitId={route.params?.unitId ?? ''} />
   {:else if route.id === 'history'}
     <History />
   {:else if route.id === 'import'}

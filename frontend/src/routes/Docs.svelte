@@ -5,7 +5,7 @@
    * Content comes from the bundled registry (`../lib/docs`) — plain
    * markdown written for the lowest common denominator, rendered with
    * `marked`. Markdown here is authored in-repo (trusted content, like the
-   * server-sanitized chapter HTML the Reader renders); user content never
+   * server-sanitized unit HTML the Reader renders); user content never
    * passes through this path.
    */
   import { marked } from 'marked';

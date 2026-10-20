@@ -44,7 +44,7 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Debug, Deserialize)]
 struct SpoilerScopeBody {
-    chapter: Option<i64>,
+    unit: Option<i64>,
 }
 
 async fn put_spoiler_scope(
@@ -66,10 +66,10 @@ async fn put_spoiler_scope(
     {
         return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
-    spoilers::set_topic_spoiler_scope(state.db(), &id, body.chapter)
+    spoilers::set_topic_spoiler_scope(state.db(), &id, body.unit)
         .await
         .map_err(internal)?;
-    Ok(Json(json!({ "spoiler_scope_chapter": body.chapter })))
+    Ok(Json(json!({ "spoiler_scope_unit": body.unit })))
 }
 
 // ---------------------------------------------------------------------------
@@ -84,12 +84,12 @@ async fn get_progress(
     let progress = spoilers::get_reader_progress(state.db(), &user.account_id.to_string(), &id)
         .await
         .map_err(internal)?;
-    Ok(Json(json!({ "last_chapter": progress.unwrap_or(0) })))
+    Ok(Json(json!({ "last_unit": progress.unwrap_or(0) })))
 }
 
 #[derive(Debug, Deserialize)]
 struct ProgressBody {
-    last_chapter: i64,
+    last_unit: i64,
 }
 
 async fn put_progress(
@@ -102,11 +102,11 @@ async fn put_progress(
         state.db(),
         &user.account_id.to_string(),
         &id,
-        body.last_chapter,
+        body.last_unit,
     )
     .await
     .map_err(internal)?;
-    Ok(Json(json!({ "last_chapter": body.last_chapter })))
+    Ok(Json(json!({ "last_unit": body.last_unit })))
 }
 
 // ---------------------------------------------------------------------------

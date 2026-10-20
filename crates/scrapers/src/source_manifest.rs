@@ -46,8 +46,8 @@ pub struct SourceManifest {
     pub rate_limit_per_second: f64,
     /// `/works/{id}` — the pattern for a work's page.
     pub work_pattern: String,
-    /// `/works/{id}/chapters/{num}` — the pattern for one chapter.
-    pub chapter_pattern: String,
+    /// `/works/{id}/units/{num}` — the pattern for one unit.
+    pub unit_pattern: String,
     pub selectors: Selectors,
     pub pagination: Pagination,
     pub auth: Auth,
@@ -68,7 +68,7 @@ pub struct Selectors {
 /// How the adapter walks from one page to the next.
 ///
 /// `None` is a real value rather than an absent field: a source with 40,000
-/// chapters and no pagination needs a single, reachable chapter list, and that is
+/// units and no pagination needs a single, reachable unit list, and that is
 /// a different thing from an adapter whose pagination selector silently matches
 /// nothing. Naming both makes the difference reviewable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -243,8 +243,8 @@ impl SourceManifest {
         if !self.work_pattern.contains("{id}") {
             problems.push("work_pattern must contain `{id}`".to_string());
         }
-        if !self.chapter_pattern.contains("{id}") {
-            problems.push("chapter_pattern must contain `{id}`".to_string());
+        if !self.unit_pattern.contains("{id}") {
+            problems.push("unit_pattern must contain `{id}`".to_string());
         }
 
         let selectors = match compile_selectors(&self.selectors) {
@@ -371,12 +371,12 @@ name: "Example Archive"
 base_url: "https://example-archive.org"
 rate_limit_per_second: 2
 work_pattern: "/works/{id}"
-chapter_pattern: "/works/{id}/chapters/{num}"
+unit_pattern: "/works/{id}/units/{num}"
 selectors:
   title: "h1.work-title"
   author: ".byline a"
   summary: ".summary blockquote"
-  body: ".chapter-content"
+  body: ".unit-content"
   tags: ".tags li"
   word_count: ".stats .words"
   date_published: "meta[property='article:published_time']"
@@ -395,7 +395,7 @@ auth:
     fn the_specs_own_example_manifest_parses() {
         let m = manifest();
         assert_eq!(m.source_id, "example-archive");
-        assert_eq!(m.selectors.body, ".chapter-content");
+        assert_eq!(m.selectors.body, ".unit-content");
         assert_eq!(m.auth, Auth::None);
         assert_eq!(
             m.pagination,
@@ -440,8 +440,8 @@ auth:
     #[test]
     fn an_unknown_selector_key_is_refused() {
         let text = SPEC_EXAMPLE.replace(
-            "  body: \".chapter-content\"",
-            "  body: \".chapter-content\"\n  bodyy: \".nope\"",
+            "  body: \".unit-content\"",
+            "  body: \".unit-content\"\n  bodyy: \".nope\"",
         );
         let err = serde_yaml::from_str::<SourceManifest>(&text).unwrap_err();
         assert!(err.to_string().contains("bodyy"), "{err}");

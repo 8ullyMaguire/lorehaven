@@ -9,7 +9,7 @@
 //!   * `reading_status` keys on `account_id`, the other four on `work_id` or a
 //!     viewer identity — so a typo there yields 0 finishers and a multiplier of
 //!     exactly 1.0x, which is indistinguishable from a genuinely mediocre work.
-//!   * `work_view_log` has no uniqueness on the reader, so a repeated chapter view
+//!   * `work_view_log` has no uniqueness on the reader, so a repeated unit view
 //!     counts once via `COUNT(DISTINCT viewer_hash)` and would count N times
 //!     without the DISTINCT.
 //!   * the demand multiplier must not reach the ledger, or §0.3's secret becomes

@@ -54,7 +54,7 @@ fn a_work_page_is_read_for_everything_it_states() {
     // The size line, read by unit because the two recorded shapes differ and
     // because its thousands separator is a non-breaking space.
     assert_eq!(work.word_count, Some(77_507));
-    assert_eq!(work.chapters.len(), 24);
+    assert_eq!(work.units.len(), 24);
     assert_eq!(work.tags.len(), 35);
     assert_eq!(work.tags[0], "AU");
 
@@ -70,18 +70,18 @@ fn the_part_list_is_in_the_pages_order_and_carries_the_sites_own_ids() {
         .unwrap();
 
     // Ordinals are one-based and follow the page, which is publication order.
-    assert_eq!(work.chapters[0].ordinal, 1);
-    assert_eq!(work.chapters[23].ordinal, 24);
-    assert_eq!(work.chapters[0].source_chapter_key, "35183469");
-    assert_eq!(work.chapters[0].title, "Глава 1. Часть I. Незваный гость");
+    assert_eq!(work.units[0].ordinal, 1);
+    assert_eq!(work.units[23].ordinal, 24);
+    assert_eq!(work.units[0].source_unit_key, "35183469");
+    assert_eq!(work.units[0].title, "Глава 1. Часть I. Незваный гость");
 
     // The "next chapter" navigation links on the same page are the same shape
     // as the list's, so a selector that collected every `a.part-link` would put
     // a duplicate in the list. The keys are therefore unique.
     let mut keys: Vec<&str> = work
-        .chapters
+        .units
         .iter()
-        .map(|chapter| chapter.source_chapter_key.as_str())
+        .map(|chapter| chapter.source_unit_key.as_str())
         .collect();
     let count = keys.len();
     keys.sort_unstable();
@@ -116,7 +116,7 @@ fn a_finished_work_says_so_and_its_size_line_has_the_other_shape() {
     // `24 страницы, 8 122 слова, 4 части` — no plan prefix, and the word form is
     // `слова` rather than `слов`.
     assert_eq!(work.word_count, Some(8_122));
-    assert_eq!(work.chapters.len(), 4);
+    assert_eq!(work.units.len(), 4);
     assert_eq!(work.tags.len(), 10);
     assert_eq!(work.summary, "А, может, стоило поговорить?");
 }
@@ -151,7 +151,7 @@ fn a_part_page_states_its_own_address_and_is_read_for_its_prose() {
         .parse_chapter(&fixture("chapter-1.html"), &work, "35183469")
         .expect("the recorded part page parses");
 
-    assert_eq!(chapter.source_chapter_key, "35183469");
+    assert_eq!(chapter.source_unit_key, "35183469");
     assert_eq!(chapter.ordinal, 1);
     assert_eq!(chapter.title, "Глава 1. Часть I. Незваный гость");
     assert!(!chapter.content_html.is_empty());
@@ -263,8 +263,8 @@ fn every_address_this_adapter_asks_for_is_one_its_robots_txt_allows() {
         .unwrap();
 
     let mut asked = vec![work.source_url.clone()];
-    for chapter in &work.chapters {
-        asked.push(adapter().part_url(&work.source_work_key, &chapter.source_chapter_key));
+    for chapter in &work.units {
+        asked.push(adapter().part_url(&work.source_work_key, &chapter.source_unit_key));
     }
 
     // A decorated address — which is what the site's own work links are — is

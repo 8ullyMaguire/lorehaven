@@ -42,8 +42,8 @@
       await addScheduleSection(topicId, {
         position: sections.length + 1,
         title: newTitle,
-        chapter_start: newStart,
-        chapter_end: newEnd,
+        unit_start: newStart,
+        unit_end: newEnd,
         unlocks_at: newUnlocks,
       });
       newTitle = '';
@@ -71,8 +71,8 @@
       {#each sections as section (section.position)}
         <li>
           <strong>{section.title}</strong>
-          <span class="chapters">
-            ch. {section.chapter_start}–{section.chapter_end}
+          <span class="units">
+            ch. {section.unit_start}–{section.unit_end}
           </span>
           {#if section.unlocks_at}
             <span class="unlocks">
@@ -115,7 +115,7 @@
   li {
     margin-bottom: 0.5rem;
   }
-  .chapters {
+  .units {
     margin-left: 0.5rem;
     color: var(--text-muted, #666);
   }

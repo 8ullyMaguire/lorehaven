@@ -180,8 +180,8 @@ fn render_statement(
     // integers on both sides, so the aggregate is coalesced to 0 either way.
     let select = format!(
         "SELECT {id_expr}, works.title, pseuds.handle AS author_handle, \
-         (SELECT COALESCE({sum_expr}, 0) FROM chapters c \
-          JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
+         (SELECT COALESCE({sum_expr}, 0) FROM units c \
+          JOIN revisions cr ON cr.id = c.current_revision_id \
           WHERE c.work_id = works.id AND c.deleted_at IS NULL) AS word_count, \
          COUNT(works_index_terms.term) AS score \
          FROM works \

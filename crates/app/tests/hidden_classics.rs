@@ -12,7 +12,7 @@
 //!
 //! The rules that need proving, each with the fixture that only it can fail:
 //!
-//!   * quality is completion over DISTINCT readers — a chapter opened four times is
+//!   * quality is completion over DISTINCT readers — a unit opened four times is
 //!     one reader, and counting rows would inflate the denominator;
 //!   * reach is log-scaled, so the strategy returns *ranked* works rather than only
 //!     works nobody has seen;
@@ -271,7 +271,7 @@ async fn a_reader_who_opened_a_work_twice_is_one_reader_not_two() {
     // `COUNT(DISTINCT v.viewer_hash)` → `COUNT(v.viewer_hash)` survived the first
     // mutation pass, because every other fixture gives each reader exactly one view row.
     //
-    // The failure it hides is the whole denominator: a reader who reopens a chapter
+    // The failure it hides is the whole denominator: a reader who reopens a unit
     // inflates the reach count, which lowers the score, which pushes a genuinely
     // well-read work down the ranking. Repeat views are legal and realistic — the key is
     // (work_id, viewer_hash, viewed_at), so they only need a different timestamp.

@@ -266,7 +266,7 @@ async fn check_one(
     // against the page's own fields rather than a structured response.
     //
     // The class is a *per-fetch parameter*, not a policy field, and that is
-    // §11.5's own design: a URL that looks like a chapter fetched as `Metadata`
+    // §11.5's own design: a URL that looks like a unit fetched as `Metadata`
     // has to be bounded as a metadata fetch, so the declaration travels with
     // the call rather than being inferred from the path or pinned to the
     // fetcher. `get_declared` exists for exactly this caller.

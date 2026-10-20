@@ -238,16 +238,16 @@ async fn create_work(client: &mut Client, title: &str) -> Value {
     body
 }
 
-async fn add_chapter(client: &mut Client, work: &str, title: &str) -> (String, i64) {
+async fn add_unit(client: &mut Client, work: &str, title: &str) -> (String, i64) {
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work}/chapters"),
             json!({ "title": title }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
     (
-        body["id"].as_str().expect("chapter id").to_owned(),
+        body["id"].as_str().expect("unit id").to_owned(),
         body["version"].as_i64().expect("version"),
     )
 }
@@ -262,15 +262,15 @@ fn document(text: &str) -> Value {
     })
 }
 
-async fn save_chapter(
+async fn save_unit(
     client: &mut Client,
-    chapter: &str,
+    unit: &str,
     version: i64,
     text: &str,
 ) -> (StatusCode, Value) {
     client
         .patch(
-            &format!("/api/v1/chapters/{chapter}"),
+            &format!("/api/v1/chapters/{unit}"),
             json!({ "expected_version": version, "document": document(text) }),
         )
         .await
@@ -286,21 +286,21 @@ async fn publish(client: &mut Client, work: &str, version: i64) -> (StatusCode, 
 }
 
 // ---------------------------------------------------------------------------
-// A visitor can read a published chapter, and a draft is a 404 to a stranger
+// A visitor can read a published unit, and a draft is a 404 to a stranger
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_visitor_can_read_a_published_chapter() {
+async fn a_visitor_can_read_a_published_unit() {
     let harness = Harness::new("visitor-reads").await;
     let mut author = harness.client();
     register(&mut author, "author@example.com", "Quill").await;
 
     let work = create_work(&mut author, "The Open Road").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(
         &mut author,
-        &chapter,
+        &unit,
         version,
         "The road was open and the sky was wide.",
     )
@@ -309,7 +309,7 @@ async fn a_visitor_can_read_a_published_chapter() {
 
     let mut visitor = harness.client();
     let (status, body) = visitor
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
@@ -329,14 +329,14 @@ async fn a_draft_is_a_404_to_a_stranger() {
 
     let work = create_work(&mut author, "Secret Draft").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Not for you.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Not for you.").await;
 
     let mut stranger = harness.client();
     let (status, _) = stranger.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _) = stranger
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -355,12 +355,12 @@ async fn progress_saved_by_one_device_does_not_overwrite_another() {
 
     let work = create_work(&mut reader, "Long Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut reader, &work_id, "One").await;
-    save_chapter(
+    let (unit, version) = add_unit(&mut reader, &work_id, "One").await;
+    save_unit(
         &mut reader,
-        &chapter,
+        &unit,
         version,
-        "A chapter with enough words to have a middle.",
+        "A unit with enough words to have a middle.",
     )
     .await;
     publish(&mut reader, &work_id, 1).await;
@@ -372,7 +372,7 @@ async fn progress_saved_by_one_device_does_not_overwrite_another() {
             json!({
                 "subject_type": "work",
                 "subject_id": work_id,
-                "chapter_id": chapter,
+                "unit_id": unit,
                 "position_permille": 100,
                 "device_id": "device-a",
             }),
@@ -387,7 +387,7 @@ async fn progress_saved_by_one_device_does_not_overwrite_another() {
             json!({
                 "subject_type": "work",
                 "subject_id": work_id,
-                "chapter_id": chapter,
+                "unit_id": unit,
                 "position_permille": 900,
                 "device_id": "device-b",
             }),
@@ -425,8 +425,8 @@ async fn a_private_rating_changes_no_public_number() {
     register(&mut author, "author@example.com", "Quill").await;
     let work = create_work(&mut author, "Rated Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Something to read.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Something to read.").await;
     publish(&mut author, &work_id, 1).await;
 
     // A private rating of 5.
@@ -460,8 +460,8 @@ async fn the_public_aggregate_is_absent_below_the_minimum_count() {
     register(&mut author, "author@example.com", "Quill").await;
     let work = create_work(&mut author, "Aggregate Test").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Something.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Something.").await;
     publish(&mut author, &work_id, 1).await;
     let work_uuid: darkhold_domain::WorkId = work_id.parse().unwrap();
 
@@ -511,8 +511,8 @@ async fn the_aggregate_reports_its_count_and_method() {
     register(&mut author, "author@example.com", "Quill").await;
     let work = create_work(&mut author, "Rated Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Something.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Something.").await;
     publish(&mut author, &work_id, 1).await;
     let work_uuid: darkhold_domain::WorkId = work_id.parse().unwrap();
 
@@ -582,8 +582,8 @@ async fn switching_pseud_shows_a_different_history() {
     register(&mut author, "author@example.com", "Quill").await;
     let work = create_work(&mut author, "Read Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Something to read.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Something to read.").await;
     publish(&mut author, &work_id, 1).await;
 
     let pseud_id: darkhold_domain::PseudId = second.parse().expect("pseud");
@@ -597,7 +597,7 @@ async fn switching_pseud_shows_a_different_history() {
         pseud_id,
         "work",
         &work_id,
-        Some(chapter.parse().expect("chapter")),
+        Some(unit.parse().expect("unit")),
     )
     .await
     .expect("touch history");
@@ -625,14 +625,14 @@ async fn switching_pseud_shows_a_different_history() {
     harness.cleanup().await;
 }
 
-/// Reading a chapter through the reader's own route records it in history.
+/// Reading a unit through the reader's own route records it in history.
 ///
 /// `touch_history` had no caller in the application: the reading surface
 /// reported a position and nothing recorded that the work had been opened, so
 /// `/library/history` was empty for every real reader while these tests — which
 /// called the repository directly — stayed green.
 #[tokio::test]
-async fn reading_a_chapter_records_it_in_history() {
+async fn reading_a_unit_records_it_in_history() {
     let harness = Harness::new("history-from-reading").await;
     let mut reader = harness.client();
     register(&mut reader, "reader@example.com", "Reader").await;
@@ -641,8 +641,8 @@ async fn reading_a_chapter_records_it_in_history() {
     register(&mut author, "author@example.com", "Quill").await;
     let work = create_work(&mut author, "The Long Road").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "Text to read.").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "Text to read.").await;
     publish(&mut author, &work_id, 1).await;
 
     // Nothing has been read yet, so nothing is in the history.
@@ -650,13 +650,13 @@ async fn reading_a_chapter_records_it_in_history() {
     assert_eq!(status, StatusCode::OK, "history: {body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 0);
 
-    // The two requests the reading surface makes: open the chapter, then say
+    // The two requests the reading surface makes: open the unit, then say
     // where the reader is.
-    let (status, chapter_body) = reader
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+    let (status, unit_body) = reader
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
-    assert_eq!(status, StatusCode::OK, "read chapter: {chapter_body}");
-    let revision_id = chapter_body["revision_id"]
+    assert_eq!(status, StatusCode::OK, "read unit: {unit_body}");
+    let revision_id = unit_body["revision_id"]
         .as_str()
         .expect("revision id")
         .to_owned();
@@ -666,7 +666,7 @@ async fn reading_a_chapter_records_it_in_history() {
             json!({
                 "subject_type": "work",
                 "subject_id": work_id,
-                "chapter_id": chapter,
+                "unit_id": unit,
                 "content_revision": revision_id,
                 "position_permille": 400,
                 "device_id": "device-1"
@@ -811,10 +811,10 @@ async fn two_devices_that_disagree_produce_a_choice() {
     let harness = Harness::new("devices-disagree").await;
     let mut reader = harness.client();
     register(&mut reader, "reader@example.com", "Bookworm").await;
-    let (work_id, chapter) = published_chapter(&harness, "Disagreeing Devices").await;
+    let (work_id, unit) = published_unit(&harness, "Disagreeing Devices").await;
 
     let (status, body) = reader
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let revision = body["revision_id"].as_str().expect("revision id");
@@ -827,7 +827,7 @@ async fn two_devices_that_disagree_produce_a_choice() {
                 json!({
                     "subject_type": "work",
                     "subject_id": work_id,
-                    "chapter_id": chapter,
+                    "unit_id": unit,
                     "content_revision": revision,
                     "position_permille": permille,
                     "device_id": device,
@@ -878,22 +878,22 @@ async fn resuming_after_an_edit_uses_the_anchor_not_the_offset() {
     register(&mut author, "author@example.com", "Quill").await;
     let work = create_work(&mut author, "Revised Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, chapter_version) = add_chapter(&mut author, &work_id, "One").await;
-    let (status, body) = save_chapter(
+    let (unit, unit_version) = add_unit(&mut author, &work_id, "One").await;
+    let (status, body) = save_unit(
         &mut author,
-        &chapter,
-        chapter_version,
+        &unit,
+        unit_version,
         "The first draft of the scene.",
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let version = body["version"].as_i64().expect("chapter version");
+    let version = body["version"].as_i64().expect("unit version");
     publish(&mut author, &work_id, 1).await;
 
     // The reader stops a third of the way into the published revision, at a
     // paragraph anchor.
     let (status, body) = reader
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let read_revision = body["revision_id"]
@@ -907,7 +907,7 @@ async fn resuming_after_an_edit_uses_the_anchor_not_the_offset() {
             json!({
                 "subject_type": "work",
                 "subject_id": work_id,
-                "chapter_id": chapter,
+                "unit_id": unit,
                 "content_revision": read_revision,
                 "paragraph_anchor": "p-3",
                 "position_permille": 330,
@@ -917,11 +917,11 @@ async fn resuming_after_an_edit_uses_the_anchor_not_the_offset() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
-    // The author rewrites the chapter. The words at 33% are not the words the
+    // The author rewrites the unit. The words at 33% are not the words the
     // reader was looking at any more.
-    let (status, body) = save_chapter(
+    let (status, body) = save_unit(
         &mut author,
-        &chapter,
+        &unit,
         version,
         "The second draft, rewritten from the top and with a different middle.",
     )
@@ -929,7 +929,7 @@ async fn resuming_after_an_edit_uses_the_anchor_not_the_offset() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let (status, body) = reader
-        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .get(&format!("/api/v1/works/{work_id}/chapters/{unit}"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let current_revision: darkhold_domain::RevisionId = body["revision_id"]
@@ -1000,7 +1000,7 @@ async fn a_rating_is_invisible_to_the_accounts_other_pseud() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let (work_id, _chapter) = published_chapter(&harness, "Rated Work").await;
+    let (work_id, _unit) = published_unit(&harness, "Rated Work").await;
     let work: darkhold_domain::WorkId = work_id.parse().expect("work id");
 
     // The second face rates it, privately.
@@ -1081,7 +1081,7 @@ async fn a_review_stays_private_until_it_is_published() {
     let harness = Harness::new("review-private").await;
     let mut reader = harness.client();
     register(&mut reader, "reader@example.com", "Bookworm").await;
-    let (work_id, _chapter) = published_chapter(&harness, "Reviewed Work").await;
+    let (work_id, _unit) = published_unit(&harness, "Reviewed Work").await;
 
     let (status, body) = reader
         .put(
@@ -1139,7 +1139,7 @@ async fn a_withdrawn_review_leaves_the_public_list() {
     let harness = Harness::new("review-withdrawn").await;
     let mut reader = harness.client();
     register(&mut reader, "reader@example.com", "Bookworm").await;
-    let (work_id, _chapter) = published_chapter(&harness, "Withdrawn Review").await;
+    let (work_id, _unit) = published_unit(&harness, "Withdrawn Review").await;
 
     let (status, body) = reader
         .put(
@@ -1192,7 +1192,7 @@ async fn a_stale_review_write_returns_conflict() {
     let harness = Harness::new("review-conflict").await;
     let mut reader = harness.client();
     register(&mut reader, "reader@example.com", "Bookworm").await;
-    let (work_id, _chapter) = published_chapter(&harness, "Contested Review").await;
+    let (work_id, _unit) = published_unit(&harness, "Contested Review").await;
 
     let (status, body) = reader
         .put(
@@ -1241,8 +1241,8 @@ async fn a_stale_review_write_returns_conflict() {
 // A helper for the tests that need a published work to point a reader at
 // ---------------------------------------------------------------------------
 
-/// Publish a one-chapter work with a different account and return its ids.
-async fn published_chapter(harness: &Harness, title: &str) -> (String, String) {
+/// Publish a one-unit work with a different account and return its ids.
+async fn published_unit(harness: &Harness, title: &str) -> (String, String) {
     let mut author = harness.client();
     let email = format!(
         "author-{}@example.com",
@@ -1251,18 +1251,18 @@ async fn published_chapter(harness: &Harness, title: &str) -> (String, String) {
     register(&mut author, &email, "Quill").await;
     let work = create_work(&mut author, title).await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    let (status, body) = save_chapter(
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    let (status, body) = save_unit(
         &mut author,
-        &chapter,
+        &unit,
         version,
-        "A chapter with enough words to have a middle.",
+        "A unit with enough words to have a middle.",
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "save chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "save unit: {body}");
     let (status, body) = publish(&mut author, &work_id, 1).await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
-    (work_id, chapter)
+    (work_id, unit)
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,18 +1279,18 @@ async fn a_note_is_private_to_its_writer_and_visible_only_to_them() {
 
     let work = create_work(&mut author, "The Open Road").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
-    save_chapter(&mut author, &chapter, version, "One").await;
+    let (unit, version) = add_unit(&mut author, &work_id, "One").await;
+    save_unit(&mut author, &unit, version, "One").await;
     publish(&mut author, &work_id, 1).await;
 
-    // The author writes a note anchored to the chapter.
+    // The author writes a note anchored to the unit.
     let (status, body) = author
         .put(
             "/api/v1/notes",
             json!({
                 "subject_type": "work",
                 "subject_id": work_id,
-                "anchor": format!("p-{chapter}"),
+                "anchor": format!("p-{unit}"),
                 "body": "a private observation"
             }),
         )
@@ -1398,8 +1398,8 @@ async fn notes_filter_to_the_exact_subject() {
 
     let work = create_work(&mut reader, "A Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut reader, &work_id, "One").await;
-    save_chapter(&mut reader, &chapter, version, "One").await;
+    let (unit, version) = add_unit(&mut reader, &work_id, "One").await;
+    save_unit(&mut reader, &unit, version, "One").await;
     publish(&mut reader, &work_id, 1).await;
 
     // One note on the work.
@@ -1447,8 +1447,8 @@ async fn saving_the_same_note_twice_updates_it_in_place() {
 
     let work = create_work(&mut reader, "A Work").await;
     let work_id = work["id"].as_str().expect("id").to_owned();
-    let (chapter, version) = add_chapter(&mut reader, &work_id, "One").await;
-    save_chapter(&mut reader, &chapter, version, "One").await;
+    let (unit, version) = add_unit(&mut reader, &work_id, "One").await;
+    save_unit(&mut reader, &unit, version, "One").await;
     publish(&mut reader, &work_id, 1).await;
 
     for body in ["first", "second"] {

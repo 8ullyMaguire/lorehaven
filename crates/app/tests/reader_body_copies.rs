@@ -533,7 +533,7 @@ async fn a_reader_cannot_read_another_readers_copy() {
         &work,
         &alice_account,
         "archive:example.org",
-        "chapters:0",
+        "units:0",
         3,
     )
     .await

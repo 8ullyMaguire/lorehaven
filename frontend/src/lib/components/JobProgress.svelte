@@ -1,11 +1,11 @@
 <script lang="ts">
   export interface JobState {
-    /** What the job is doing, e.g. "Importing chapters". */
+    /** What the job is doing, e.g. "Importing units". */
     label: string;
     status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'retry_wait';
     /** 0–100, when known. */
     percent?: number;
-    /** Human-readable summary, e.g. "12 of 40 chapters". */
+    /** Human-readable summary, e.g. "12 of 40 units". */
     detail?: string;
     /** Stable error code, shown without internal detail (spec §5). */
     errorCode?: string;

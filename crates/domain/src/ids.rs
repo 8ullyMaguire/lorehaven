@@ -107,11 +107,11 @@ uuid_id! {
     WorkId
 }
 uuid_id! {
-    /// A single chapter belonging to a work.
-    ChapterId
+    /// A single unit belonging to a work.
+    UnitId
 }
 uuid_id! {
-    /// An immutable chapter revision.
+    /// An immutable unit revision.
     RevisionId
 }
 uuid_id! {
@@ -152,8 +152,8 @@ uuid_id! {
     ImportJobId
 }
 uuid_id! {
-    /// One chapter's state within an import.
-    ImportChapterId
+    /// One unit's state within an import.
+    ImportUnitId
 }
 uuid_id! {
     /// A stored connection to a source, which names a row in `secrets` rather
@@ -174,7 +174,7 @@ uuid_id! {
     ShelfItemId
 }
 uuid_id! {
-    /// A reader's bookmark, which may point into a work or a chapter.
+    /// A reader's bookmark, which may point into a work or a unit.
     BookmarkId
 }
 uuid_id! {

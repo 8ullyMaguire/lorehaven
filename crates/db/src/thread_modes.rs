@@ -58,35 +58,35 @@ pub async fn add_schedule_section(
     topic_id: &str,
     position: i64,
     title: &str,
-    chapter_start: i64,
-    chapter_end: i64,
+    unit_start: i64,
+    unit_end: i64,
     unlocks_at: &str,
 ) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(
-                "INSERT INTO topic_schedules (topic_id, position, title, chapter_start, chapter_end, unlocks_at)
+                "INSERT INTO topic_schedules (topic_id, position, title, unit_start, unit_end, unlocks_at)
                  VALUES (?, ?, ?, ?, ?, ?)",
             )
             .bind(topic_id)
             .bind(position)
             .bind(title)
-            .bind(chapter_start)
-            .bind(chapter_end)
+            .bind(unit_start)
+            .bind(unit_end)
             .bind(unlocks_at)
             .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO topic_schedules (topic_id, position, title, chapter_start, chapter_end, unlocks_at)
+                "INSERT INTO topic_schedules (topic_id, position, title, unit_start, unit_end, unlocks_at)
                  VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(topic_id)
             .bind(position)
             .bind(title)
-            .bind(chapter_start)
-            .bind(chapter_end)
+            .bind(unit_start)
+            .bind(unit_end)
             .bind(unlocks_at)
             .execute(db.postgres_pool().expect("postgres"))
             .await?;
@@ -100,7 +100,7 @@ pub async fn get_schedule(db: &Database, topic_id: &str) -> Result<Vec<serde_jso
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (i64, String, i64, i64, String)>(
-                "SELECT position, title, chapter_start, chapter_end, unlocks_at
+                "SELECT position, title, unit_start, unit_end, unlocks_at
                  FROM topic_schedules WHERE topic_id = ? ORDER BY position",
             )
             .bind(topic_id)
@@ -109,7 +109,7 @@ pub async fn get_schedule(db: &Database, topic_id: &str) -> Result<Vec<serde_jso
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (i64, String, i64, i64, String)>(
-                "SELECT CAST(position AS BIGINT), title, CAST(chapter_start AS BIGINT), CAST(chapter_end AS BIGINT), unlocks_at
+                "SELECT CAST(position AS BIGINT), title, CAST(unit_start AS BIGINT), CAST(unit_end AS BIGINT), unlocks_at
                  FROM topic_schedules WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)
@@ -122,8 +122,8 @@ pub async fn get_schedule(db: &Database, topic_id: &str) -> Result<Vec<serde_jso
         result.push(serde_json::json!({
             "position": pos,
             "title": title,
-            "chapter_start": start,
-            "chapter_end": end,
+            "unit_start": start,
+            "unit_end": end,
             "unlocks_at": unlocks,
         }));
     }

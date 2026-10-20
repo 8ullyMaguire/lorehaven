@@ -92,8 +92,8 @@ pub struct CreateCommentBody {
     anchor_kind: Option<String>,
     /// Anchor value (paragraph index or timestamp).
     anchor_value: Option<String>,
-    /// Chapter id for paragraph anchors.
-    anchor_chapter_id: Option<String>,
+    /// Unit id for paragraph anchors.
+    anchor_unit_id: Option<String>,
 }
 
 async fn get_work_comments(
@@ -167,20 +167,20 @@ async fn post_comment(
         ),
     };
     // Validate anchor fields if provided.
-    let (anchor_kind, anchor_value, anchor_chapter_id) = match (
+    let (anchor_kind, anchor_value, anchor_unit_id) = match (
         &body.anchor_kind,
         &body.anchor_value,
-        &body.anchor_chapter_id,
+        &body.anchor_unit_id,
     ) {
-        (Some(kind_str), Some(value), chapter_id) => {
+        (Some(kind_str), Some(value), unit_id) => {
             let kind = darkhold_domain::anchor::AnchorKind::from_str(kind_str)
                 .map_err(|e| ApiError(darkhold_domain::AppError::field("anchor_kind", &e)))?;
-            darkhold_domain::anchor::validate_anchor(kind, value, chapter_id.as_deref())
+            darkhold_domain::anchor::validate_anchor(kind, value, unit_id.as_deref())
                 .map_err(|e| ApiError(darkhold_domain::AppError::field("anchor", &e)))?;
             (
                 Some(kind_str.clone()),
                 Some(value.clone()),
-                chapter_id.clone(),
+                unit_id.clone(),
             )
         }
         (None, None, _) => (None, None, None),
@@ -201,7 +201,7 @@ async fn post_comment(
         None,
         anchor_kind.as_deref(),
         anchor_value.as_deref(),
-        anchor_chapter_id.as_deref(),
+        anchor_unit_id.as_deref(),
     )
     .await
     .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;

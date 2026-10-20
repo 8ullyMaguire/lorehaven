@@ -8,7 +8,7 @@
 //! merely slow:
 //!
 //! 1. **A `304` serves the bytes we already hold.** If it did not, the source
-//!    would be telling us "unchanged" and we would store an empty chapter.
+//!    would be telling us "unchanged" and we would store an empty unit.
 //! 2. **A credentialed read is not a public read.** Same URL, different reader,
 //!    different page. Sharing an entry would hand gated content to somebody who
 //!    cannot see it.
@@ -277,7 +277,7 @@ async fn a_discarded_read_is_not_filed_in_the_cache() {
         // Discarded, but it DOES carry a validator — so the discard check is the
         // only thing that can keep it out of the cache.
         Answer::Discarded {
-            body: "<html>the forbidden chapter, in full</html>".to_owned(),
+            body: "<html>the forbidden unit, in full</html>".to_owned(),
             etag: Some("\"v1\"".to_owned()),
         },
         // A real page, which the cache would answer from what it held if the

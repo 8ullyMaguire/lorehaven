@@ -187,26 +187,26 @@ async fn create_work(client: &mut Client, title: &str) -> (String, String) {
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work_id = body["id"].as_str().expect("work id").to_owned();
 
-    // Add a chapter so the work can be published.
+    // Add a unit so the work can be published.
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
-            json!({ "title": "Chapter 1" }),
+            json!({ "title": "Unit 1" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter_id = body["id"].as_str().expect("chapter id").to_owned();
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit_id = body["id"].as_str().expect("unit id").to_owned();
 
-    // Add body text to the chapter.
+    // Add body text to the unit.
     let (status, body) = client
         .patch(
-            &format!("/api/v1/chapters/{chapter_id}"),
+            &format!("/api/v1/chapters/{unit_id}"),
             json!({ "expected_version": 1, "document": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Opening text." }] }] } }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "update chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "update unit: {body}");
 
-    (work_id, chapter_id)
+    (work_id, unit_id)
 }
 
 /// Publish a work so it's visible.
@@ -291,13 +291,13 @@ async fn warmth_accumulates_and_promotes_tier() {
         register(&mut reader_client, "reader@example.com", "reader").await;
 
     // Create a work by the author
-    let (work_id, chapter_id) = create_work(&mut author_client, "Author's Work").await;
+    let (work_id, unit_id) = create_work(&mut author_client, "Author's Work").await;
     publish_work(&mut author_client, &work_id).await;
 
     // Reader records progress (creates a reading event).
     //
-    // `PUT /reading/progress`, not `POST /works/{id}/chapters/1/read` — the
-    // latter was never a route. The GET at `/works/{id}/chapters/{chapter}`
+    // `PUT /reading/progress`, not `POST /works/{id}/units/1/read` — the
+    // latter was never a route. The GET at `/works/{id}/units/{unit}`
     // exists; there is no POST under it. A second invented URL hidden behind
     // the SPA fallback, which answered 200 for the empty `json!({})` body and
     // the test passed having recorded nothing at all.
@@ -308,7 +308,7 @@ async fn warmth_accumulates_and_promotes_tier() {
             Some(json!({
                 "subject_type": "work",
                 "subject_id": work_id,
-                "chapter_id": chapter_id,
+                "unit_id": unit_id,
                 "position_permille": 500,
             })),
         )

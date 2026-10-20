@@ -97,7 +97,7 @@ pub struct ReaderBodyCopy {
     pub work_id: String,
     pub account_id: String,
     pub source_key: String,
-    pub chapter_key: String,
+    pub unit_key: String,
     pub state: CopyState,
     pub reason_code: Option<String>,
     /// The bytes. `None` until the job settles the copy as `Ready`.
@@ -112,7 +112,7 @@ pub struct ReaderBodyCopy {
 #[derive(Debug, Clone, FromRow)]
 pub struct ReaderBodyCopyBody {
     pub work_id: String,
-    pub chapter_key: String,
+    pub unit_key: String,
     pub source_key: String,
     pub plain_text: String,
     pub sanitized_html: Option<String>,
@@ -154,17 +154,17 @@ pub async fn source_for_work(db: &Database, work_id: &str) -> Result<Option<Stri
     Ok(row.map(|(key,)| key))
 }
 
-/// A work's chapter list, as the `chapter_key` string the copy records.
+/// A work's unit list, as the `unit_key` string the copy records.
 ///
-/// A work's chapters are the `chapter_revisions` rows the import wrote. The copy
+/// A work's units are the `revisions` rows the import wrote. The copy
 /// records *which* list it fetched so a later re-import, which may replace those
 /// revisions, does not silently re-point a reader's copy at different bytes.
-pub async fn chapter_key_for_work(db: &Database, work_id: &str) -> Result<String> {
+pub async fn unit_key_for_work(db: &Database, work_id: &str) -> Result<String> {
     let sql = db.sql(
-        "SELECT COUNT(*) FROM chapter_revisions cr \
-         JOIN chapters c ON c.id = cr.chapter_id WHERE c.work_id = ?1",
-        "SELECT COUNT(*) FROM chapter_revisions cr \
-         JOIN chapters c ON c.id = cr.chapter_id WHERE c.work_id = $1::uuid",
+        "SELECT COUNT(*) FROM revisions cr \
+         JOIN units c ON c.id = cr.unit_id WHERE c.work_id = ?1",
+        "SELECT COUNT(*) FROM revisions cr \
+         JOIN units c ON c.id = cr.unit_id WHERE c.work_id = $1::uuid",
     );
     let row: (i64,) = match db.backend() {
         Backend::Sqlite => {
@@ -180,7 +180,7 @@ pub async fn chapter_key_for_work(db: &Database, work_id: &str) -> Result<String
                 .await?
         }
     };
-    Ok(format!("chapters:{}", row.0))
+    Ok(format!("units:{}", row.0))
 }
 
 /// Record a reader's request: a `pending` copy, and the audit row §6.2 requires.
@@ -203,7 +203,7 @@ pub async fn request_copy(
     work_id: &str,
     account_id: &Uuid,
     source_key: &str,
-    chapter_key: &str,
+    unit_key: &str,
     trust_at_request: i64,
 ) -> Result<ReaderBodyCopy> {
     let existing = copy_id_for(db, work_id, &account_id.to_string()).await?;
@@ -212,12 +212,12 @@ pub async fn request_copy(
 
     let sql = db.sql(
         "INSERT INTO reader_body_copies \
-         (id, work_id, account_id, source_key, chapter_key, state, plain_text, \
+         (id, work_id, account_id, source_key, unit_key, state, plain_text, \
           sanitized_html, requested_at, created_at, updated_at, version) \
          VALUES (?1, ?2, ?3, ?4, ?5, 'pending', NULL, NULL, ?6, ?6, ?6, 1) \
          ON CONFLICT (work_id, account_id) DO UPDATE SET \
            state = CASE WHEN reader_body_copies.state = 'ready' THEN 'ready' ELSE 'pending' END, \
-           source_key = ?4, chapter_key = ?5, \
+           source_key = ?4, unit_key = ?5, \
            reason_code = CASE WHEN reader_body_copies.state = 'ready' THEN reader_body_copies.reason_code ELSE NULL END, \
            plain_text = CASE WHEN reader_body_copies.state = 'ready' THEN reader_body_copies.plain_text ELSE NULL END, \
            sanitized_html = CASE WHEN reader_body_copies.state = 'ready' THEN reader_body_copies.sanitized_html ELSE NULL END, \
@@ -225,12 +225,12 @@ pub async fn request_copy(
            updated_at = ?6, \
            version = reader_body_copies.version + 1",
         "INSERT INTO reader_body_copies \
-         (id, work_id, account_id, source_key, chapter_key, state, plain_text, \
+         (id, work_id, account_id, source_key, unit_key, state, plain_text, \
           sanitized_html, requested_at, created_at, updated_at, version) \
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'pending', NULL, NULL, $6, $6, $6, 1) \
          ON CONFLICT (work_id, account_id) DO UPDATE SET \
            state = CASE WHEN reader_body_copies.state = 'ready' THEN 'ready' ELSE 'pending' END, \
-           source_key = $4, chapter_key = $5, \
+           source_key = $4, unit_key = $5, \
            reason_code = CASE WHEN reader_body_copies.state = 'ready' THEN reader_body_copies.reason_code ELSE NULL END, \
            plain_text = CASE WHEN reader_body_copies.state = 'ready' THEN reader_body_copies.plain_text ELSE NULL END, \
            sanitized_html = CASE WHEN reader_body_copies.state = 'ready' THEN reader_body_copies.sanitized_html ELSE NULL END, \
@@ -258,7 +258,7 @@ pub async fn request_copy(
                 .bind(work_id)
                 .bind(account_id.to_string())
                 .bind(source_key)
-                .bind(chapter_key)
+                .bind(unit_key)
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
                 .await?;
@@ -269,7 +269,7 @@ pub async fn request_copy(
                 .bind(work_id)
                 .bind(account_id.to_string())
                 .bind(source_key)
-                .bind(chapter_key)
+                .bind(unit_key)
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
@@ -345,11 +345,11 @@ async fn copy_id_for(db: &Database, work_id: &str, account_id: &str) -> Result<O
 
 async fn copy_by_id(db: &Database, id: &str) -> Result<ReaderBodyCopy> {
     let sql = db.sql(
-        "SELECT id, work_id, account_id, source_key, chapter_key, state, reason_code, \
+        "SELECT id, work_id, account_id, source_key, unit_key, state, reason_code, \
                 plain_text, sanitized_html, requested_at, settled_at, version \
          FROM reader_body_copies WHERE id = ?1",
         "SELECT id::text AS id, work_id::text AS work_id, account_id::text AS account_id, \
-                source_key, chapter_key, state, reason_code, plain_text, sanitized_html, \
+                source_key, unit_key, state, reason_code, plain_text, sanitized_html, \
                 requested_at::text AS requested_at, settled_at::text AS settled_at, \
                 version::bigint AS version \
          FROM reader_body_copies WHERE id = $1::uuid",
@@ -378,7 +378,7 @@ struct ReaderBodyCopyRow {
     work_id: String,
     account_id: String,
     source_key: String,
-    chapter_key: String,
+    unit_key: String,
     state: String,
     reason_code: Option<String>,
     plain_text: Option<String>,
@@ -395,7 +395,7 @@ impl ReaderBodyCopyRow {
             work_id: self.work_id,
             account_id: self.account_id,
             source_key: self.source_key,
-            chapter_key: self.chapter_key,
+            unit_key: self.unit_key,
             state: CopyState::parse_stored(&self.state),
             reason_code: self.reason_code,
             plain_text: self.plain_text,
@@ -419,10 +419,10 @@ pub async fn body_for(
     account_id: &Uuid,
 ) -> Result<Option<ReaderBodyCopyBody>> {
     let sql = db.sql(
-        "SELECT work_id, chapter_key, source_key, plain_text, sanitized_html, settled_at \
+        "SELECT work_id, unit_key, source_key, plain_text, sanitized_html, settled_at \
          FROM reader_body_copies \
          WHERE work_id = ?1 AND account_id = ?2 AND state = 'ready' AND plain_text IS NOT NULL",
-        "SELECT work_id::text AS work_id, chapter_key, source_key, plain_text, \
+        "SELECT work_id::text AS work_id, unit_key, source_key, plain_text, \
                 sanitized_html, settled_at::text AS settled_at \
          FROM reader_body_copies \
          WHERE work_id = $1::uuid AND account_id = $2::uuid \
@@ -616,11 +616,11 @@ async fn record_outcome(
 /// whichever reader's copy sorted first.
 pub async fn status_by_id(db: &Database, id: &str) -> Result<Option<ReaderBodyCopy>> {
     let sql = db.sql(
-        "SELECT id, work_id, account_id, source_key, chapter_key, state, reason_code, \
+        "SELECT id, work_id, account_id, source_key, unit_key, state, reason_code, \
                 plain_text, sanitized_html, requested_at, settled_at, version \
          FROM reader_body_copies WHERE id = ?1",
         "SELECT id::text AS id, work_id::text AS work_id, account_id::text AS account_id, \
-                source_key, chapter_key, state, reason_code, plain_text, sanitized_html, \
+                source_key, unit_key, state, reason_code, plain_text, sanitized_html, \
                 requested_at::text AS requested_at, settled_at::text AS settled_at, \
                 version::bigint AS version \
          FROM reader_body_copies WHERE id = $1::uuid",

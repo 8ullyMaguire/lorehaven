@@ -24,7 +24,7 @@ use scraper::Html;
 use url::Url;
 
 use crate::{
-    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceError,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError,
     SourceKey, SourceResult, SourceWork, WorkStatus,
 };
 
@@ -232,9 +232,9 @@ impl SourceAdapter for Pawchive {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             bibliography: true,
-            per_chapter_fetch: false,
+            per_unit_fetch: false,
             incremental: false,
             authentication: AuthKind::None,
             min_interval_millis: None,
@@ -275,7 +275,7 @@ impl SourceAdapter for Pawchive {
 
         // Count posts with real content (chapters) vs links-only, and collect
         // the union of post tags for the work's tag list.
-        let mut chapters = Vec::new();
+        let mut units = Vec::new();
         let mut tag_set: Vec<String> = Vec::new();
         for (ordinal, post) in posts.iter().enumerate() {
             for tag in &post.tags {
@@ -287,9 +287,9 @@ impl SourceAdapter for Pawchive {
             let text = text.trim().to_owned();
             // Only include posts that have meaningful chapter text.
             if text.len() > 50 {
-                chapters.push(crate::ChapterRef {
+                units.push(crate::UnitRef {
                     ordinal: ordinal as u32 + 1,
-                    source_chapter_key: post.id.clone(),
+                    source_unit_key: post.id.clone(),
                     title: post.title.clone(),
                 });
             }
@@ -321,23 +321,23 @@ impl SourceAdapter for Pawchive {
             status: WorkStatus::Unknown,
             published_at: None,
             updated_at: None,
-            chapters,
+            units,
             rating_text: None,
             warning_texts: Vec::new(),
             tags: tag_set,
         })
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         let uid = &work.source_work_key;
 
         // Paginate through all posts and yield those with chapter text.
-        let mut chapters = Vec::new();
+        let mut units = Vec::new();
         let mut offset = 0;
         loop {
             let api_url = Self::api_user_posts_url(uid, offset);
@@ -357,9 +357,9 @@ impl SourceAdapter for Pawchive {
                 let text = strip_tags(&post.content);
                 let text = collapse_whitespace(&text);
                 if text.len() > 50 {
-                    chapters.push(SourceChapter {
-                        ordinal: chapters.len() as u32 + 1,
-                        source_chapter_key: post.id.clone(),
+                    units.push(SourceUnit {
+                        ordinal: units.len() as u32 + 1,
+                        source_unit_key: post.id.clone(),
                         title: post.title.clone(),
                         content_html: text,
                         image_urls: Vec::new(),
@@ -373,7 +373,7 @@ impl SourceAdapter for Pawchive {
             offset += 50;
         }
 
-        Ok(chapters)
+        Ok(units)
     }
 
     async fn list_author_works(
@@ -396,11 +396,11 @@ impl SourceAdapter for Pawchive {
         ))
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         let _ = (html, work);
         Err(SourceError::Unsupported(
             "Pawchive has no HTML chapters entry point".to_owned(),

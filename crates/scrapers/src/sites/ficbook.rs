@@ -110,8 +110,8 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, text_of, texts_of, AuthKind, ChapterRef, Credentials,
-    Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey,
+    attr_of, collapse_whitespace, html_of, text_of, texts_of, AuthKind, UnitRef, Credentials,
+    Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey,
     SourceResult, SourceWork, WorkStatus,
 };
 
@@ -226,7 +226,7 @@ impl Ficbook {
 
         let summary = text_of(&document, "[itemprop='description']").unwrap_or_default();
 
-        let chapters = part_refs(&document);
+        let units = part_refs(&document);
         let size = size_line(&document);
 
         // The page states its own part count beside a list it renders in full.
@@ -234,15 +234,15 @@ impl Ficbook {
         // understand, and importing the list would import a fraction of a work
         // and report success.
         if let Some(stated) = size.parts {
-            if chapters.is_empty() {
+            if units.is_empty() {
                 return Err(SourceError::Parse(format!(
                     "ficbook work {work} states {stated} parts and lists none"
                 )));
             }
-            if stated as usize != chapters.len() {
+            if stated as usize != units.len() {
                 return Err(SourceError::Parse(format!(
                     "ficbook work {work} states {stated} parts and lists {}",
-                    chapters.len()
+                    units.len()
                 )));
             }
         }
@@ -267,7 +267,7 @@ impl Ficbook {
             status: status_of(&document),
             published_at: part_dates.first().copied(),
             updated_at: part_dates.last().copied(),
-            chapters,
+            units,
             rating_text: rating_of(&document),
             warning_texts: Vec::new(),
             tags: texts_of(&document, "div.tags a.tag"),
@@ -287,7 +287,7 @@ impl Ficbook {
         html: &str,
         work: &SourceWork,
         part: &str,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
 
         let raw = html_of(&document, "div#content").ok_or_else(|| {
@@ -314,14 +314,14 @@ impl Ficbook {
         let body = inline_footnotes(&raw, &text_footnotes(&document));
 
         let entry = work
-            .chapters
+            .units
             .iter()
-            .find(|entry| entry.source_chapter_key == part);
+            .find(|entry| entry.source_unit_key == part);
         let ordinal = entry.map_or(0, |entry| entry.ordinal);
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal,
-            source_chapter_key: part.to_owned(),
+            source_unit_key: part.to_owned(),
             title: entry.map(|entry| entry.title.clone()).unwrap_or_default(),
             content_html: sanitize_fragment(&body, Url::parse(&work.source_url).ok().as_ref()),
             image_urls: crate::sanitize::extract_image_urls(
@@ -333,9 +333,9 @@ impl Ficbook {
 
     /// The ordinal of a part page, from the work's own list.
     fn ordinal_of(work: &SourceWork, part: &str) -> Option<u32> {
-        work.chapters
+        work.units
             .iter()
-            .find(|entry| entry.source_chapter_key == part)
+            .find(|entry| entry.source_unit_key == part)
             .map(|entry| entry.ordinal)
     }
 }
@@ -353,10 +353,10 @@ impl SourceAdapter for Ficbook {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             // A part has its own address and it is derivable from the work's
             // list, so a retry re-reads one part and touches nothing else.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             // Author pages exist (`/authors/{id}`); their markup has not been
             // recorded.
             bibliography: false,
@@ -396,38 +396,38 @@ impl SourceAdapter for Ficbook {
         self.parse_work(&page.body, &work)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        if work.chapters.is_empty() {
+    ) -> SourceResult<Vec<SourceUnit>> {
+        if work.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "ficbook work {} lists no parts",
                 work.source_work_key
             )));
         }
 
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for entry in &work.chapters {
+        let mut units = Vec::with_capacity(work.units.len());
+        for entry in &work.units {
             let page = fetch
-                .get(&self.part_url(&work.source_work_key, &entry.source_chapter_key))
+                .get(&self.part_url(&work.source_work_key, &entry.source_unit_key))
                 .await?;
-            chapters.push(self.parse_chapter(&page.body, work, &entry.source_chapter_key)?);
+            units.push(self.parse_chapter(&page.body, work, &entry.source_unit_key)?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let entry = work
-            .chapters
+            .units
             .iter()
             .find(|entry| entry.ordinal == ordinal)
             .ok_or_else(|| {
@@ -437,9 +437,9 @@ impl SourceAdapter for Ficbook {
                 ))
             })?;
         let page = fetch
-            .get(&self.part_url(&work.source_work_key, &entry.source_chapter_key))
+            .get(&self.part_url(&work.source_work_key, &entry.source_unit_key))
             .await?;
-        self.parse_chapter(&page.body, work, &entry.source_chapter_key)
+        self.parse_chapter(&page.body, work, &entry.source_unit_key)
     }
 
     fn preview_from_html(&self, html: &str, url: &Url) -> SourceResult<SourceWork> {
@@ -449,11 +449,11 @@ impl SourceAdapter for Ficbook {
         self.parse_work(html, &work)
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // A part page states its own address, so the ordinal comes from the
         // page rather than from the caller — see the module documentation.
         let document = Html::parse_document(html);
@@ -480,7 +480,7 @@ impl SourceAdapter for Ficbook {
 /// because the same page carries "next chapter" navigation links of the same
 /// shape: collecting every match would put a duplicate of one part in the list
 /// and, on a one-part work, would double it.
-fn part_refs(document: &Html) -> Vec<ChapterRef> {
+fn part_refs(document: &Html) -> Vec<UnitRef> {
     let Ok(selector) = Selector::parse("ul.list-of-fanfic-parts li.part a.part-link") else {
         return Vec::new();
     };
@@ -508,10 +508,10 @@ fn part_refs(document: &Html) -> Vec<ChapterRef> {
             Some((part, title))
         })
         .enumerate()
-        .map(|(index, (part, title))| ChapterRef {
+        .map(|(index, (part, title))| UnitRef {
             ordinal: (index as u32) + 1,
             // The site's own id for the part, which is what its address carries.
-            source_chapter_key: part,
+            source_unit_key: part,
             title,
         })
         .collect()

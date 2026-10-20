@@ -213,15 +213,15 @@ async fn published_work(harness: &Harness, email: &str, handle: &str, title: &st
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter").to_owned();
-    let chapter_version = body["version"].as_i64().expect("version");
-    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+    assert_eq!(status, StatusCode::CREATED, "unit: {body}");
+    let unit = body["id"].as_str().expect("unit").to_owned();
+    let unit_version = body["version"].as_i64().expect("version");
+    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = author
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "save: {body}");
@@ -250,7 +250,7 @@ async fn positive_text_is_stored_and_delivered_by_default() {
     let (status, body) = reader
         .put(
             &format!("/api/v1/works/{work_id}/reviews"),
-            json!({ "body": "I loved this chapter, thank you!", "is_public": true }),
+            json!({ "body": "I loved this unit, thank you!", "is_public": true }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -466,7 +466,7 @@ async fn neutral_text_is_deterministic_and_never_double_classified() {
         let (status, body) = reader
             .put(
                 &format!("/api/v1/works/{work_id}/reviews"),
-                json!({ "body": "I loved this chapter, thank you!", "is_public": true }),
+                json!({ "body": "I loved this unit, thank you!", "is_public": true }),
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");

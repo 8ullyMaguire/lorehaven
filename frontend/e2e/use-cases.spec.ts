@@ -34,7 +34,7 @@ import { expectSignedIn, signOutThroughHeader } from './support/session';
 
 const PASSPHRASE = 'use-case-passphrase-1';
 const WORK_TITLE = 'The Use Case Chronicle';
-const CHAPTER_TEXT =
+const UNIT_TEXT =
   'The kettle had other plans. It sits on the counter and refuses to boil, which is the sort of thing a kettle does in a story where nothing else is going to happen. Outside, the street fills with rain and the sound of a neighbour practising an instrument badly and with conviction. This paragraph exists so the page is taller than the window, because the reader records a position only when the reader scrolls, and a test that never scrolls would prove nothing about the reader.';
 
 interface Who {
@@ -117,8 +117,8 @@ async function findWork(page: Page): Promise<string> {
   return page.url().match(/works\/([0-9a-f-]{36})/)![1];
 }
 
-async function openChapter(page: Page): Promise<void> {
-  await page.locator('ol.chapters li a').first().click();
+async function openUnit(page: Page): Promise<void> {
+  await page.locator('ol.units li a').first().click();
   await expect(page.locator('.prose').first()).toBeVisible();
 }
 
@@ -207,17 +207,17 @@ test('5. an author starts a draft from the writing surface', async ({ page }) =>
   await expect(page).toHaveURL(/\/write\/[0-9a-f-]{36}/);
 });
 
-test('6. the author writes a chapter and saves it', async ({ page }) => {
+test('6. the author writes a unit and saves it', async ({ page }) => {
   await ensureAccount(page, author);
   await openDraft(page);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
 
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type(CHAPTER_TEXT);
+  await page.keyboard.type(UNIT_TEXT);
 
   const saved = page.waitForResponse(
-    (response) => response.url().includes('/api/v1/chapters/') && response.request().method() !== 'GET',
+    (response) => response.url().includes('/api/v1/units/') && response.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   expect((await saved).status()).toBeLessThan(400);
@@ -248,14 +248,14 @@ test('9. a signed-out visitor is told that writing needs an account', async ({ p
 
 test('10. a signed-out visitor reads a published work', async ({ page }) => {
   await findWork(page);
-  await openChapter(page);
+  await openUnit(page);
   await expect(page.locator('.prose').first()).toContainText('The kettle had other plans');
 });
 
-test('11. a reader opens a chapter and the reader records where they got to', async ({ page }) => {
+test('11. a reader opens a unit and the reader records where they got to', async ({ page }) => {
   await ensureAccount(page, reader);
   await findWork(page);
-  await openChapter(page);
+  await openUnit(page);
 
   const progress = page.waitForResponse(
     (response) => response.url().includes('/reading/progress') && response.request().method() === 'PUT',
@@ -419,7 +419,7 @@ test('16b. the author is told when their work is reviewed', async ({ page }) => 
 test('17. a reader changes their reader settings and they survive a reload', async ({ page }) => {
   await ensureAccount(page, reader);
   await findWork(page);
-  await openChapter(page);
+  await openUnit(page);
   await page.click('button:text-is("Reading settings")');
 
   const saved = page.waitForResponse(

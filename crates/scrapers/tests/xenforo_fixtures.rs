@@ -65,11 +65,11 @@ fn the_threadmark_list_is_read_for_its_chapters_and_its_stated_total() {
     assert_eq!(marks.author.as_deref(), Some("master arminas"));
 
     // One page of a paginated list: 25, the site's page size.
-    assert_eq!(marks.chapters.len(), 25);
-    assert_eq!(marks.chapters[0].ordinal, 1);
-    assert_eq!(marks.chapters[0].source_chapter_key, "11149727");
-    assert_eq!(marks.chapters[0].title, "Prologue; September 27, 2596");
-    assert_eq!(marks.chapters[24].ordinal, 25);
+    assert_eq!(marks.units.len(), 25);
+    assert_eq!(marks.units[0].ordinal, 1);
+    assert_eq!(marks.units[0].source_unit_key, "11149727");
+    assert_eq!(marks.units[0].title, "Prologue; September 27, 2596");
+    assert_eq!(marks.units[24].ordinal, 25);
 
     // The dates are carried beside the chapters, which is what a work's last
     // change is read from.
@@ -92,30 +92,30 @@ fn the_two_pages_add_up_to_the_stated_total_and_the_ordinals_stay_dense() {
     let second = adapter
         .parse_threadmark_page(&fixture("threadmarks-page-2.html"), THREAD)
         .unwrap();
-    assert_eq!(second.chapters.len(), 17);
+    assert_eq!(second.units.len(), 17);
 
     marks.append(second);
 
     // 25 + 17 is exactly the 42 the header states. This is the check the adapter
     // performs on a live import, asserted here against the recorded pages.
-    assert_eq!(marks.chapters.len(), 42);
+    assert_eq!(marks.units.len(), 42);
     assert_eq!(marks.stated, Some(42));
 
     // Ordinals are dense and in reading order across the page boundary: a reader's
     // progress and bookmarks are keyed to the ordinal, so two chapters sharing
     // one would put a chapter under somebody else's bookmark.
     assert!(marks
-        .chapters
+        .units
         .iter()
         .enumerate()
         .all(|(index, entry)| entry.ordinal == u32::try_from(index).unwrap() + 1));
-    assert_eq!(marks.chapters[41].ordinal, 42);
+    assert_eq!(marks.units[41].ordinal, 42);
 
     // No post appears twice, which is what a pagination overlap would look like.
     let mut keys: Vec<&str> = marks
-        .chapters
+        .units
         .iter()
-        .map(|entry| entry.source_chapter_key.as_str())
+        .map(|entry| entry.source_unit_key.as_str())
         .collect();
     let count = keys.len();
     keys.sort_unstable();
@@ -128,10 +128,10 @@ fn the_two_pages_add_up_to_the_stated_total_and_the_ordinals_stay_dense() {
 fn the_last_chapter_in_reading_order_is_not_the_newest_thing_in_the_thread() {
     let work = recorded_work();
 
-    assert_eq!(work.chapters.len(), 42);
+    assert_eq!(work.units.len(), 42);
     // The final chapter of the list, which is the work's 42nd.
-    assert_eq!(work.chapters[41].source_chapter_key, "80490627");
-    assert_eq!(work.chapters[41].title, "April 17, 3026");
+    assert_eq!(work.units[41].source_unit_key, "80490627");
+    assert_eq!(work.units[41].title, "April 17, 3026");
 
     // And the work's last change is a different chapter: ordinal 6 was posted in
     // 2024, while the list ends on one posted in 2021. `updated_at` is the newest
@@ -189,7 +189,7 @@ fn a_chapter_is_read_from_the_article_for_that_post_and_not_from_the_first_one()
         .parse_post(&page, &work, "11149727")
         .expect("the recorded post page carries the post asked for");
 
-    assert_eq!(chapter.source_chapter_key, "11149727");
+    assert_eq!(chapter.source_unit_key, "11149727");
     assert_eq!(chapter.ordinal, 1);
     assert_eq!(chapter.title, "Prologue; September 27, 2596");
 
@@ -235,7 +235,7 @@ fn a_thread_page_carries_a_widget_list_and_the_count_check_is_what_refuses_it() 
         .expect("the widget parses as a list");
 
     assert!(
-        marks.chapters.len() < 10,
+        marks.units.len() < 10,
         "the widget is a handful of items"
     );
     assert_eq!(
@@ -244,7 +244,7 @@ fn a_thread_page_carries_a_widget_list_and_the_count_check_is_what_refuses_it() 
         "and the page still states the work's real size, which is what catches it"
     );
     assert_ne!(
-        marks.chapters.len(),
+        marks.units.len(),
         marks.stated.unwrap() as usize,
         "a widget that matched the total would defeat the check"
     );
@@ -266,10 +266,10 @@ fn a_completed_work_is_read_as_complete() {
 
     assert_eq!(marks.status, WorkStatus::Complete);
     assert_eq!(marks.stated, Some(1));
-    assert_eq!(marks.chapters.len(), 1);
-    assert_eq!(marks.chapters[0].source_chapter_key, "125333051");
+    assert_eq!(marks.units.len(), 1);
+    assert_eq!(marks.units[0].source_unit_key, "125333051");
     assert_eq!(
-        marks.chapters[0].title,
+        marks.units[0].title,
         "The poem, may my cat rest in peace"
     );
     // Opened 2026-09-09, written in one post: the two dates are days apart and
@@ -292,9 +292,9 @@ fn the_three_forums_record_the_same_add_on_and_their_own_answers() {
         .expect("the recorded SufficientVelocity list parses");
     assert_eq!(sv_marks.status, WorkStatus::Ongoing);
     assert_eq!(sv_marks.stated, Some(77));
-    assert_eq!(sv_marks.chapters.len(), 77);
-    assert_eq!(sv_marks.chapters[0].ordinal, 1);
-    assert_eq!(sv_marks.chapters[76].ordinal, 77);
+    assert_eq!(sv_marks.units.len(), 77);
+    assert_eq!(sv_marks.units[0].ordinal, 1);
+    assert_eq!(sv_marks.units[76].ordinal, 77);
 
     // QuestionableQuesting writes `Incomplete` for the state the other two call
     // `Ongoing`. Same state, different word — which is why the mapping is by
@@ -310,7 +310,7 @@ fn the_three_forums_record_the_same_add_on_and_their_own_answers() {
         .expect("the recorded QuestionableQuesting list parses");
     assert_eq!(qq_marks.status, WorkStatus::Ongoing);
     assert_eq!(qq_marks.stated, Some(17));
-    assert_eq!(qq_marks.chapters.len(), 17);
+    assert_eq!(qq_marks.units.len(), 17);
 
     // Each forum is its own source, and none of them declares an expensive wall.
     //
@@ -430,12 +430,12 @@ fn a_work_is_assembled_from_both_documents_the_same_way_the_live_path_does() {
     assert_eq!(from_thread_page.author_text, "master arminas");
     assert_eq!(from_thread_page.tags, vec!["battletech"]);
     // No chapters and no status: those are the other document's to state.
-    assert!(from_thread_page.chapters.is_empty());
+    assert!(from_thread_page.units.is_empty());
     assert_eq!(from_thread_page.status, WorkStatus::Unknown);
 
     // And assembled with both, the same call the live path makes.
     let work = recorded_work();
-    assert_eq!(work.chapters.len(), 42);
+    assert_eq!(work.units.len(), 42);
     assert_eq!(work.status, WorkStatus::Ongoing);
     assert_eq!(work.source_url, THREAD_URL);
     assert_eq!(work.author_text, "master arminas");
@@ -453,16 +453,16 @@ fn the_chapters_a_page_carries_are_returned_in_the_works_order() {
     // work's chapters, in the page's order.
     let work = recorded_work();
     let chapters = spacebattles()
-        .chapters_from_html(&fixture("post-11149727.html"), &work)
+        .units_from_html(&fixture("post-11149727.html"), &work)
         .expect("the recorded page carries chapters of this work");
 
     assert!(!chapters.is_empty());
     // Only posts this work lists, and each at the ordinal the work gives it.
     for chapter in &chapters {
         let entry = work
-            .chapters
+            .units
             .iter()
-            .find(|entry| entry.source_chapter_key == chapter.source_chapter_key)
+            .find(|entry| entry.source_unit_key == chapter.source_unit_key)
             .expect("a returned chapter is one the work lists");
         assert_eq!(chapter.ordinal, entry.ordinal);
     }
@@ -473,12 +473,12 @@ fn the_chapters_a_page_carries_are_returned_in_the_works_order() {
     // The post this fixture is named for is among them.
     assert!(chapters
         .iter()
-        .any(|chapter| chapter.source_chapter_key == "11149727"));
+        .any(|chapter| chapter.source_unit_key == "11149727"));
 
     // A page with none of this work's chapters is refused rather than read as
     // an empty chapter.
     let error = spacebattles()
-        .chapters_from_html(&fixture("threadmarks.html"), &work)
+        .units_from_html(&fixture("threadmarks.html"), &work)
         .expect_err("a threadmark list carries no prose");
     assert!(
         format!("{error}").contains("none of its chapters"),

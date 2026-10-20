@@ -46,42 +46,42 @@ const NAV_PATH: &str = "OEBPS/nav.xhtml";
 const NCX_PATH: &str = "OEBPS/toc.ncx";
 const STYLE_PATH: &str = "OEBPS/style.css";
 
-/// How many chapters one export may hold.
+/// How many units one export may hold.
 ///
 /// A cap rather than a limit on the reader: an export is built in memory and
 /// written as one blob, and a work larger than this is a mistake or an attack
-/// rather than a reader's afternoon. One hundred thousand chapters is far above
+/// rather than a reader's afternoon. One hundred thousand units is far above
 /// any work the importer has recorded — the largest was 795 episodes — and far
 /// below anything that would exhaust a small instance.
-pub const MAX_CHAPTERS: usize = 100_000;
+pub const MAX_UNITS: usize = 100_000;
 
-/// How large one chapter's XHTML may be.
+/// How large one unit's XHTML may be.
 ///
 /// The editor's own document limit is 2 MiB (see [`crate::document`]); this is
-/// that limit with room for the wrapper, so a chapter that was accepted by the
+/// that limit with room for the wrapper, so a unit that was accepted by the
 /// editor cannot make the container unwritable.
-pub const MAX_CHAPTER_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_UNIT_BYTES: usize = 4 * 1024 * 1024;
 
 /// Something went wrong building or reading a container.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EpubError {
-    /// A work with no chapters. Spec §13's fourth pitfall: never produce an empty
+    /// A work with no units. Spec §13's fourth pitfall: never produce an empty
     /// file and call it success — a reader can act on this, and a file they
     /// cannot open is not something they can act on.
-    #[error("a work with no chapters cannot be exported")]
+    #[error("a work with no units cannot be exported")]
     Empty,
-    /// More chapters than [`MAX_CHAPTERS`].
-    #[error("the work has {count} chapters, above the {max} an export may hold")]
-    TooManyChapters {
+    /// More units than [`MAX_UNITS`].
+    #[error("the work has {count} units, above the {max} an export may hold")]
+    TooManyUnits {
         /// How many the work has.
         count: usize,
         /// The ceiling.
         max: usize,
     },
-    /// A chapter larger than [`MAX_CHAPTER_BYTES`].
-    #[error("chapter {ordinal} is {bytes} bytes, above the {max} one chapter may be")]
-    ChapterTooLarge {
-        /// The chapter's position.
+    /// A unit larger than [`MAX_UNIT_BYTES`].
+    #[error("unit {ordinal} is {bytes} bytes, above the {max} one unit may be")]
+    UnitTooLarge {
+        /// The unit's position.
         ordinal: u32,
         /// Its size.
         bytes: usize,
@@ -96,14 +96,14 @@ pub enum EpubError {
     Invalid(String),
 }
 
-/// One chapter, as the container builder receives it.
+/// One unit, as the container builder receives it.
 #[derive(Debug, Clone, Copy)]
-pub struct EpubChapter<'a> {
+pub struct EpubUnit<'a> {
     /// 1-based position, which is also the file name's order.
     pub ordinal: u32,
-    /// The chapter's title as shown to the reader.
+    /// The unit's title as shown to the reader.
     pub title: &'a str,
-    /// The chapter body, as sanitized XHTML *fragments* — the output of
+    /// The unit body, as sanitized XHTML *fragments* — the output of
     /// [`crate::document::Document::to_sanitized_html`]. It is already an
     /// allow-listed subset with void elements self-closed, which is what makes it
     /// legal inside XHTML; the builder still escapes the title, which is text.
@@ -113,10 +113,10 @@ pub struct EpubChapter<'a> {
 /// Where the instance CTA goes in an export (spec §42.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CtaPlacement {
-    /// After every chapter (the default).
+    /// After every unit (the default).
     #[default]
-    PerChapter,
-    /// After the final chapter only.
+    PerUnit,
+    /// After the final unit only.
     PerWork,
     /// Nowhere.
     Off,
@@ -127,7 +127,7 @@ impl CtaPlacement {
     /// validation can name the bad value rather than silently defaulting.
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
-            "per_chapter" => Some(Self::PerChapter),
+            "per_unit" => Some(Self::PerUnit),
             "per_work" => Some(Self::PerWork),
             "off" => Some(Self::Off),
             _ => None,
@@ -137,18 +137,18 @@ impl CtaPlacement {
     /// The TOML value.
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::PerChapter => "per_chapter",
+            Self::PerUnit => "per_unit",
             Self::PerWork => "per_work",
             Self::Off => "off",
         }
     }
 
-    /// Whether the chapter at `ordinal` (1-based) of `total` carries the
+    /// Whether the unit at `ordinal` (1-based) of `total` carries the
     /// CTA under this placement.
     #[must_use]
     pub fn carries_on(&self, ordinal: u32, total: u32) -> bool {
         match self {
-            Self::PerChapter => true,
+            Self::PerUnit => true,
             Self::PerWork => ordinal == total,
             Self::Off => false,
         }
@@ -200,8 +200,8 @@ pub struct EpubInput<'a> {
     pub language: &'a str,
     /// RFC 3339, the revision's moment — `dcterms:modified` requires it.
     pub modified: &'a str,
-    /// The chapters, in reading order.
-    pub chapters: &'a [EpubChapter<'a>],
+    /// The units, in reading order.
+    pub units: &'a [EpubUnit<'a>],
     /// Provenance and permission, when the work has any to state.
     pub provenance: Option<EpubProvenance<'a>>,
     /// The instance CTA (spec §42), when the placement is not `off` and
@@ -213,7 +213,7 @@ pub struct EpubInput<'a> {
 ///
 /// Returned rather than merely asserted, because the interesting facts are the
 /// ones a caller can check against what it asked for: the title, the language,
-/// and the chapters in order.
+/// and the units in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpubFacts {
     /// `dc:identifier`.
@@ -222,13 +222,13 @@ pub struct EpubFacts {
     pub title: String,
     /// `dc:language`.
     pub language: String,
-    /// Which chapter ordinals carry the instance CTA (spec §42.3).
-    pub cta_chapters: Vec<u32>,
+    /// Which unit ordinals carry the instance CTA (spec §42.3).
+    pub cta_units: Vec<u32>,
     /// `dc:creator`, which attribution requires.
     pub author: String,
-    /// Chapter titles, in spine order.
-    pub chapter_titles: Vec<String>,
-    /// Whether a navigation document with one entry per chapter is present.
+    /// Unit titles, in spine order.
+    pub unit_titles: Vec<String>,
+    /// Whether a navigation document with one entry per unit is present.
     pub has_navigation: bool,
     /// Whether the package states where the work came from.
     pub has_provenance: bool,
@@ -243,26 +243,26 @@ pub struct EpubFacts {
 /// Build an EPUB (spec §13.1's fourth format, and §13.3's subject).
 ///
 /// # Errors
-/// [`EpubError::Empty`] for a work with no chapters, [`EpubError::TooManyChapters`]
-/// or [`EpubError::ChapterTooLarge`] when the work exceeds what one export may
-/// hold. A work with no chapters is an error rather than an empty package
+/// [`EpubError::Empty`] for a work with no units, [`EpubError::TooManyUnits`]
+/// or [`EpubError::UnitTooLarge`] when the work exceeds what one export may
+/// hold. A work with no units is an error rather than an empty package
 /// precisely because an empty package is the failure that looks like success.
 pub fn build(input: &EpubInput<'_>) -> Result<Vec<u8>, EpubError> {
-    if input.chapters.is_empty() {
+    if input.units.is_empty() {
         return Err(EpubError::Empty);
     }
-    if input.chapters.len() > MAX_CHAPTERS {
-        return Err(EpubError::TooManyChapters {
-            count: input.chapters.len(),
-            max: MAX_CHAPTERS,
+    if input.units.len() > MAX_UNITS {
+        return Err(EpubError::TooManyUnits {
+            count: input.units.len(),
+            max: MAX_UNITS,
         });
     }
-    for chapter in input.chapters {
-        if chapter.body.len() > MAX_CHAPTER_BYTES {
-            return Err(EpubError::ChapterTooLarge {
-                ordinal: chapter.ordinal,
-                bytes: chapter.body.len(),
-                max: MAX_CHAPTER_BYTES,
+    for unit in input.units {
+        if unit.body.len() > MAX_UNIT_BYTES {
+            return Err(EpubError::UnitTooLarge {
+                ordinal: unit.ordinal,
+                bytes: unit.body.len(),
+                max: MAX_UNIT_BYTES,
             });
         }
     }
@@ -288,22 +288,22 @@ pub fn build(input: &EpubInput<'_>) -> Result<Vec<u8>, EpubError> {
         Method::Deflated,
     );
     zip.add(NCX_PATH, ncx_document(input).as_bytes(), Method::Deflated);
-    for chapter in input.chapters {
+    for unit in input.units {
         zip.add(
-            &chapter_path(chapter.ordinal),
-            chapter_xhtml(input, chapter).as_bytes(),
+            &unit_path(unit.ordinal),
+            unit_xhtml(input, unit).as_bytes(),
             Method::Deflated,
         );
     }
     Ok(zip.finish())
 }
 
-/// Where a chapter lives inside the package.
+/// Where a unit lives inside the package.
 ///
 /// Zero-padded so that a reader sorting file names — and a person looking at the
 /// archive — sees the reading order rather than `10` before `2`.
-fn chapter_path(ordinal: u32) -> String {
-    format!("OEBPS/text/chapter-{ordinal:05}.xhtml")
+fn unit_path(ordinal: u32) -> String {
+    format!("OEBPS/text/unit-{ordinal:05}.xhtml")
 }
 
 fn container_xml(opf_path: &str) -> String {
@@ -396,14 +396,14 @@ fn package_document(input: &EpubInput<'_>) -> String {
         "    <item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n",
     );
     out.push_str("    <item id=\"style\" href=\"style.css\" media-type=\"text/css\"/>\n");
-    for chapter in input.chapters {
+    for unit in input.units {
         // The href is relative to the package document, which sits one level
         // above `text/` — a path that is wrong here produces a package whose
         // every spine item is "missing" in a validator and silently blank in a
         // reader that is lenient.
         out.push_str(&format!(
-            "    <item id=\"c{}\" href=\"text/chapter-{:05}.xhtml\" media-type=\"application/xhtml+xml\"/>\n",
-            chapter.ordinal, chapter.ordinal
+            "    <item id=\"c{}\" href=\"text/unit-{:05}.xhtml\" media-type=\"application/xhtml+xml\"/>\n",
+            unit.ordinal, unit.ordinal
         ));
     }
     out.push_str("  </manifest>\n");
@@ -411,8 +411,8 @@ fn package_document(input: &EpubInput<'_>) -> String {
     // The spine states the reading order. `toc="ncx"` keeps EPUB 2 readers
     // working, which is most of the devices this format is used for.
     out.push_str("  <spine toc=\"ncx\">\n");
-    for chapter in input.chapters {
-        out.push_str(&format!("    <itemref idref=\"c{}\"/>\n", chapter.ordinal));
+    for unit in input.units {
+        out.push_str(&format!("    <itemref idref=\"c{}\"/>\n", unit.ordinal));
     }
     out.push_str("  </spine>\n");
     out.push_str("</package>\n");
@@ -429,11 +429,11 @@ fn navigation_document(input: &EpubInput<'_>) -> String {
         escape_text(input.title)
     ));
     out.push_str("<nav epub:type=\"toc\" id=\"toc\">\n<h1>Contents</h1>\n<ol>\n");
-    for chapter in input.chapters {
+    for unit in input.units {
         out.push_str(&format!(
-            "<li><a href=\"text/chapter-{:05}.xhtml\">{}</a></li>\n",
-            chapter.ordinal,
-            escape_text(&chapter_label(chapter))
+            "<li><a href=\"text/unit-{:05}.xhtml\">{}</a></li>\n",
+            unit.ordinal,
+            escape_text(&unit_label(unit))
         ));
     }
     out.push_str("</ol>\n</nav>\n");
@@ -464,49 +464,49 @@ fn ncx_document(input: &EpubInput<'_>) -> String {
         escape_text(input.title)
     ));
     out.push_str("<navMap>\n");
-    for chapter in input.chapters {
+    for unit in input.units {
         out.push_str(&format!(
             "<navPoint id=\"n{}\" playOrder=\"{}\">\n<navLabel><text>{}</text></navLabel>\n\
-             <content src=\"text/chapter-{:05}.xhtml\"/>\n</navPoint>\n",
-            chapter.ordinal,
-            chapter.ordinal,
-            escape_text(&chapter_label(chapter)),
-            chapter.ordinal
+             <content src=\"text/unit-{:05}.xhtml\"/>\n</navPoint>\n",
+            unit.ordinal,
+            unit.ordinal,
+            escape_text(&unit_label(unit)),
+            unit.ordinal
         ));
     }
     out.push_str("</navMap>\n</ncx>\n");
     out
 }
 
-/// A chapter's own title, or its number when the author did not give one.
+/// A unit's own title, or its number when the author did not give one.
 ///
 /// The fallback is a number and says so; it does not invent a title, which is the
-/// ported defect the eFiction work found (`Chapter {i}` looking plausible and
+/// ported defect the eFiction work found (`Unit {i}` looking plausible and
 /// being wrong).
-fn chapter_label(chapter: &EpubChapter<'_>) -> String {
-    let title = chapter.title.trim();
+fn unit_label(unit: &EpubUnit<'_>) -> String {
+    let title = unit.title.trim();
     if title.is_empty() {
-        format!("Chapter {}", chapter.ordinal)
+        format!("Unit {}", unit.ordinal)
     } else {
         title.to_owned()
     }
 }
 
-fn chapter_xhtml(input: &EpubInput<'_>, chapter: &EpubChapter<'_>) -> String {
+fn unit_xhtml(input: &EpubInput<'_>, unit: &EpubUnit<'_>) -> String {
     let mut out = String::new();
     out.push_str(XHTML_OPEN);
     out.push_str(&format!(
         "<title>{} — {}</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"../style.css\"/>\n</head>\n<body>\n",
-        escape_text(&chapter_label(chapter)),
+        escape_text(&unit_label(unit)),
         escape_text(input.title)
     ));
     out.push_str(&format!(
-        "<h1 class=\"chapter-title\">{}</h1>\n",
-        escape_text(&chapter_label(chapter))
+        "<h1 class=\"unit-title\">{}</h1>\n",
+        escape_text(&unit_label(unit))
     ));
-    // A provenance line on every chapter rather than only in the package: a
-    // chapter is the unit that gets copied out of an EPUB, and an extracted
-    // chapter that no longer says where it came from is an orphan.
+    // A provenance line on every unit rather than only in the package: a
+    // unit is the unit that gets copied out of an EPUB, and an extracted
+    // unit that no longer says where it came from is an orphan.
     if let Some(provenance) = input.provenance {
         out.push_str(&format!(
             "<p class=\"provenance\">{} — <a href=\"{}\">{}</a></p>\n",
@@ -516,14 +516,14 @@ fn chapter_xhtml(input: &EpubInput<'_>, chapter: &EpubChapter<'_>) -> String {
         ));
     }
     // The body is already an allow-listed XHTML fragment (see the module docs).
-    out.push_str(chapter.body);
+    out.push_str(unit.body);
     // The instance CTA (spec §42): appended after the last paragraph, never
     // interleaved, and never inside the attribution block — attribution is
     // legal notice, not growth surface (§42.3).
     if let Some(cta) = input.cta {
         if cta
             .placement
-            .carries_on(chapter.ordinal, input.chapters.len() as u32)
+            .carries_on(unit.ordinal, input.units.len() as u32)
         {
             out.push_str(&format!(
                 "\n<div class=\"{}\">{}</div>\n",
@@ -570,7 +570,7 @@ const XHTML_OPEN: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 /// readable on a device that applies no styling of its own.
 const STYLE: &str = "\
 body { margin: 1em auto; max-width: 34em; padding: 0 1em; line-height: 1.5; }
-h1.chapter-title { font-size: 1.3em; margin: 0 0 1em; }
+h1.unit-title { font-size: 1.3em; margin: 0 0 1em; }
 p.provenance { font-size: 0.85em; color: #555; }
 section.attribution { margin-top: 2em; font-size: 0.9em; color: #555; }
 blockquote { margin: 1em 1.5em; }
@@ -585,7 +585,7 @@ blockquote { margin: 1em 1.5em; }
 /// The checks are the ones the spec lists, and they are structural rather than
 /// stylistic: the container is a ZIP whose first entry is a stored `mimetype`
 /// holding exactly the right string, `container.xml` names a package document
-/// that parses as XML with the required metadata, its spine lists every chapter
+/// that parses as XML with the required metadata, its spine lists every unit
 /// in order, and each spine item exists as an entry. Text is validated as UTF-8,
 /// which is the only encoding an EPUB may use.
 ///
@@ -659,31 +659,31 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
     let has_provenance = metadata.contains("<dc:source>");
     let has_permission = metadata.contains("<dc:rights>");
 
-    // 4. The navigation document, and the chapters it must name.
+    // 4. The navigation document, and the units it must name.
     let nav = archive.text(NAV_PATH)?;
-    // The nav's own links, filtered to the chapter files: a future nav that also
+    // The nav's own links, filtered to the unit files: a future nav that also
     // links a colophon or a licence must not shift the entry that corresponds to
     // each spine item.
     let nav_links: Vec<&str> = find_all_between(&nav, "<a href=\"", "\"")
         .into_iter()
-        .filter(|href| href.starts_with("text/chapter-"))
+        .filter(|href| href.starts_with("text/unit-"))
         .collect();
     let has_navigation = nav.contains("epub:type=\"toc\"") && !nav_links.is_empty();
 
-    // 5. The spine: every chapter, in order, each one a real entry.
+    // 5. The spine: every unit, in order, each one a real entry.
     let spine = require_between(&opf, "<spine", "</spine>")
         .ok_or_else(|| EpubError::Invalid("the package has no spine".to_owned()))?;
     let spine_ids = find_all_between(spine, "idref=\"", "\"");
     if spine_ids.is_empty() {
         return Err(EpubError::Invalid(
-            "the spine names no chapters, so the package has no reading order".to_owned(),
+            "the spine names no units, so the package has no reading order".to_owned(),
         ));
     }
     let manifest = require_between(&opf, "<manifest", "</manifest>")
         .ok_or_else(|| EpubError::Invalid("the package has no manifest".to_owned()))?;
 
-    let mut chapter_titles = Vec::with_capacity(spine_ids.len());
-    let mut cta_chapters = Vec::new();
+    let mut unit_titles = Vec::with_capacity(spine_ids.len());
+    let mut cta_units = Vec::new();
     let mut previous: Option<u32> = None;
     for idref in &spine_ids {
         // The manifest maps the id to the file, which is the join a reader makes.
@@ -709,10 +709,10 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
             }
         }
 
-        // The chapter title is what the nav document says it is, which is the
+        // The unit title is what the nav document says it is, which is the
         // thing a reader sees; taking it from the file name would report the
         // ordinal to a reader's table of contents.
-        let nav_entry = nav_links.get(chapter_titles.len()).ok_or_else(|| {
+        let nav_entry = nav_links.get(unit_titles.len()).ok_or_else(|| {
             EpubError::Invalid(format!("the navigation document names no entry for {path}"))
         })?;
         if *nav_entry != href {
@@ -722,30 +722,30 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
         }
         let label = require_between(&nav, &format!("<a href=\"{href}\">"), "</a>")
             .ok_or_else(|| EpubError::Invalid(format!("the nav entry for {href} has no label")))?;
-        chapter_titles.push(unescape(label));
+        unit_titles.push(unescape(label));
 
         // Order: the spine is the reading order, and a spine that runs backwards
-        // is a work whose chapters are shuffled for every reader of the export.
+        // is a work whose units are shuffled for every reader of the export.
         let ordinal = ordinal_from_href(href).ok_or_else(|| {
-            EpubError::Invalid(format!("the spine item {href:?} is not a chapter file"))
+            EpubError::Invalid(format!("the spine item {href:?} is not a unit file"))
         })?;
         if let Some(previous) = previous {
             if ordinal <= previous {
                 return Err(EpubError::Invalid(format!(
-                    "the spine puts chapter {ordinal} after chapter {previous}"
+                    "the spine puts unit {ordinal} after unit {previous}"
                 )));
             }
         }
         previous = Some(ordinal);
 
-        // Which chapters carry the instance CTA (spec §42.3): reported from
+        // Which units carry the instance CTA (spec §42.3): reported from
         // the parsed bytes so tests assert placement, not the builder's intent.
         if body.contains(&format!("class=\"{}\"", EpubCta::CLASS)) {
-            cta_chapters.push(ordinal);
+            cta_units.push(ordinal);
         }
     }
 
-    // 6. Non-code-unit text: the metadata and every chapter had to decode as
+    // 6. Non-code-unit text: the metadata and every unit had to decode as
     //    UTF-8 to get here, which is the check. This confirms the *content* is
     //    UTF-8 rather than merely ASCII-compatible, which is what a reader with
     //    a non-Latin script in a title depends on.
@@ -765,8 +765,8 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
         title,
         language,
         author,
-        chapter_titles,
-        cta_chapters,
+        unit_titles,
+        cta_units,
         has_navigation,
         has_provenance,
         has_permission,
@@ -814,9 +814,9 @@ fn find_all_between<'a>(haystack: &'a str, open: &str, close: &str) -> Vec<&'a s
     out
 }
 
-/// `text/chapter-00007.xhtml` is chapter 7.
+/// `text/unit-00007.xhtml` is unit 7.
 fn ordinal_from_href(href: &str) -> Option<u32> {
-    let stem = href.strip_prefix("text/chapter-")?.strip_suffix(".xhtml")?;
+    let stem = href.strip_prefix("text/unit-")?.strip_suffix(".xhtml")?;
     stem.parse().ok()
 }
 
@@ -861,7 +861,7 @@ struct ZipEntry {
 /// A ZIP archive, written by hand.
 ///
 /// Only what an EPUB needs: no data descriptors, no ZIP64 (an export large enough
-/// for 4 GiB is refused before it gets here by [`MAX_CHAPTERS`]), no encryption.
+/// for 4 GiB is refused before it gets here by [`MAX_UNITS`]), no encryption.
 /// Every field the format requires is written explicitly, which is what lets the
 /// mimetype entry be exactly what OCF demands.
 #[derive(Default)]
@@ -1146,21 +1146,21 @@ fn read_u32(bytes: &[u8], at: usize) -> Result<u32, EpubError> {
 mod tests {
     use super::*;
 
-    fn chapters() -> Vec<EpubChapter<'static>> {
+    fn units() -> Vec<EpubUnit<'static>> {
         vec![
-            EpubChapter {
+            EpubUnit {
                 ordinal: 1,
                 title: "An Arrival",
                 body: "<p>It began, as these things do, at an awkward hour.</p>",
             },
-            EpubChapter {
+            EpubUnit {
                 ordinal: 2,
                 // No title: the builder must not invent one, and must not omit
-                // the chapter either.
+                // the unit either.
                 title: "  ",
                 body: "<p>The second movement.</p><hr /><p>And then silence.</p>",
             },
-            EpubChapter {
+            EpubUnit {
                 // A title with characters that are XML-significant, because a
                 // reader's own work is where those appear.
                 ordinal: 3,
@@ -1170,14 +1170,14 @@ mod tests {
         ]
     }
 
-    fn input<'a>(chapters: &'a [EpubChapter<'a>]) -> EpubInput<'a> {
+    fn input<'a>(units: &'a [EpubUnit<'a>]) -> EpubInput<'a> {
         EpubInput {
             identifier: "urn:uuid:11111111-2222-3333-4444-555555555555",
             title: "A Work & Its Title",
             author: "Someone",
             language: "en",
             modified: "2026-09-11T00:00:00Z",
-            chapters,
+            units,
             provenance: Some(EpubProvenance {
                 source_name: "Archive of Our Own",
                 source_url: "https://archiveofourown.org/works/1",
@@ -1192,7 +1192,7 @@ mod tests {
     // --- CTA placement (spec §42) -----------------------------------------
 
     fn input_with_cta<'a>(
-        chapters: &'a [EpubChapter<'a>],
+        units: &'a [EpubUnit<'a>],
         placement: CtaPlacement,
     ) -> EpubInput<'a> {
         EpubInput {
@@ -1200,51 +1200,51 @@ mod tests {
                 placement,
                 html: "<p>If you enjoyed this, <strong>leave a comment</strong> or <strong>share</strong> with a friend.</p>",
             }),
-            ..input(chapters)
+            ..input(units)
         }
     }
 
     #[test]
-    fn cta_default_is_per_chapter_on_every_chapter() {
-        let chapters = chapters();
-        let bytes = build(&input_with_cta(&chapters, CtaPlacement::PerChapter)).expect("build");
+    fn cta_default_is_per_unit_on_every_unit() {
+        let units = units();
+        let bytes = build(&input_with_cta(&units, CtaPlacement::PerUnit)).expect("build");
         let facts = validate(&bytes).expect("validate");
-        assert_eq!(facts.cta_chapters, vec![1, 2, 3]);
+        assert_eq!(facts.cta_units, vec![1, 2, 3]);
     }
 
     #[test]
-    fn cta_per_work_lands_on_the_last_chapter_only() {
-        let chapters = chapters();
-        let bytes = build(&input_with_cta(&chapters, CtaPlacement::PerWork)).expect("build");
+    fn cta_per_work_lands_on_the_last_unit_only() {
+        let units = units();
+        let bytes = build(&input_with_cta(&units, CtaPlacement::PerWork)).expect("build");
         let facts = validate(&bytes).expect("validate");
-        assert_eq!(facts.cta_chapters, vec![3]);
+        assert_eq!(facts.cta_units, vec![3]);
     }
 
     #[test]
     fn cta_off_places_nothing_anywhere() {
-        let chapters = chapters();
-        let bytes = build(&input_with_cta(&chapters, CtaPlacement::Off)).expect("build");
+        let units = units();
+        let bytes = build(&input_with_cta(&units, CtaPlacement::Off)).expect("build");
         let facts = validate(&bytes).expect("validate");
-        assert!(facts.cta_chapters.is_empty());
+        assert!(facts.cta_units.is_empty());
     }
 
     #[test]
     fn cta_absent_leaves_the_export_untouched() {
-        let chapters = chapters();
-        let bytes = build(&input(&chapters)).expect("build");
+        let units = units();
+        let bytes = build(&input(&units)).expect("build");
         let facts = validate(&bytes).expect("validate");
-        assert!(facts.cta_chapters.is_empty());
+        assert!(facts.cta_units.is_empty());
     }
 
     #[test]
     fn cta_never_reaches_the_attribution_block() {
-        let chapters = chapters();
-        let bytes = build(&input_with_cta(&chapters, CtaPlacement::PerChapter)).expect("build");
+        let units = units();
+        let bytes = build(&input_with_cta(&units, CtaPlacement::PerUnit)).expect("build");
         // The attribution section is a separate document; the CTA class must
-        // appear in no document other than the chapters (§42.3).
+        // appear in no document other than the units (§42.3).
         let archive = Archive::read(&bytes).expect("archive");
         for entry in &archive.entries {
-            if entry.name.starts_with("OEBPS/text/chapter-") {
+            if entry.name.starts_with("OEBPS/text/unit-") {
                 continue;
             }
             let text = archive.text(&entry.name).unwrap_or_default();
@@ -1259,32 +1259,32 @@ mod tests {
     #[test]
     fn cta_placement_parses_and_round_trips() {
         assert_eq!(
-            CtaPlacement::parse("per_chapter"),
-            Some(CtaPlacement::PerChapter)
+            CtaPlacement::parse("per_unit"),
+            Some(CtaPlacement::PerUnit)
         );
         assert_eq!(CtaPlacement::parse("per_work"), Some(CtaPlacement::PerWork));
         assert_eq!(CtaPlacement::parse("off"), Some(CtaPlacement::Off));
         assert_eq!(CtaPlacement::parse("everywhere"), None);
-        assert_eq!(CtaPlacement::default().as_str(), "per_chapter");
+        assert_eq!(CtaPlacement::default().as_str(), "per_unit");
         // carries_on: the placement rule, stated directly.
-        assert!(CtaPlacement::PerChapter.carries_on(1, 3));
-        assert!(CtaPlacement::PerChapter.carries_on(3, 3));
+        assert!(CtaPlacement::PerUnit.carries_on(1, 3));
+        assert!(CtaPlacement::PerUnit.carries_on(3, 3));
         assert!(!CtaPlacement::PerWork.carries_on(1, 3));
         assert!(CtaPlacement::PerWork.carries_on(3, 3));
         assert!(!CtaPlacement::Off.carries_on(3, 3));
     }
 
     #[test]
-    fn an_epub_export_opens_and_contains_every_chapter() {
+    fn an_epub_export_opens_and_contains_every_unit() {
         // The plan's own criterion for this format.
-        let chapters = chapters();
-        let bytes = build(&input(&chapters)).expect("an epub");
+        let units = units();
+        let bytes = build(&input(&units)).expect("an epub");
         let facts = validate(&bytes).expect("the epub validates");
 
-        assert_eq!(facts.chapter_titles.len(), 3, "{facts:?}");
+        assert_eq!(facts.unit_titles.len(), 3, "{facts:?}");
         assert_eq!(
-            facts.chapter_titles,
-            ["An Arrival", "Chapter 2", "A & B <not a tag>"]
+            facts.unit_titles,
+            ["An Arrival", "Unit 2", "A & B <not a tag>"]
         );
         assert_eq!(facts.title, "A Work & Its Title");
         assert_eq!(facts.author, "Someone");
@@ -1296,12 +1296,12 @@ mod tests {
         );
         assert!(facts.has_permission, "the source stated terms; they travel");
 
-        // Every chapter's prose is in the container, and so is the one whose
+        // Every unit's prose is in the container, and so is the one whose
         // title needed escaping.
         let archive = Archive::read(&bytes).expect("a zip");
         let third = archive
-            .text("OEBPS/text/chapter-00003.xhtml")
-            .expect("chapter 3");
+            .text("OEBPS/text/unit-00003.xhtml")
+            .expect("unit 3");
         assert!(third.contains("Ending."));
         assert!(third.contains("A &amp; B &lt;not a tag&gt;"), "{third}");
     }
@@ -1311,8 +1311,8 @@ mod tests {
         // The first entry, stored, with no extra field: a reader reads these
         // bytes at a fixed offset before it has parsed anything else, and
         // several refuse the file outright if this is wrong.
-        let chapters = chapters();
-        let bytes = build(&input(&chapters)).expect("an epub");
+        let units = units();
+        let bytes = build(&input(&units)).expect("an epub");
         assert_eq!(&bytes[0..4], b"PK\x03\x04", "the first local header");
         let method = u16::from_le_bytes([bytes[8], bytes[9]]);
         assert_eq!(method, 0, "mimetype must be stored, not deflated");
@@ -1329,14 +1329,14 @@ mod tests {
     fn the_bytes_are_the_same_every_time() {
         // The output goes into a content-addressed blob store: two exports of an
         // unchanged work must be one blob, which a timestamp would prevent.
-        let chapters = chapters();
-        let first = build(&input(&chapters)).expect("an epub");
-        let second = build(&input(&chapters)).expect("an epub");
+        let units = units();
+        let first = build(&input(&units)).expect("an epub");
+        let second = build(&input(&units)).expect("an epub");
         assert_eq!(first, second);
     }
 
     #[test]
-    fn a_work_with_no_chapters_is_an_error_rather_than_an_empty_package() {
+    fn a_work_with_no_units_is_an_error_rather_than_an_empty_package() {
         // The plan's fourth pitfall, and the reason this is an error: a file that
         // exists and opens to nothing looks like success.
         let error = build(&input(&[])).expect_err("must refuse");
@@ -1344,9 +1344,9 @@ mod tests {
     }
 
     #[test]
-    fn the_chapter_order_is_the_spine_and_the_navigation() {
-        let chapters = chapters();
-        let bytes = build(&input(&chapters)).expect("an epub");
+    fn the_unit_order_is_the_spine_and_the_navigation() {
+        let units = units();
+        let bytes = build(&input(&units)).expect("an epub");
         let archive = Archive::read(&bytes).expect("a zip");
         let opf = archive.text(OPF_PATH).expect("the package");
         let spine = require_between(&opf, "<spine", "</spine>").expect("a spine");
@@ -1354,7 +1354,7 @@ mod tests {
         assert_eq!(refs, ["c1", "c2", "c3"], "the reading order");
 
         let nav = archive.text(NAV_PATH).expect("the nav");
-        let links = find_all_between(&nav, "href=\"text/chapter-", "\"");
+        let links = find_all_between(&nav, "href=\"text/unit-", "\"");
         assert_eq!(
             links,
             ["00001.xhtml", "00002.xhtml", "00003.xhtml"],
@@ -1367,8 +1367,8 @@ mod tests {
         // Attribution is not decoration: an export that names nobody is one a
         // reader cannot cite, and the validator is where that becomes an error
         // rather than a missing line in a library.
-        let chapters = chapters();
-        let bytes = build(&input(&chapters)).expect("an epub");
+        let units = units();
+        let bytes = build(&input(&units)).expect("an epub");
 
         // Damage the package's attribution and confirm the validator says why.
         let damaged = replace_entry(&bytes, OPF_PATH, |opf| {

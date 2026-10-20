@@ -4,7 +4,7 @@
 //!
 //! An adapter knows how to read one site and nothing else. It is handed a URL
 //! and optional credentials, and it hands back **data**: a work's metadata, a
-//! list of its chapters, chapter bodies. It never sees a database, never writes
+//! list of its units, unit bodies. It never sees a database, never writes
 //! a row, and never decides whether an import should happen — that decision is
 //! the domain crate's (`plan_import`) and the repository's, exactly as
 //! spec §11.1 intends ("Adapters use the shared safe fetcher") and the
@@ -201,23 +201,23 @@ impl VerificationStatus {
 ///
 /// Capability absence must be visible (spec §11.1), so this is reported to the
 /// reader in the source catalogue and stored on the `sources` row. A source that
-/// cannot list chapters says so, instead of returning an empty list that reads
-/// like a work with no chapters.
+/// cannot list units says so, instead of returning an empty list that reads
+/// like a work with no units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceCapabilities {
-    /// Metadata can be read without fetching any chapter body.
+    /// Metadata can be read without fetching any unit body.
     pub metadata: bool,
-    /// Chapter bodies can be read.
-    pub chapters: bool,
-    /// A single chapter can be fetched by ordinal, without re-reading the whole
-    /// work. When this is false, a failed chapter cannot be retried on its own
+    /// Unit bodies can be read.
+    pub units: bool,
+    /// A single unit can be fetched by ordinal, without re-reading the whole
+    /// work. When this is false, a failed unit cannot be retried on its own
     /// and the import must re-read the work — an honest limit, surfaced at
     /// planning time rather than discovered on retry.
-    pub per_chapter_fetch: bool,
+    pub per_unit_fetch: bool,
     /// The source can enumerate another author's works (spec §11.9).
     pub bibliography: bool,
     /// The source exposes a revision marker (an edit time, a version), so an
-    /// update check can answer "unchanged" without reading every chapter.
+    /// update check can answer "unchanged" without reading every unit.
     pub incremental: bool,
     /// How the source authenticates.
     pub authentication: AuthKind,
@@ -234,8 +234,8 @@ impl SourceCapabilities {
     pub const fn public_read() -> Self {
         Self {
             metadata: true,
-            chapters: true,
-            per_chapter_fetch: false,
+            units: true,
+            per_unit_fetch: false,
             bibliography: false,
             incremental: false,
             authentication: AuthKind::None,
@@ -278,45 +278,45 @@ impl WorkStatus {
     }
 }
 
-/// One chapter's identity, without its body.
+/// One unit's identity, without its body.
 ///
 /// A preview returns these: enough to show the reader what they are about to
 /// import and how many requests it will take, carrying no text at all.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChapterRef {
+pub struct UnitRef {
     /// 1-based position in the work. The ordinal is what a reader's progress and
     /// a reader's notes are mapped onto across a re-import, so it must be stable
     /// across runs for an unchanged work.
     pub ordinal: u32,
-    /// The source's own chapter identifier, when it has one that is stable.
-    /// Used as the dedupe key in `import_chapters`; falls back to the ordinal
+    /// The source's own unit identifier, when it has one that is stable.
+    /// Used as the dedupe key in `import_units`; falls back to the ordinal
     /// when the source has nothing better.
-    pub source_chapter_key: String,
-    /// The chapter's title as shown by the source. May be empty.
+    pub source_unit_key: String,
+    /// The unit's title as shown by the source. May be empty.
     pub title: String,
 }
 
-/// One chapter's body, with the identity of [`ChapterRef`].
+/// One unit's body, with the identity of [`UnitRef`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SourceChapter {
+pub struct SourceUnit {
     /// Position in the work, 1-based.
     pub ordinal: u32,
-    /// The source's stable identifier for this chapter.
-    pub source_chapter_key: String,
+    /// The source's stable identifier for this unit.
+    pub source_unit_key: String,
     /// Title as shown by the source.
     pub title: String,
-    /// The chapter body as HTML, sanitised on the way out of this crate.
+    /// The unit body as HTML, sanitised on the way out of this crate.
     ///
     /// It is sanitised here rather than at the storage boundary because an
     /// adapter is the only code that knows which parts of a foreign page are
     /// content: a source's navigation chrome, script tags and tracking images
     /// are noise that no downstream sanitiser can distinguish from prose.
     pub content_html: String,
-    /// Image URLs found in the chapter body, resolved against the page URL.
+    /// Image URLs found in the unit body, resolved against the page URL.
     ///
     /// The sanitiser strips `<img>` tags (they are not on the allow-list), so
     /// these are collected beforehand for the media-rescue pipeline (spec §32.7.9).
-    /// Empty when the chapter has no images.
+    /// Empty when the unit has no images.
     pub image_urls: Vec<String>,
 }
 
@@ -356,10 +356,10 @@ pub struct SourceWork {
     pub published_at: Option<OffsetDateTime>,
     /// When the source says the work last changed.
     pub updated_at: Option<OffsetDateTime>,
-    /// The chapter list. Empty when the source could not enumerate chapters even
-    /// though [`SourceCapabilities::chapters`] is true — which is the signal the
+    /// The unit list. Empty when the source could not enumerate units even
+    /// though [`SourceCapabilities::units`] is true — which is the signal the
     /// import treats as a parse failure, not as an empty work.
-    pub chapters: Vec<ChapterRef>,
+    pub units: Vec<UnitRef>,
     /// The source's rating string, as it displays it (`Teen And Up Audiences`).
     /// Kept as text; mapping it onto Darkhold's own rating scale is a
     /// classification decision (spec §12.2), not a scraping one.
@@ -373,10 +373,10 @@ pub struct SourceWork {
 }
 
 impl SourceWork {
-    /// How many chapters a full import would have to read.
+    /// How many units a full import would have to read.
     #[must_use]
-    pub fn chapter_count(&self) -> usize {
-        self.chapters.len()
+    pub fn unit_count(&self) -> usize {
+        self.units.len()
     }
 }
 
@@ -467,7 +467,7 @@ pub enum SourceError {
     Network(String),
     /// The page arrived and did not contain what it must contain.
     ///
-    /// Deliberately loud. A parser that returns zero chapters from a page it
+    /// Deliberately loud. A parser that returns zero units from a page it
     /// does not recognise produces an empty library item that looks like
     /// success (spec §11.6, plan "A source that changes its HTML must fail
     /// loudly").
@@ -872,7 +872,7 @@ pub trait SourceAdapter: Send + Sync {
     /// why the registry test asserts every listed host is claimed by the adapter.
     fn hosts(&self) -> Vec<String>;
 
-    /// Read a work's metadata and chapter list, and no chapter bodies.
+    /// Read a work's metadata and unit list, and no unit bodies.
     ///
     /// This is what `POST /imports/preview` calls, so it must not write
     /// anything anywhere — a preview that has already imported is a trap.
@@ -883,30 +883,30 @@ pub trait SourceAdapter: Send + Sync {
         creds: Option<&Credentials>,
     ) -> SourceResult<SourceWork>;
 
-    /// Read every chapter body of a work.
-    async fn fetch_chapters(
+    /// Read every unit body of a work.
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>>;
+    ) -> SourceResult<Vec<SourceUnit>>;
 
-    /// Read one chapter body by ordinal.
+    /// Read one unit body by ordinal.
     ///
     /// Default: refused. Overridden only where the source genuinely addresses a
-    /// chapter on its own, and advertised through
-    /// [`SourceCapabilities::per_chapter_fetch`] so the import knows before it
+    /// unit on its own, and advertised through
+    /// [`SourceCapabilities::per_unit_fetch`] so the import knows before it
     /// needs to. A default that silently re-read the whole work would make the
     /// capability flag a lie.
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         _fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         Err(SourceError::Unsupported(format!(
-            "{} cannot fetch chapter {ordinal} of {} on its own",
+            "{} cannot fetch unit {ordinal} of {} on its own",
             self.key(),
             work.source_work_key
         )))
@@ -925,12 +925,12 @@ pub trait SourceAdapter: Send + Sync {
         )))
     }
 
-    /// Parse chapters from a page that has already been retrieved.
-    fn chapters_from_html(
+    /// Parse units from a page that has already been retrieved.
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         let _ = (html, work);
         Err(SourceError::Unsupported(format!(
             "{} has no fixture entry point",
@@ -1130,7 +1130,7 @@ mod tests {
         assert!(SourceError::Blocked.is_transient());
         // Not transient: a retry would fail identically.
         assert!(!SourceError::NotFound.is_transient());
-        assert!(!SourceError::Parse("no chapter div".into()).is_transient());
+        assert!(!SourceError::Parse("no unit div".into()).is_transient());
         assert!(!SourceError::AuthRequired("expired".into()).is_transient());
         // A hold is the source's own state, not a refusal aimed at us: waiting
         // does not lift it.
@@ -1200,7 +1200,7 @@ mod tests {
     }
 
     #[test]
-    fn a_work_reports_its_chapter_count() {
+    fn a_work_reports_its_unit_count() {
         let work = SourceWork {
             source_key: SourceKey::new("ao3"),
             source_work_key: "1".into(),
@@ -1214,15 +1214,15 @@ mod tests {
             status: WorkStatus::Unknown,
             published_at: None,
             updated_at: None,
-            chapters: vec![
-                ChapterRef {
+            units: vec![
+                UnitRef {
                     ordinal: 1,
-                    source_chapter_key: "1".into(),
+                    source_unit_key: "1".into(),
                     title: "One".into(),
                 },
-                ChapterRef {
+                UnitRef {
                     ordinal: 2,
-                    source_chapter_key: "2".into(),
+                    source_unit_key: "2".into(),
                     title: "Two".into(),
                 },
             ],
@@ -1230,6 +1230,6 @@ mod tests {
             warning_texts: Vec::new(),
             tags: Vec::new(),
         };
-        assert_eq!(work.chapter_count(), 2);
+        assert_eq!(work.unit_count(), 2);
     }
 }

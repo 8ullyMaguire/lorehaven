@@ -34,7 +34,7 @@ pub enum ContributorRole {
     Owner,
     /// May edit, publish and invite; may not delete.
     Coauthor,
-    /// May edit chapters; may not publish.
+    /// May edit units; may not publish.
     Editor,
     /// May read a draft and comment; may not change text.
     BetaReader,
@@ -507,10 +507,10 @@ pub fn can_manage_contributors(actor: &Actor, contributors: &[Contributor]) -> D
 pub struct PublicationFacts<'a> {
     /// The work's title, as the author last set it.
     pub title: &'a str,
-    /// How many chapters exist.
-    pub chapter_count: usize,
+    /// How many units exist.
+    pub unit_count: usize,
     /// How many of them have a revision with any text.
-    pub chapters_with_content: usize,
+    pub units_with_content: usize,
     /// The current lifecycle state.
     pub lifecycle: Lifecycle,
 }
@@ -527,16 +527,16 @@ pub fn publication_readiness(facts: &PublicationFacts<'_>) -> Result<()> {
             "A work needs a title before it can be published.",
         ));
     }
-    if facts.chapter_count == 0 {
+    if facts.unit_count == 0 {
         return Err(AppError::field(
-            "chapters",
-            "A work needs at least one chapter before it can be published.",
+            "units",
+            "A work needs at least one unit before it can be published.",
         ));
     }
-    if facts.chapters_with_content == 0 {
+    if facts.units_with_content == 0 {
         return Err(AppError::field(
-            "chapters",
-            "Write something in a chapter before publishing: an empty work has nothing to read.",
+            "units",
+            "Write something in a unit before publishing: an empty work has nothing to read.",
         ));
     }
     if matches!(facts.lifecycle, Lifecycle::Deleted) {
@@ -739,25 +739,25 @@ mod tests {
         );
     }
 
-    fn facts<'a>(title: &'a str, chapters: usize, with_content: usize) -> PublicationFacts<'a> {
+    fn facts<'a>(title: &'a str, units: usize, with_content: usize) -> PublicationFacts<'a> {
         PublicationFacts {
             title,
-            chapter_count: chapters,
-            chapters_with_content: with_content,
+            unit_count: units,
+            units_with_content: with_content,
             lifecycle: Lifecycle::Draft,
         }
     }
 
     #[test]
-    fn publication_requires_a_title_a_chapter_and_content() {
+    fn publication_requires_a_title_a_unit_and_content() {
         let error = publication_readiness(&facts("   ", 1, 1)).expect_err("no title");
         assert!(error.field_errors().contains_key("title"));
 
-        let error = publication_readiness(&facts("A Title", 0, 0)).expect_err("no chapters");
-        assert!(error.field_errors().contains_key("chapters"));
+        let error = publication_readiness(&facts("A Title", 0, 0)).expect_err("no units");
+        assert!(error.field_errors().contains_key("units"));
 
         let error = publication_readiness(&facts("A Title", 2, 0)).expect_err("nothing written");
-        assert!(error.field_errors().contains_key("chapters"));
+        assert!(error.field_errors().contains_key("units"));
 
         publication_readiness(&facts("A Title", 2, 1)).expect("ready");
     }

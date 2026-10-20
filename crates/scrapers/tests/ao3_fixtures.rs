@@ -86,21 +86,21 @@ fn a_work_page_yields_its_chapter_list_with_the_sources_own_keys() {
         )
         .expect("parses");
 
-    assert_eq!(work.chapter_count(), 3);
-    let ordinals: Vec<u32> = work.chapters.iter().map(|c| c.ordinal).collect();
+    assert_eq!(work.unit_count(), 3);
+    let ordinals: Vec<u32> = work.units.iter().map(|c| c.ordinal).collect();
     assert_eq!(ordinals, vec![1, 2, 3]);
     // The ids come from the chapter index's option values, so a re-import keys
     // the same chapter the same way.
     let keys: Vec<&str> = work
-        .chapters
+        .units
         .iter()
-        .map(|c| c.source_chapter_key.as_str())
+        .map(|c| c.source_unit_key.as_str())
         .collect();
     assert_eq!(keys, vec!["246151286", "246151581", "246152346"]);
     // Titles are reduced from `1. Title`, not left as the index renders them.
-    assert_eq!(work.chapters[0].title, "2 Minutes to Midnight");
-    assert_eq!(work.chapters[1].title, "Stratego");
-    assert_eq!(work.chapters[2].title, "Nocturne in the Moonlight");
+    assert_eq!(work.units[0].title, "2 Minutes to Midnight");
+    assert_eq!(work.units[1].title, "Stratego");
+    assert_eq!(work.units[2].title, "Nocturne in the Moonlight");
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn a_whole_work_page_yields_every_chapter_body() {
         .expect("parses");
 
     let chapters = adapter
-        .chapters_from_html(&fixture("ao3/work-full.html"), &work)
+        .units_from_html(&fixture("ao3/work-full.html"), &work)
         .expect("the recorded whole-work page parses");
 
     assert_eq!(chapters.len(), 3);
@@ -156,7 +156,7 @@ fn a_whole_work_page_yields_every_chapter_body() {
     // a re-import would treat every chapter as new.
     let keys: Vec<&str> = chapters
         .iter()
-        .map(|c| c.source_chapter_key.as_str())
+        .map(|c| c.source_unit_key.as_str())
         .collect();
     assert_eq!(keys, vec!["246151286", "246151581", "246152346"]);
 
@@ -191,7 +191,7 @@ fn the_sanitised_body_carries_no_scripts_or_handlers() {
         )
         .expect("parses");
     let chapters = adapter
-        .chapters_from_html(&fixture("ao3/work-full.html"), &work)
+        .units_from_html(&fixture("ao3/work-full.html"), &work)
         .expect("parses");
 
     for chapter in &chapters {
@@ -232,7 +232,7 @@ fn an_ongoing_work_is_reported_as_ongoing() {
     assert_eq!(work.author_text, "withMoxie");
     // `Updated:` rather than `Completed:`, and `10/30` chapters.
     assert_eq!(work.status, WorkStatus::Ongoing);
-    assert_eq!(work.chapter_count(), 10);
+    assert_eq!(work.unit_count(), 10);
     assert_eq!(work.source_work_key, "91806026");
 }
 
@@ -270,7 +270,7 @@ fn a_page_that_is_not_a_work_page_fails_loudly() {
         )
         .expect("parses");
     let error = adapter()
-        .chapters_from_html("<html><body><div>nothing here</div></body></html>", &work)
+        .units_from_html("<html><body><div>nothing here</div></body></html>", &work)
         .expect_err("a whole-work page with no chapters is a parse failure");
     assert!(
         matches!(error, SourceError::Parse(_)),

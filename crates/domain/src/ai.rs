@@ -230,7 +230,7 @@ pub type AiOutcome<T> = std::result::Result<T, AiAbstain>;
 ///
 /// The prompt and the private text travel together because §23.7 requires the provider's
 /// retention and data-use disclosure to be shown *for this call*: a provider that is
-/// fine with a summary may not be fine with a full chapter.
+/// fine with a summary may not be fine with a full unit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiRequest {
     pub task: AiTask,
@@ -317,7 +317,7 @@ impl AiConsent {
     ///
     /// The asymmetry is deliberate: for a private-text task, `provider_allowed` alone is
     /// not enough. A reader who allowed *some* provider to summarise public posts has not
-    /// thereby agreed to send their draft chapter to it.
+    /// thereby agreed to send their draft unit to it.
     pub fn private_text(provider_allowed: bool, private_text_allowed: bool) -> Self {
         AiConsent {
             provider_allowed,
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn a_public_task_ignores_the_private_text_consent() {
-        // The opposite asymmetry: translation of a *published* chapter needs the provider
+        // The opposite asymmetry: translation of a *published* unit needs the provider
         // allowed, and nothing else.
         assert!(!AiTask::Translation.touches_private_text());
         assert!(AiConsent::public_only(true)

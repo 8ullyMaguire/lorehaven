@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './api';
-import { ChapterAutosave, type Storage } from './autosave';
+import { UnitAutosave, type Storage } from './autosave';
 
 /**
  * The autosave contract.
@@ -31,7 +31,7 @@ function paragraph(text: string) {
   return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] };
 }
 
-describe('chapter autosave', () => {
+describe('unit autosave', () => {
   let storage: FakeStorage;
 
   beforeEach(() => {
@@ -47,8 +47,8 @@ describe('chapter autosave', () => {
     version?: number;
     save: (payload: { document: unknown; expected_version: number }) => Promise<{ version: number }>;
   }) {
-    return new ChapterAutosave(options.version ?? 1, {
-      storageKey: 'chapter:draft',
+    return new UnitAutosave(options.version ?? 1, {
+      storageKey: 'unit:draft',
       storage,
       debounceMs: 1000,
       savedVisibleMs: 500,
@@ -167,10 +167,10 @@ describe('chapter autosave', () => {
         version: 2,
       })),
     });
-    storage.setItem('chapter:draft', 'not json');
+    storage.setItem('unit:draft', 'not json');
 
     expect(autosave.recover()).toBeNull();
-    expect(storage.getItem('chapter:draft')).toBeNull();
+    expect(storage.getItem('unit:draft')).toBeNull();
   });
 
   it('reports an unexpected failure without pretending it was saved', async () => {

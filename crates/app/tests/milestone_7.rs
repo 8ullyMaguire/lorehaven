@@ -282,36 +282,36 @@ fn document(text: &str) -> Value {
     })
 }
 
-/// Author a work with `chapters` chapters, each a single paragraph.
+/// Author a work with `units` units, each a single paragraph.
 ///
 /// Through the API rather than through SQL, so the export renders the document a
 /// reader's page would render — a repository insert that bypassed the editor's
 /// schema would test the exporter against a shape nothing produces.
-async fn author(client: &mut Client, title: &str, chapters: &[&str]) -> String {
+async fn author(client: &mut Client, title: &str, units: &[&str]) -> String {
     let (status, body) = client
         .post("/api/v1/works", json!({ "title": title }))
         .await;
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work = body["id"].as_str().expect("work id").to_owned();
 
-    for (index, text) in chapters.iter().enumerate() {
+    for (index, text) in units.iter().enumerate() {
         let (status, body) = client
             .post(
                 &format!("/api/v1/works/{work}/chapters"),
-                json!({ "title": format!("Chapter {}", index + 1) }),
+                json!({ "title": format!("Unit {}", index + 1) }),
             )
             .await;
-        assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-        let chapter = body["id"].as_str().expect("chapter id").to_owned();
+        assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+        let unit = body["id"].as_str().expect("unit id").to_owned();
         let version = body["version"].as_i64().expect("version");
 
         let (status, body) = client
             .patch(
-                &format!("/api/v1/chapters/{chapter}"),
+                &format!("/api/v1/chapters/{unit}"),
                 json!({ "expected_version": version, "document": document(text) }),
             )
             .await;
-        assert_eq!(status, StatusCode::OK, "save chapter: {body}");
+        assert_eq!(status, StatusCode::OK, "save unit: {body}");
     }
 
     work
@@ -379,7 +379,7 @@ async fn an_export_is_a_job_not_a_request() {
     let work = author(&mut client, "A Finished Work", &["One.", "Two."]).await;
 
     let (status, body) = request_export(&mut client, &work, "epub", true).await;
-    // 202: accepted, not done. A 122-chapter work rendered inside a request is
+    // 202: accepted, not done. A 122-unit work rendered inside a request is
     // the thing this avoids.
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
     let export_id = body["id"].as_str().expect("export id").to_owned();
@@ -406,7 +406,7 @@ async fn an_export_is_a_job_not_a_request() {
 }
 
 #[tokio::test]
-async fn an_epub_export_opens_and_contains_every_chapter() {
+async fn an_epub_export_opens_and_contains_every_unit() {
     let harness = Harness::new("epub").await;
     let state = harness.state();
     let mut client = harness.client();
@@ -440,13 +440,13 @@ async fn an_epub_export_opens_and_contains_every_chapter() {
 
     // Validated with the container's own validator, which is a structural read of
     // the bytes: the mimetype entry first and stored, the package's metadata, the
-    // navigation, and the spine naming every chapter file.
+    // navigation, and the spine naming every unit file.
     let facts = epub::validate(&bytes).expect("a valid container");
     assert_eq!(facts.title, "The Long Way Round");
     assert_eq!(
-        facts.chapter_titles,
-        ["Chapter 1", "Chapter 2", "Chapter 3"],
-        "every chapter is present and in order"
+        facts.unit_titles,
+        ["Unit 1", "Unit 2", "Unit 3"],
+        "every unit is present and in order"
     );
     assert!(
         !facts.language.is_empty(),
@@ -563,7 +563,7 @@ async fn a_format_with_no_converter_is_refused_with_what_to_install() {
 }
 
 #[tokio::test]
-async fn exporting_a_work_with_no_chapters_is_refused() {
+async fn exporting_a_work_with_no_units_is_refused() {
     let harness = Harness::new("empty").await;
     let mut client = harness.client();
     register(&mut client, "empty@example.org", "empty").await;
@@ -575,7 +575,7 @@ async fn exporting_a_work_with_no_chapters_is_refused() {
         body["error"]["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("no chapters"),
+            .contains("no units"),
         "an empty export is refused rather than produced: {body}"
     );
     harness.cleanup().await;

@@ -11,7 +11,7 @@
 //!    written from a guess, and the guess is wrong in the one place that
 //!    matters — the selector that silently matches nothing.
 //! 3. Implement [`crate::SourceAdapter`], with `preview_from_html` and
-//!    `chapters_from_html` so the fixtures can drive it.
+//!    `units_from_html` so the fixtures can drive it.
 //! 4. Register it in [`default_registry`].
 //! 5. Add a fixture test in `tests/`.
 //!
@@ -121,7 +121,7 @@ mod tests {
             assert!(!key.as_str().is_empty());
             let capabilities = adapter.capabilities();
             assert!(
-                capabilities.metadata || capabilities.chapters,
+                capabilities.metadata || capabilities.units,
                 "{} claims to do nothing",
                 key
             );

@@ -58,9 +58,9 @@ pub struct SurfaceWork {
     pub summary: String,
     pub completion: String,
     pub published_at: Option<String>,
-    /// Item 4 of the 100-idea audit: total words across the work's CURRENT chapter
+    /// Item 4 of the 100-idea audit: total words across the work's CURRENT unit
     /// revisions. A plain `i64`, not an `Option`, because the aggregate is COALESCEd to 0
-    /// in SQL on both engines — "this work has no chapters yet" is 0 words, which is a
+    /// in SQL on both engines — "this work has no units yet" is 0 words, which is a
     /// true answer, not a missing field. An `Option` here would put `undefined` in front of
     /// the client for every work with no prose, and a card that renders nothing for a
     /// missing count renders nothing for a zero count too.
@@ -136,8 +136,8 @@ pub async fn most_bookmarked_this_week(
                 COUNT(DISTINCT b.account_id) AS recent_bookmarks,
                 COALESCE((
                   SELECT SUM(cr.word_count)
-                    FROM chapters c
-                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                    FROM units c
+                    JOIN revisions cr ON cr.id = c.current_revision_id
                    WHERE c.work_id = w.id AND c.deleted_at IS NULL
                 ), 0) AS word_count
          FROM bookmarks b
@@ -154,8 +154,8 @@ pub async fn most_bookmarked_this_week(
                 COUNT(DISTINCT b.account_id) AS recent_bookmarks,
                 COALESCE((
                   SELECT CAST(SUM(cr.word_count) AS BIGINT)
-                    FROM chapters c
-                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                    FROM units c
+                    JOIN revisions cr ON cr.id = c.current_revision_id
                    WHERE c.work_id = w.id AND c.deleted_at IS NULL
                 ), 0) AS word_count
          FROM bookmarks b
@@ -261,8 +261,8 @@ pub async fn new_in_your_fandoms(
         "SELECT DISTINCT w.id, w.title, w.summary, w.completion, w.published_at,
                 COALESCE((
                   SELECT SUM(cr.word_count)
-                    FROM chapters c
-                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                    FROM units c
+                    JOIN revisions cr ON cr.id = c.current_revision_id
                    WHERE c.work_id = w.id AND c.deleted_at IS NULL
                 ), 0) AS word_count
          FROM works w
@@ -279,8 +279,8 @@ pub async fn new_in_your_fandoms(
         "SELECT DISTINCT w.id::text, w.title, w.summary, w.completion, w.published_at,
                 COALESCE((
                   SELECT CAST(SUM(cr.word_count) AS BIGINT)
-                    FROM chapters c
-                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                    FROM units c
+                    JOIN revisions cr ON cr.id = c.current_revision_id
                    WHERE c.work_id = w.id AND c.deleted_at IS NULL
                 ), 0) AS word_count
          FROM works w
@@ -524,8 +524,8 @@ pub async fn similar_works(db: &Database, work_id: &str, limit: i64) -> Result<V
         "SELECT id, title, summary, completion, published_at,
                 COALESCE((
                   SELECT SUM(cr.word_count)
-                    FROM chapters c
-                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                    FROM units c
+                    JOIN revisions cr ON cr.id = c.current_revision_id
                    WHERE c.work_id = works.id AND c.deleted_at IS NULL
                 ), 0) AS word_count
          FROM works
@@ -536,8 +536,8 @@ pub async fn similar_works(db: &Database, work_id: &str, limit: i64) -> Result<V
         "SELECT id::text, title, summary, completion, published_at,
                 COALESCE((
                   SELECT CAST(SUM(cr.word_count) AS BIGINT)
-                    FROM chapters c
-                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                    FROM units c
+                    JOIN revisions cr ON cr.id = c.current_revision_id
                    WHERE c.work_id = works.id AND c.deleted_at IS NULL
                 ), 0) AS word_count
          FROM works

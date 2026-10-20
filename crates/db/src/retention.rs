@@ -438,9 +438,9 @@ pub async fn resolve_for_source(
 /// halves are required, and a count that keeps only one of them is worse than
 /// no count — it is a number the operator acts on.
 ///
-/// * *holds no body* — there is no `import_chapters` row in state `stored` for
+/// * *holds no body* — there is no `import_units` row in state `stored` for
 ///   this library item. This is the same expression the library listing uses for
-///   its chapter count, so the two can never disagree about what "holds a body"
+///   its unit count, so the two can never disagree about what "holds a body"
 ///   means.
 /// * *origin unreachable* — the most recent import of this item's work ended
 ///   `failed` **for a reason that is not the operator's to fix**. That
@@ -476,7 +476,7 @@ pub async fn works_past_saving(db: &Database) -> Result<WorksPastSaving> {
     let sql = db.sql(
         "SELECT COUNT(*)
            FROM library_items li
-          WHERE NOT EXISTS (SELECT 1 FROM import_chapters ic
+          WHERE NOT EXISTS (SELECT 1 FROM import_units ic
                              WHERE ic.library_item_id = li.id AND ic.state = 'stored')
             -- The failure codes that mean the work is GONE at its origin.
             -- `credential_missing` and `credential_expired` are excluded on
@@ -489,7 +489,7 @@ pub async fn works_past_saving(db: &Database) -> Result<WorksPastSaving> {
                              OR ij.report_json LIKE '%withheld%'))",
         "SELECT COUNT(*)
            FROM library_items li
-          WHERE NOT EXISTS (SELECT 1 FROM import_chapters ic
+          WHERE NOT EXISTS (SELECT 1 FROM import_units ic
                              WHERE ic.library_item_id = li.id AND ic.state = 'stored')
             -- The failure codes that mean the work is GONE at its origin.
             -- `credential_missing` and `credential_expired` are excluded on

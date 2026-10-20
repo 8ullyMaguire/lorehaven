@@ -245,21 +245,21 @@ fn the_first_list_page_yields_the_hundred_rows_it_shows() {
     // The page states エピソード 1 ～ 100 を表示中, and the adapter refuses a page
     // whose rows disagree with that statement, so this is the number the site
     // itself claims.
-    assert_eq!(work.chapter_count(), 100);
+    assert_eq!(work.unit_count(), 100);
 
-    let first = &work.chapters[0];
+    let first = &work.units[0];
     assert_eq!(first.ordinal, 1);
-    assert_eq!(first.source_chapter_key, "1");
+    assert_eq!(first.source_unit_key, "1");
     assert_eq!(first.title, "プロローグ 『始まりの余熱』");
 
-    let second = &work.chapters[1];
+    let second = &work.units[1];
     assert_eq!(second.ordinal, 2);
-    assert_eq!(second.source_chapter_key, "2");
+    assert_eq!(second.source_unit_key, "2");
     assert_eq!(second.title, "第一章１ 『ギザ十は使えない』");
 
-    let last = &work.chapters[99];
+    let last = &work.units[99];
     assert_eq!(last.ordinal, 100);
-    assert_eq!(last.source_chapter_key, "100");
+    assert_eq!(last.source_unit_key, "100");
 }
 
 #[test]
@@ -271,9 +271,9 @@ fn the_chapter_keys_are_the_sites_own_episode_numbers() {
     // Not loop positions: the key is the number in the episode's URL, which is
     // what the site displays as `2/795`. A key that were the row index would
     // renumber every later episode the moment one was inserted.
-    for (index, chapter) in work.chapters.iter().enumerate() {
+    for (index, chapter) in work.units.iter().enumerate() {
         assert_eq!(chapter.ordinal as usize, index + 1);
-        assert_eq!(chapter.source_chapter_key, chapter.ordinal.to_string());
+        assert_eq!(chapter.source_unit_key, chapter.ordinal.to_string());
     }
 }
 
@@ -284,10 +284,10 @@ fn a_later_list_page_continues_from_where_the_previous_one_stopped() {
         .expect("the recorded second page must parse");
 
     // The recorded page 2 states エピソード 101 ～ 200 を表示中.
-    assert_eq!(page2.chapter_count(), 100);
-    assert_eq!(page2.chapters[0].ordinal, 101);
-    assert_eq!(page2.chapters[0].source_chapter_key, "101");
-    assert_eq!(page2.chapters[99].ordinal, 200);
+    assert_eq!(page2.unit_count(), 100);
+    assert_eq!(page2.units[0].ordinal, 101);
+    assert_eq!(page2.units[0].source_unit_key, "101");
+    assert_eq!(page2.units[99].ordinal, 200);
 }
 
 #[test]
@@ -367,10 +367,10 @@ fn the_short_work_assembles_completely() {
     assert_eq!(work.status, WorkStatus::Ongoing);
     // Six episodes on one page, and the info page agrees, so the count check
     // passes — the other direction of the test above.
-    assert_eq!(work.chapter_count(), 6);
-    assert_eq!(work.chapters[0].source_chapter_key, "1");
-    assert_eq!(work.chapters[0].title, "リゼロＥＸ 『とある殉教者の訃報』");
-    assert_eq!(work.chapters[5].source_chapter_key, "6");
+    assert_eq!(work.unit_count(), 6);
+    assert_eq!(work.units[0].source_unit_key, "1");
+    assert_eq!(work.units[0].title, "リゼロＥＸ 『とある殉教者の訃報』");
+    assert_eq!(work.units[5].source_unit_key, "6");
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn the_short_works_infos_page_agrees_with_its_list() {
 
 #[test]
 fn the_source_url_is_the_work_page_even_for_an_info_url() {
-    // `fetch_chapters` reads `source_url`, so an info or episode URL stored there
+    // `fetch_units` reads `source_url`, so an info or episode URL stored there
     // would make a chapter import fetch the info page and find no prose.
     let work = adapter()
         .preview_from_html(
@@ -406,14 +406,14 @@ fn a_one_shot_is_one_chapter_keyed_by_its_own_ncode() {
     assert_eq!(work.author_text, "ＭＣＣ");
     assert_eq!(work.source_url, TANPEN_URL);
     assert_eq!(work.status, WorkStatus::Complete);
-    assert_eq!(work.chapter_count(), 1);
+    assert_eq!(work.unit_count(), 1);
 
-    let chapter = &work.chapters[0];
+    let chapter = &work.units[0];
     assert_eq!(chapter.ordinal, 1);
     // Not "1": there is no episode 1 to name, and this key is how
-    // `fetch_chapter` knows to re-read the work page instead of building an
+    // `fetch_unit` knows to re-read the work page instead of building an
     // episode URL that does not exist.
-    assert_eq!(chapter.source_chapter_key, TANPEN_NCODE);
+    assert_eq!(chapter.source_unit_key, TANPEN_NCODE);
     assert_eq!(chapter.title, "風呂場でクトゥルフなう");
 }
 
@@ -445,7 +445,7 @@ fn a_one_shots_info_page_carries_no_episode_count_element() {
 fn an_episodes_prose_is_read_with_its_position_from_the_site() {
     let work = short_work();
     let chapters = adapter()
-        .chapters_from_html(&fixture("short-ep2.html"), &work)
+        .units_from_html(&fixture("short-ep2.html"), &work)
         .expect("the recorded episode must parse");
 
     assert_eq!(chapters.len(), 1);
@@ -453,7 +453,7 @@ fn an_episodes_prose_is_read_with_its_position_from_the_site() {
     // From the page's own `N/total` marker, which reads `2/6` here. Without it the
     // page would have to be matched to the work by title.
     assert_eq!(chapter.ordinal, 2);
-    assert_eq!(chapter.source_chapter_key, "2");
+    assert_eq!(chapter.source_unit_key, "2");
     assert_eq!(chapter.title, "リゼロＥＸ 『鬼も幸福も』");
     assert!(
         chapter.content_html.contains("スバル"),
@@ -465,11 +465,11 @@ fn an_episodes_prose_is_read_with_its_position_from_the_site() {
 fn the_first_episode_is_read_as_the_first() {
     let work = short_work();
     let chapters = adapter()
-        .chapters_from_html(&fixture("short-ep1.html"), &work)
+        .units_from_html(&fixture("short-ep1.html"), &work)
         .expect("the recorded episode must parse");
 
     assert_eq!(chapters[0].ordinal, 1);
-    assert_eq!(chapters[0].source_chapter_key, "1");
+    assert_eq!(chapters[0].source_unit_key, "1");
     assert_eq!(chapters[0].title, "リゼロＥＸ 『とある殉教者の訃報』");
 }
 
@@ -477,7 +477,7 @@ fn the_first_episode_is_read_as_the_first() {
 fn the_authors_note_is_kept_and_set_apart_from_the_story() {
     let work = short_work();
     let chapters = adapter()
-        .chapters_from_html(&fixture("short-ep1.html"), &work)
+        .units_from_html(&fixture("short-ep1.html"), &work)
         .expect("the recorded episode must parse");
     let body = &chapters[0].content_html;
 
@@ -501,7 +501,7 @@ fn a_chapter_body_carries_no_script_and_no_site_chrome() {
     let work = short_work();
     for name in ["short-ep1.html", "short-ep2.html"] {
         let chapters = adapter()
-            .chapters_from_html(&fixture(name), &work)
+            .units_from_html(&fixture(name), &work)
             .expect("the recorded episode must parse");
         let body = &chapters[0].content_html;
 
@@ -534,12 +534,12 @@ fn a_chapter_body_carries_no_script_and_no_site_chrome() {
 fn a_one_shots_prose_is_read_from_the_work_page_itself() {
     let work = one_shot();
     let chapters = adapter()
-        .chapters_from_html(&fixture("tanpen-work.html"), &work)
+        .units_from_html(&fixture("tanpen-work.html"), &work)
         .expect("the recorded one-shot work page must parse");
 
     assert_eq!(chapters.len(), 1);
     assert_eq!(chapters[0].ordinal, 1);
-    assert_eq!(chapters[0].source_chapter_key, TANPEN_NCODE);
+    assert_eq!(chapters[0].source_unit_key, TANPEN_NCODE);
     assert!(
         chapters[0].content_html.len() > 1_000,
         "the one-shot's prose looks empty"
@@ -596,7 +596,7 @@ fn the_not_found_page_carries_none_of_the_work_landmarks() {
 fn an_episode_page_with_no_prose_is_a_parse_failure() {
     let work = short_work();
     let error = adapter()
-        .chapters_from_html("<html><body><p>nothing here</p></body></html>", &work)
+        .units_from_html("<html><body><p>nothing here</p></body></html>", &work)
         .expect_err("a page with no prose must not become a chapter");
 
     assert!(matches!(error, SourceError::Parse(_)), "got {error:?}");

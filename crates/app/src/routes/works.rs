@@ -1,4 +1,4 @@
-//! Works, chapters, revisions and publication endpoints (spec §8).
+//! Works, units, revisions and publication endpoints (spec §8).
 //!
 //! ```text
 //! GET    /works                         the acting pseud's own works
@@ -7,12 +7,12 @@
 //! PATCH  /works/:id                     edit metadata
 //! POST   /works/:id/publish             publish / republish, idempotent
 //! POST   /works/:id/withdraw            withdraw
-//! POST   /works/:id/chapters            append a chapter
-//! GET    /works/:id/chapters/:chapter   read a chapter
-//! POST   /works/:id/reorder-chapters    reorder
-//! PATCH  /chapters/:id                  rename, and/or save text
-//! GET    /chapters/:id/revisions        revision history
-//! POST   /chapters/:id/restore-revision bring an old revision back
+//! POST   /works/:id/units            append a unit
+//! GET    /works/:id/units/:unit   read a unit
+//! POST   /works/:id/reorder-units    reorder
+//! PATCH  /units/:id                  rename, and/or save text
+//! GET    /units/:id/revisions        revision history
+//! POST   /units/:id/restore-revision bring an old revision back
 //! ```
 //!
 //! Two rules hold across every handler, and both are enforced by *loading*
@@ -28,8 +28,8 @@
 //!
 //! And one property the reader endpoints must hold (spec §8 acceptance):
 //! **public readers never receive an unpublished revision.** The reader path
-//! serves the chapter's *current* revision, and the lifecycle check happens
-//! before the chapter is loaded at all.
+//! serves the unit's *current* revision, and the lifecycle check happens
+//! before the unit is loaded at all.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -55,7 +55,7 @@ use darkhold_domain::policy::{
     can_access_content_with_standing, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,
 };
-use darkhold_domain::{AppError, ChapterId, PseudId, RevisionId, WorkId};
+use darkhold_domain::{AppError, UnitId, PseudId, RevisionId, WorkId};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -65,11 +65,11 @@ use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use darkhold_domain::api_scopes::Scope;
 
-/// Work, chapter and revision routes.
+/// Work, unit and revision routes.
 ///
 /// Split in two because the reader surface and the writing surface have
 /// different audiences and therefore different rate-limit classes: a visitor
-/// reading a published chapter must not share a bucket with an author saving
+/// reading a published unit must not share a bucket with an author saving
 /// drafts.
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -101,8 +101,8 @@ pub fn router() -> Router<AppState> {
             patch(declare_generated_content),
         )
         .route("/works/{id}/withdraw", post(withdraw_work))
-        .route("/works/{id}/chapters", post(add_chapter))
-        .route("/works/{id}/reorder-chapters", post(reorder_chapters))
+        .route("/works/{id}/chapters", post(add_unit))
+        .route("/works/{id}/reorder-units", post(reorder_units))
         .route(
             "/works/{id}/permissions",
             get(get_work_permissions).put(put_work_permissions),
@@ -111,7 +111,7 @@ pub fn router() -> Router<AppState> {
         .route("/works/{id}/fork", post(fork_work))
         .route(
             "/chapters/{id}",
-            patch(update_chapter).delete(delete_chapter),
+            patch(update_unit).delete(delete_unit),
         )
         .route("/chapters/{id}/revisions", get(list_revisions))
         .route("/chapters/{id}/restore-revision", post(restore_revision))
@@ -125,7 +125,7 @@ pub fn router() -> Router<AppState> {
 pub fn read_router() -> Router<AppState> {
     Router::new()
         .route("/works/{id}", get(read_work))
-        .route("/works/{id}/chapters/{chapter}", get(read_chapter))
+        .route("/works/{id}/chapters/{unit}", get(read_unit))
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ struct AuthorWorkView {
     generated_content: Option<GeneratedContentView>,
     /// What the *acting* pseud may do with it.
     role: String,
-    chapters: Vec<ChapterView>,
+    units: Vec<UnitView>,
     contributors: Vec<ContributorView>,
     /// Why the work cannot be published yet, if it cannot.
     publication_blockers: Vec<String>,
@@ -182,10 +182,10 @@ struct ContributorView {
     public_attribution: bool,
 }
 
-/// A chapter, with its text only when the caller asked for one chapter.
+/// A unit, with its text only when the caller asked for one unit.
 #[derive(Debug, Serialize)]
-struct ChapterView {
-    id: ChapterId,
+struct UnitView {
+    id: UnitId,
     title: String,
     order_key: i64,
     word_count: i64,
@@ -197,29 +197,29 @@ struct ChapterView {
     current_revision_id: Option<RevisionId>,
 }
 
-impl From<content::Chapter> for ChapterView {
-    fn from(chapter: content::Chapter) -> Self {
-        // Computed before the fields are moved out of `chapter`.
-        let has_content = chapter.has_content();
+impl From<content::Unit> for UnitView {
+    fn from(unit: content::Unit) -> Self {
+        // Computed before the fields are moved out of `unit`.
+        let has_content = unit.has_content();
         Self {
-            id: chapter.id,
-            title: chapter.title,
-            order_key: chapter.order_key,
-            word_count: chapter.word_count,
-            revision_count: chapter.revision_count,
-            version: chapter.version,
-            updated_at: chapter.updated_at,
-            created_at: chapter.created_at,
+            id: unit.id,
+            title: unit.title,
+            order_key: unit.order_key,
+            word_count: unit.word_count,
+            revision_count: unit.revision_count,
+            version: unit.version,
+            updated_at: unit.updated_at,
+            created_at: unit.created_at,
             has_content,
-            current_revision_id: chapter.current_revision_id,
+            current_revision_id: unit.current_revision_id,
         }
     }
 }
 
-/// A chapter's text, as whoever may read it receives it.
+/// A unit's text, as whoever may read it receives it.
 #[derive(Debug, Serialize)]
-struct ChapterContentView {
-    chapter: ChapterView,
+struct UnitContentView {
+    unit: UnitView,
     /// The editor document, as the schema stores it. Contributors only.
     document: Option<serde_json::Value>,
     /// Derived sanitized HTML.
@@ -229,17 +229,17 @@ struct ChapterContentView {
     word_count: i64,
     revision_number: Option<i64>,
     revision_id: Option<RevisionId>,
-    /// The acting pseud may change this chapter.
+    /// The acting pseud may change this unit.
     editable: bool,
-    /// Neighbouring chapters, so a reader can move without a table of contents.
-    previous_chapter_id: Option<ChapterId>,
-    next_chapter_id: Option<ChapterId>,
-    work: ChapterWorkView,
+    /// Neighbouring units, so a reader can move without a table of contents.
+    previous_unit_id: Option<UnitId>,
+    next_unit_id: Option<UnitId>,
+    work: UnitWorkView,
 }
 
-/// The little bit of work metadata a chapter page needs.
+/// The little bit of work metadata a unit page needs.
 #[derive(Debug, Serialize)]
-struct ChapterWorkView {
+struct UnitWorkView {
     id: WorkId,
     title: String,
     lifecycle: String,
@@ -286,7 +286,7 @@ struct PublicWorkView {
     /// rating aggregates").
     metrics: Option<PublicWorkMetricsView>,
     authors: Vec<PublicAuthor>,
-    chapters: Vec<ChapterView>,
+    units: Vec<UnitView>,
     /// §49.4: the top-rated rec note, as a SECOND summary. `None` when there is
     /// no quotable note -- which is the common case, because `review.allow_quote`
     /// defaults to false.
@@ -360,7 +360,7 @@ struct PublicRatingSummaryView {
 const MEAN_OF_PUBLIC_RATINGS: &str =
     "mean of public ratings, shown only at or above the minimum count";
 
-/// A chapter in the revision history list.
+/// A unit in the revision history list.
 #[derive(Debug, Serialize)]
 struct RevisionView {
     id: String,
@@ -463,13 +463,13 @@ struct PublishRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct CreateChapterRequest {
+struct CreateUnitRequest {
     #[serde(default)]
     title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct UpdateChapterRequest {
+struct UpdateUnitRequest {
     expected_version: i64,
     #[serde(default)]
     title: Option<String>,
@@ -483,7 +483,7 @@ struct UpdateChapterRequest {
 
 #[derive(Debug, Deserialize)]
 struct ReorderRequest {
-    chapters: Vec<String>,
+    units: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -521,7 +521,17 @@ async fn create_work(
     require_participation(&user)?;
 
     let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
-    let work = content::create_work(state.db(), pseud, &title, None).await?;
+    // **The discussion mode is the instance's**, applied when the work is
+    // created rather than looked up at read time (spec §13.2): a later change
+    // of the instance's default must not rewrite a work that already exists.
+    let work = content::create_work_with_discussion_mode(
+        state.db(),
+        pseud,
+        &title,
+        None,
+        Some(state.config().forum.work_discussion_default.as_str()),
+    )
+    .await?;
 
     let view = author_view(&state, &user, &work).await?;
     Ok((StatusCode::CREATED, Json(view)))
@@ -544,7 +554,7 @@ async fn read_work(
         Reading::Contributor => {}
         Reading::Public => {
             // A public reader never receives the editor document, and never
-            // receives a chapter that is not currently published.
+            // receives a unit that is not currently published.
             let view = public_view(&state, &work).await?;
             record_view_for_work(&state, &work_id, session.as_ref())
                 .await
@@ -1018,15 +1028,15 @@ async fn withdraw_work(
 }
 
 // ---------------------------------------------------------------------------
-// Chapters
+// Units
 // ---------------------------------------------------------------------------
 
-async fn add_chapter(
+async fn add_unit(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
-    Json(request): Json<CreateChapterRequest>,
-) -> ApiResult<(StatusCode, Json<ChapterView>)> {
+    Json(request): Json<CreateUnitRequest>,
+) -> ApiResult<(StatusCode, Json<UnitView>)> {
     let (work, contributors) = author_work(&state, &user, &id).await?;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
@@ -1034,77 +1044,77 @@ async fn add_chapter(
     }
 
     let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
-    let chapter = content::create_chapter(state.db(), work.id, &title).await?;
+    let unit = content::create_unit(state.db(), work.id, &title).await?;
 
-    Ok((StatusCode::CREATED, Json(ChapterView::from(chapter))))
+    Ok((StatusCode::CREATED, Json(UnitView::from(unit))))
 }
 
-/// Soft-delete a chapter (owner or contributor).
+/// Soft-delete a unit (owner or contributor).
 ///
-/// A chapter is never removed outright: a reader's saved position may point at
+/// A unit is never removed outright: a reader's saved position may point at
 /// one, and the revision history is what makes an accidental deletion
 /// recoverable. The row stays, `deleted_at` is set, and reads already filter on
-/// it -- so the chapter disappears from the work without the row that readers
+/// it -- so the unit disappears from the work without the row that readers
 /// point at disappearing underneath them.
-async fn delete_chapter(
+async fn delete_unit(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let chapter_id = parse_chapter_id(&id)?;
-    let chapter = content::find_chapter(state.db(), chapter_id)
+    let unit_id = parse_unit_id(&id)?;
+    let unit = content::find_unit(state.db(), unit_id)
         .await?
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
 
     // Same authorization as an edit: loading the parent work through the acting
-    // pseud means a stranger's chapter is not found rather than found-and-refused.
-    let (_work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+    // pseud means a stranger's unit is not found rather than found-and-refused.
+    let (_work, contributors) = author_work(&state, &user, &unit.work_id.to_string()).await?;
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
         return Err(refusal(reason));
     }
 
-    // `find_chapter` already excludes soft-deleted rows, so a chapter that
+    // `find_unit` already excludes soft-deleted rows, so a unit that
     // reached here was live a moment ago. The `false` branch is therefore
     // unreachable in practice and is handled as a 404 rather than panicking --
     // it becomes reachable the moment a delete races two concurrent requests, and
     // the second one should get "not found", not a 500.
-    if !content::delete_chapter(state.db(), chapter_id).await? {
+    if !content::delete_unit(state.db(), unit_id).await? {
         return Err(ApiError(AppError::NotFound {
-            resource: "chapter",
+            resource: "unit",
         }));
     }
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn update_chapter(
+async fn update_unit(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
-    Json(request): Json<UpdateChapterRequest>,
-) -> ApiResult<Json<ChapterView>> {
-    let chapter_id = parse_chapter_id(&id)?;
-    let chapter = content::find_chapter(state.db(), chapter_id)
+    Json(request): Json<UpdateUnitRequest>,
+) -> ApiResult<Json<UnitView>> {
+    let unit_id = parse_unit_id(&id)?;
+    let unit = content::find_unit(state.db(), unit_id)
         .await?
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
 
     // Loading the parent work through the acting pseud is the authorization
-    // step: a stranger's chapter is not found rather than found-and-refused.
-    let (work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+    // step: a stranger's unit is not found rather than found-and-refused.
+    let (work, contributors) = author_work(&state, &user, &unit.work_id.to_string()).await?;
     let _ = work;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
         return Err(refusal(reason));
     }
 
-    // Text first: a save that appends a revision also bumps the chapter's
+    // Text first: a save that appends a revision also bumps the unit's
     // version, so a rename sent with the same expected version afterwards would
     // conflict with itself.
     if let Some(document) = &request.document {
@@ -1124,8 +1134,8 @@ async fn update_chapter(
 
         content::append_revision(
             state.db(),
-            chapter.id,
-            chapter.work_id,
+            unit.id,
+            unit.work_id,
             acting_pseud(&user)?,
             &input,
             Some(request.expected_version),
@@ -1137,19 +1147,19 @@ async fn update_chapter(
 
     if request.title.is_some() {
         let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
-        let changed = content::update_chapter(
+        let changed = content::update_unit(
             state.db(),
-            chapter.id,
+            unit.id,
             request.expected_version,
             Some(&title),
         )
         .await?;
         if !changed && request.document.is_none() {
-            let current = content::find_chapter(state.db(), chapter.id)
+            let current = content::find_unit(state.db(), unit.id)
                 .await?
                 .ok_or_else(|| {
                     ApiError(AppError::NotFound {
-                        resource: "chapter",
+                        resource: "unit",
                     })
                 })?;
             return Err(ApiError(AppError::RevisionConflict {
@@ -1159,54 +1169,54 @@ async fn update_chapter(
         }
     }
 
-    let updated = content::find_chapter(state.db(), chapter.id)
+    let updated = content::find_unit(state.db(), unit.id)
         .await?
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
 
-    Ok(Json(ChapterView::from(updated)))
+    Ok(Json(UnitView::from(updated)))
 }
 
-async fn reorder_chapters(
+async fn reorder_units(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
     Json(request): Json<ReorderRequest>,
-) -> ApiResult<Json<Vec<ChapterView>>> {
+) -> ApiResult<Json<Vec<UnitView>>> {
     let (work, contributors) = author_work(&state, &user, &id).await?;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
         return Err(refusal(reason));
     }
 
-    let ordered: Vec<ChapterId> = request
-        .chapters
+    let ordered: Vec<UnitId> = request
+        .units
         .iter()
-        .map(|raw| parse_chapter_id(raw))
+        .map(|raw| parse_unit_id(raw))
         .collect::<ApiResult<Vec<_>>>()?;
 
-    content::reorder_chapters(state.db(), work.id, &ordered)
+    content::reorder_units(state.db(), work.id, &ordered)
         .await
         .map_err(from_content)?;
 
-    let chapters = trace_step(
-        "chapters",
-        content::chapters_for_work(state.db(), work.id).await,
+    let units = trace_step(
+        "units",
+        content::units_for_work(state.db(), work.id).await,
     )?;
-    Ok(Json(chapters.into_iter().map(ChapterView::from).collect()))
+    Ok(Json(units.into_iter().map(UnitView::from).collect()))
 }
 
-async fn read_chapter(
+async fn read_unit(
     State(state): State<AppState>,
     MaybeSession(session): MaybeSession,
-    Path((id, chapter)): Path<(String, String)>,
+    Path((id, unit)): Path<(String, String)>,
     Query(query): Query<ReadQuery>,
-) -> ApiResult<Json<ChapterContentView>> {
+) -> ApiResult<Json<UnitContentView>> {
     let work_id = parse_work_id(&id)?;
-    let chapter_id = parse_chapter_id(&chapter)?;
+    let unit_id = parse_unit_id(&unit)?;
 
     let work = content::find_work(state.db(), work_id)
         .await?
@@ -1222,32 +1232,32 @@ async fn read_chapter(
         };
     let _ = is_public;
 
-    let chapters = content::chapters_for_work(state.db(), work_id).await?;
-    let chapter = chapters
+    let units = content::units_for_work(state.db(), work_id).await?;
+    let unit = units
         .iter()
-        .find(|candidate| candidate.id == chapter_id)
+        .find(|candidate| candidate.id == unit_id)
         .cloned()
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
 
-    let revision = match chapter.current_revision_id {
+    let revision = match unit.current_revision_id {
         Some(id) => content::find_revision(state.db(), id).await?,
         None => None,
     };
 
-    let position = chapters
+    let position = units
         .iter()
-        .position(|candidate| candidate.id == chapter_id);
-    let previous_chapter_id = position
+        .position(|candidate| candidate.id == unit_id);
+    let previous_unit_id = position
         .and_then(|index| index.checked_sub(1))
-        .and_then(|index| chapters.get(index))
-        .map(|chapter| chapter.id);
-    let next_chapter_id = position
-        .and_then(|index| chapters.get(index + 1))
-        .map(|chapter| chapter.id);
+        .and_then(|index| units.get(index))
+        .map(|unit| unit.id);
+    let next_unit_id = position
+        .and_then(|index| units.get(index + 1))
+        .map(|unit| unit.id);
 
     let authors = collaboration::public_contributors(state.db(), work_id)
         .await?
@@ -1270,8 +1280,8 @@ async fn read_chapter(
         None
     };
 
-    Ok(Json(ChapterContentView {
-        chapter: ChapterView::from(chapter),
+    Ok(Json(UnitContentView {
+        unit: UnitView::from(unit),
         document,
         sanitized_html: revision
             .as_ref()
@@ -1285,9 +1295,9 @@ async fn read_chapter(
         revision_number: revision.as_ref().map(|revision| revision.revision_number),
         revision_id: revision.as_ref().map(|revision| revision.id),
         editable: is_contributor,
-        previous_chapter_id,
-        next_chapter_id,
-        work: ChapterWorkView {
+        previous_unit_id,
+        next_unit_id,
+        work: UnitWorkView {
             id: work.id,
             title: work.title.clone(),
             lifecycle: work.lifecycle.clone(),
@@ -1301,23 +1311,23 @@ async fn list_revisions(
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<RevisionView>>> {
-    let chapter_id = parse_chapter_id(&id)?;
-    let chapter = content::find_chapter(state.db(), chapter_id)
+    let unit_id = parse_unit_id(&id)?;
+    let unit = content::find_unit(state.db(), unit_id)
         .await?
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
-    let (_work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+    let (_work, contributors) = author_work(&state, &user, &unit.work_id.to_string()).await?;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
         return Err(refusal(reason));
     }
 
-    let current = chapter.current_revision_id.map(|id| id.to_string());
+    let current = unit.current_revision_id.map(|id| id.to_string());
     let revisions: Vec<RevisionSummary> =
-        content::revisions_for_chapter(state.db(), chapter_id).await?;
+        content::revisions_for_unit(state.db(), unit_id).await?;
 
     Ok(Json(
         revisions
@@ -1341,16 +1351,16 @@ async fn restore_revision(
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
     Json(request): Json<RestoreRequest>,
-) -> ApiResult<Json<ChapterView>> {
-    let chapter_id = parse_chapter_id(&id)?;
-    let chapter = content::find_chapter(state.db(), chapter_id)
+) -> ApiResult<Json<UnitView>> {
+    let unit_id = parse_unit_id(&id)?;
+    let unit = content::find_unit(state.db(), unit_id)
         .await?
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
-    let (_work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+    let (_work, contributors) = author_work(&state, &user, &unit.work_id.to_string()).await?;
 
     if let Decision::Deny(reason) = can_edit(&user, &contributors) {
         return Err(refusal(reason));
@@ -1362,19 +1372,19 @@ async fn restore_revision(
         })
     })?;
 
-    content::restore_revision(state.db(), chapter, revision_id, acting_pseud(&user)?)
+    content::restore_revision(state.db(), unit, revision_id, acting_pseud(&user)?)
         .await
         .map_err(from_content)?;
 
-    let updated = content::find_chapter(state.db(), chapter_id)
+    let updated = content::find_unit(state.db(), unit_id)
         .await?
         .ok_or_else(|| {
             ApiError(AppError::NotFound {
-                resource: "chapter",
+                resource: "unit",
             })
         })?;
 
-    Ok(Json(ChapterView::from(updated)))
+    Ok(Json(UnitView::from(updated)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1667,9 +1677,9 @@ async fn author_view(
     user: &SessionUser,
     work: &Work,
 ) -> ApiResult<AuthorWorkView> {
-    let chapters = content::chapters_for_work(state.db(), work.id).await?;
+    let units = content::units_for_work(state.db(), work.id).await?;
     let contributors = collaboration::contributors_for_work(state.db(), work.id).await?;
-    let (_, with_content) = content::chapter_facts(state.db(), work.id).await?;
+    let (_, with_content) = content::unit_facts(state.db(), work.id).await?;
 
     let role = user
         .pseud_id
@@ -1729,7 +1739,7 @@ async fn author_view(
         ai_training_statement: ai_training_statement(&work.ai_training),
         generated_content: generated_content_view(&state, &work).await,
         role,
-        chapters: chapters.into_iter().map(ChapterView::from).collect(),
+        units: units.into_iter().map(UnitView::from).collect(),
         contributors: contributor_views,
         publication_blockers,
     })
@@ -1749,7 +1759,7 @@ fn trace_step<T, E: std::fmt::Debug>(what: &str, r: Result<T, E>) -> Result<T, E
 }
 
 async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView> {
-    let chapters = content::chapters_for_work(state.db(), work.id).await?;
+    let units = content::units_for_work(state.db(), work.id).await?;
     let authors = trace_step(
         "contributors",
         collaboration::public_contributors(state.db(), work.id).await,
@@ -1833,7 +1843,7 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         }),
         metrics,
         authors,
-        chapters: chapters.into_iter().map(ChapterView::from).collect(),
+        units: units.into_iter().map(UnitView::from).collect(),
         rec_blurb,
     })
 }
@@ -2267,10 +2277,10 @@ fn parse_work_id(raw: &str) -> ApiResult<WorkId> {
         .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))
 }
 
-fn parse_chapter_id(raw: &str) -> ApiResult<ChapterId> {
+fn parse_unit_id(raw: &str) -> ApiResult<UnitId> {
     raw.parse().map_err(|_| {
         ApiError(AppError::NotFound {
-            resource: "chapter",
+            resource: "unit",
         })
     })
 }
@@ -2283,7 +2293,7 @@ fn parse_visibility(raw: &str) -> Visibility {
     }
 }
 
-/// Trim and validate a title or chapter heading. An empty one is allowed for a
+/// Trim and validate a title or unit heading. An empty one is allowed for a
 /// draft; publication is what refuses it.
 fn validate_title(raw: &str, required: bool) -> ApiResult<String> {
     let trimmed = raw.trim();

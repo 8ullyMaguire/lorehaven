@@ -255,14 +255,14 @@ async fn the_floor_boundary_is_exactly_ten() {
 }
 
 #[tokio::test]
-async fn a_reader_is_counted_once_not_once_per_chapter() {
+async fn a_reader_is_counted_once_not_once_per_unit() {
     // `reading_history_entry` has a unique key on
-    // (account, pseud, subject), so a reader reading a 25-chapter work has
+    // (account, pseud, subject), so a reader reading a 25-unit work has
     // *one* history row that moves forward, not 25. The schema is what makes
     // this correct rather than a `DISTINCT` clause that could be forgotten --
     // but the metric must still count distinct pseudonyms, because a reader
-    // with a history row on this work and another on a chapter-scoped row is
-    // possible after a chapter-split migration.
+    // with a history row on this work and another on a unit-scoped row is
+    // possible after a unit-split migration.
     let dir = scratch_dir("anon_distinct");
     let tdb = TestDb::connect_with_dir("anon-distinct", &dir).await;
     let owner = seed_pseud(tdb.db(), "anon4-owner").await;

@@ -4,7 +4,7 @@
 //! # Not one site: software
 //!
 //! A XenForo forum holds fanfiction as *threads* — a forum thread whose posts are
-//! the chapters, with the ordered chapter list supplied by the **SV Threadmarks**
+//! the units, with the ordered chapter list supplied by the **SV Threadmarks**
 //! add-on. Three hosts matter, and they are three sources rather than one,
 //! because the walls and the policies differ. Measured on 2026-09-11:
 //!
@@ -86,7 +86,7 @@
 //! and arrives as 25 + 17 — and the 25 is not a coincidence: **`per_page` is
 //! clamped**. Asking for `per_page=1000` returns **25** items, the site's default,
 //! with no error and no warning. An adapter that asked for a large page and
-//! trusted the answer would import 25 chapters of 42 and report success. This one
+//! trusted the answer would import 25 units of 42 and report success. This one
 //! asks for 100 (which is honoured) and checks the total against the header
 //! regardless, so a clamp in either direction is caught rather than silently
 //! obeyed.
@@ -134,8 +134,8 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, text_of, AuthKind, ChapterRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult,
+    attr_of, collapse_whitespace, html_of, text_of, AuthKind, UnitRef, Credentials, Fetcher,
+    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
     SourceWork, Wall, WorkStatus,
 };
 
@@ -421,12 +421,12 @@ impl XenForo {
     pub fn parse_threadmark_page(&self, html: &str, id: &str) -> SourceResult<ThreadmarkPage> {
         let document = Html::parse_document(html);
         let items = threadmark_items(&document);
-        let chapters: Vec<ChapterRef> = items
+        let units: Vec<UnitRef> = items
             .iter()
             .enumerate()
-            .map(|(index, item)| ChapterRef {
+            .map(|(index, item)| UnitRef {
                 ordinal: (index as u32) + 1,
-                source_chapter_key: item.post.clone(),
+                source_unit_key: item.post.clone(),
                 title: item.title.clone(),
             })
             .collect();
@@ -434,8 +434,8 @@ impl XenForo {
         let stated = stated_threadmarks(&document);
 
         // A page with a stated count and no items is not a thread with no
-        // chapters: it is a page this adapter did not understand.
-        if chapters.is_empty() && stated.is_none() {
+        // units: it is a page this adapter did not understand.
+        if units.is_empty() && stated.is_none() {
             return Err(SourceError::Parse(format!(
                 "xenforo thread {id} has no threadmark list on this page"
             )));
@@ -446,7 +446,7 @@ impl XenForo {
             created: header_created(&document),
             stated,
             author: item_author(&document),
-            chapters,
+            units,
             dates,
         })
     }
@@ -494,7 +494,7 @@ impl XenForo {
         html: &str,
         work: &SourceWork,
         post: &str,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
 
         // Scoped to the article for this post: a thread page carries one
@@ -509,13 +509,13 @@ impl XenForo {
         })?;
 
         let entry = work
-            .chapters
+            .units
             .iter()
-            .find(|entry| entry.source_chapter_key == post);
+            .find(|entry| entry.source_unit_key == post);
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal: entry.map_or(0, |entry| entry.ordinal),
-            source_chapter_key: post.to_owned(),
+            source_unit_key: post.to_owned(),
             title: entry.map(|entry| entry.title.clone()).unwrap_or_default(),
             content_html: sanitize_fragment(&body, Url::parse(&work.source_url).ok().as_ref()),
             image_urls: crate::sanitize::extract_image_urls(
@@ -541,9 +541,9 @@ pub struct ThreadmarkPage {
     pub stated: Option<u32>,
     /// The author the items name.
     pub author: Option<String>,
-    /// This page's chapters, in reading order.
-    pub chapters: Vec<ChapterRef>,
-    /// When each chapter was posted, aligned with `chapters`. Carried beside
+    /// This page's units, in reading order.
+    pub units: Vec<UnitRef>,
+    /// When each chapter was posted, aligned with `units`. Carried beside
     /// them rather than on them because the domain's chapter reference has no
     /// date — a chapter's date is not part of a chapter's identity — while a
     /// work's last change is.
@@ -557,7 +557,7 @@ impl Default for ThreadmarkPage {
             created: None,
             stated: None,
             author: None,
-            chapters: Vec::new(),
+            units: Vec::new(),
             dates: Vec::new(),
         }
     }
@@ -580,7 +580,7 @@ impl ThreadmarkPage {
     ///
     /// The header's `Created`, falling back to the earliest chapter date — a
     /// thread opened before its first threadmark existed states one, and a thread
-    /// whose header is absent has only the chapters.
+    /// whose header is absent has only the units.
     #[must_use]
     pub fn published(&self) -> Option<time::OffsetDateTime> {
         self.created
@@ -640,7 +640,7 @@ struct ThreadmarkItem {
     date: Option<time::OffsetDateTime>,
 }
 
-/// The thread's chapters, in the page's order.
+/// The thread's units, in the page's order.
 ///
 /// The ordinal is the item's position: the add-on renders the list in reading
 /// order, and a reader's progress and bookmarks are mapped onto the ordinal.
@@ -881,7 +881,7 @@ impl XenForo {
             status: marks.status,
             published_at: marks.published(),
             updated_at: marks.updated(),
-            chapters: marks.chapters,
+            units: marks.units,
             // A forum thread carries no content rating.
             rating_text: None,
             warning_texts: Vec::new(),
@@ -909,14 +909,14 @@ impl XenForo {
         loop {
             let response = fetch.get(&self.threadmarks_url(id, page)).await?;
             let parsed = self.parse_threadmark_page(&response.body, id)?;
-            let page_is_short = parsed.chapters.is_empty() || parsed.chapters.len() < PER_PAGE;
+            let page_is_short = parsed.units.is_empty() || parsed.units.len() < PER_PAGE;
 
             match merged.as_mut() {
                 Some(collected) => collected.append(parsed),
                 None => merged = Some(parsed),
             }
 
-            let collected = merged.as_ref().map_or(0, |marks| marks.chapters.len());
+            let collected = merged.as_ref().map_or(0, |marks| marks.units.len());
             let stated = merged.as_ref().and_then(|marks| marks.stated);
 
             // Stop as soon as the stated count is reached, which is one request
@@ -942,14 +942,14 @@ impl XenForo {
 
         // The check the module documentation is about.
         if let Some(stated) = marks.stated {
-            if marks.chapters.len() != stated as usize {
+            if marks.units.len() != stated as usize {
                 return Err(SourceError::Parse(format!(
                     "xenforo thread {id} states {stated} threadmarks and lists {}",
-                    marks.chapters.len()
+                    marks.units.len()
                 )));
             }
         }
-        if marks.chapters.is_empty() {
+        if marks.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "xenforo thread {id} lists no threadmarks"
             )));
@@ -959,11 +959,11 @@ impl XenForo {
 }
 
 impl ThreadmarkPage {
-    /// Append another page's worth of chapters, keeping the ordinals dense.
+    /// Append another page's worth of units, keeping the ordinals dense.
     ///
     /// Each page numbers its own items from one, so a merged list has to be
     /// renumbered: an ordinal is what a reader's progress and notes are keyed
-    /// to, and two chapters sharing ordinal 1 would put one of them under the
+    /// to, and two units sharing ordinal 1 would put one of them under the
     /// other's bookmark.
     ///
     /// Public because a caller assembling a list from several recorded pages —
@@ -971,10 +971,10 @@ impl ThreadmarkPage {
     /// way [`XenForo::read_threadmark_pages`] does, rather than reimplementing
     /// the renumbering and checking its own arithmetic.
     pub fn append(&mut self, other: ThreadmarkPage) {
-        let base = self.chapters.len() as u32;
-        for (mut chapter, date) in other.chapters.into_iter().zip(other.dates) {
+        let base = self.units.len() as u32;
+        for (mut chapter, date) in other.units.into_iter().zip(other.dates) {
             chapter.ordinal += base;
-            self.chapters.push(chapter);
+            self.units.push(chapter);
             self.dates.push(date);
         }
     }
@@ -995,11 +995,11 @@ impl SourceAdapter for XenForo {
             metadata: true,
             // Gated on the wall the forum states: SpaceBattles needs a solver
             // for every reading page, the other two need nothing.
-            chapters: true,
+            units: true,
             // A chapter has its own address — the post — so a retry re-reads one
             // page and touches nothing else. The page is the whole thread, which
             // is the add-on's doing and not something this adapter can narrow.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             // Member pages exist and their markup has not been recorded.
             bibliography: false,
             // The chapter list states both the total and each chapter's date, so
@@ -1066,37 +1066,37 @@ impl SourceAdapter for XenForo {
         Ok(self.assemble_work(&id, thread, marks))
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        if work.chapters.is_empty() {
+    ) -> SourceResult<Vec<SourceUnit>> {
+        if work.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "xenforo thread {} lists no chapters",
                 work.source_work_key
             )));
         }
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for entry in &work.chapters {
+        let mut units = Vec::with_capacity(work.units.len());
+        for entry in &work.units {
             let page = fetch
-                .get(&self.post_url(&work.source_work_key, &entry.source_chapter_key))
+                .get(&self.post_url(&work.source_work_key, &entry.source_unit_key))
                 .await?;
-            chapters.push(self.parse_post(&page.body, work, &entry.source_chapter_key)?);
+            units.push(self.parse_post(&page.body, work, &entry.source_unit_key)?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let entry = work
-            .chapters
+            .units
             .iter()
             .find(|entry| entry.ordinal == ordinal)
             .ok_or_else(|| {
@@ -1106,9 +1106,9 @@ impl SourceAdapter for XenForo {
                 ))
             })?;
         let page = fetch
-            .get(&self.post_url(&work.source_work_key, &entry.source_chapter_key))
+            .get(&self.post_url(&work.source_work_key, &entry.source_unit_key))
             .await?;
-        self.parse_post(&page.body, work, &entry.source_chapter_key)
+        self.parse_post(&page.body, work, &entry.source_unit_key)
     }
 
     fn preview_from_html(&self, html: &str, url: &Url) -> SourceResult<SourceWork> {
@@ -1116,8 +1116,8 @@ impl SourceAdapter for XenForo {
         // construction: a XenForo work is described by two documents — the thread
         // page for what the work *is* and the threadmark list for what is *in*
         // it — and the seam is handed one string. This parses the thread page and
-        // returns a work with no chapters, which is the honest answer to "what
-        // does this document say the work is". A test that wants the chapters
+        // returns a work with no units, which is the honest answer to "what
+        // does this document say the work is". A test that wants the units
         // calls `parse_threadmark_page` and then `assemble_work`, which is
         // exactly what `preview` does with the two live responses.
         let id = XenForo::thread_id(url).ok_or_else(|| {
@@ -1127,16 +1127,16 @@ impl SourceAdapter for XenForo {
         Ok(self.assemble_work(&id, thread, ThreadmarkPage::default()))
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // Every chapter of this work that this document carries, in the work's
         // order. A XenForo post address serves the containing page — the recorded
         // one holds 26 posts — and nothing on the page says which of them was
         // asked for, so "the chapter this page is" would be a guess. What the
-        // page indisputably contains is a set of this work's chapters, which is
+        // page indisputably contains is a set of this work's units, which is
         // what this returns.
         let document = Html::parse_document(html);
         let Ok(selector) = Selector::parse("article[data-content^='post-']") else {
@@ -1149,19 +1149,19 @@ impl SourceAdapter for XenForo {
             .map(str::to_owned)
             .collect();
 
-        let mut chapters = Vec::new();
-        for entry in &work.chapters {
-            if present.contains(&entry.source_chapter_key) {
-                chapters.push(self.parse_post(html, work, &entry.source_chapter_key)?);
+        let mut units = Vec::new();
+        for entry in &work.units {
+            if present.contains(&entry.source_unit_key) {
+                units.push(self.parse_post(html, work, &entry.source_unit_key)?);
             }
         }
-        if chapters.is_empty() {
+        if units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "xenforo page for thread {} carries none of its chapters",
                 work.source_work_key
             )));
         }
-        Ok(chapters)
+        Ok(units)
     }
 }
 
@@ -1265,7 +1265,7 @@ mod tests {
             .as_deref(),
             Some("13124301")
         );
-        // The theme's other links are not chapters.
+        // The theme's other links are not units.
         assert_eq!(post_id_in_href("/threads/margin-of-error.39359/"), None);
         assert_eq!(post_id_in_href("/forums/creative-writing.18/"), None);
         assert_eq!(post_id_in_href("#post-"), None);
@@ -1399,15 +1399,15 @@ mod tests {
     #[test]
     fn a_second_page_of_chapters_is_renumbered_rather_than_restarting_at_one() {
         // Each page numbers its own items from one. An ordinal is what a
-        // reader's progress and notes are keyed to, so two chapters sharing
+        // reader's progress and notes are keyed to, so two units sharing
         // ordinal 1 would put one under the other's bookmark.
         let page = |posts: &[&str]| ThreadmarkPage {
-            chapters: posts
+            units: posts
                 .iter()
                 .enumerate()
-                .map(|(index, post)| ChapterRef {
+                .map(|(index, post)| UnitRef {
                     ordinal: (index as u32) + 1,
-                    source_chapter_key: (*post).to_owned(),
+                    source_unit_key: (*post).to_owned(),
                     title: String::new(),
                 })
                 .collect(),
@@ -1419,22 +1419,22 @@ mod tests {
         first.append(page(&["c"]));
         assert_eq!(
             first
-                .chapters
+                .units
                 .iter()
-                .map(|c| (c.ordinal, c.source_chapter_key.as_str()))
+                .map(|c| (c.ordinal, c.source_unit_key.as_str()))
                 .collect::<Vec<_>>(),
             vec![(1, "a"), (2, "b"), (3, "c")]
         );
-        assert_eq!(first.dates.len(), first.chapters.len());
+        assert_eq!(first.dates.len(), first.units.len());
     }
 
     #[test]
     fn a_works_dates_come_from_the_header_and_from_the_last_chapter() {
         let marks = ThreadmarkPage {
             created: Some(datetime!(2013-06-24 23:27:50 UTC)),
-            chapters: vec![ChapterRef {
+            units: vec![UnitRef {
                 ordinal: 1,
-                source_chapter_key: "a".into(),
+                source_unit_key: "a".into(),
                 title: String::new(),
             }],
             dates: vec![Some(datetime!(2013-06-25 03:28:23 UTC))],

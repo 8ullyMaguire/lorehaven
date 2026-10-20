@@ -84,24 +84,24 @@ async fn published_work(client: &mut test_support::TestClient, title: &str) -> S
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter id").to_owned();
-    let chapter_version = body["version"].as_i64().expect("chapter version");
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit = body["id"].as_str().expect("unit id").to_owned();
+    let unit_version = body["version"].as_i64().expect("unit version");
 
-    // A chapter needs a document before the work may be published.
+    // A unit needs a document before the work may be published.
     let doc = json!({ "type": "doc", "content": [
         { "type": "paragraph", "content": [
-            { "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+            { "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = client
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "write the chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "write the unit: {body}");
 
-    // Publish is optimistic and names the version it expects, which the chapter
+    // Publish is optimistic and names the version it expects, which the unit
     // moved on. Read it back rather than guessing.
     let (status, body) = client.get(format!("/api/v1/works/{id}")).await;
     assert_eq!(status, StatusCode::OK, "reload work: {body}");
@@ -493,9 +493,9 @@ async fn an_unrecognised_audience_from_the_edit_door_is_refused() {
 }
 
 #[tokio::test]
-async fn the_chapter_door_agrees_with_the_work_door() {
-    let dir = test_support::scratch_dir("ba_chapter");
-    let tdb = test_support::TestDb::connect_with_dir("ba-chapter", &dir).await;
+async fn the_unit_door_agrees_with_the_work_door() {
+    let dir = test_support::scratch_dir("ba_unit");
+    let tdb = test_support::TestDb::connect_with_dir("ba-unit", &dir).await;
 
     let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
     test_support::register(&mut author, "author@test.dev", "ba_author").await;

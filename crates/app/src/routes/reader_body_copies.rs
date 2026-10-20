@@ -149,8 +149,8 @@ async fn request(
         );
     }
 
-    let chapter_key =
-        match darkhold_db::reader_body_copies::chapter_key_for_work(state.db(), &id).await {
+    let unit_key =
+        match darkhold_db::reader_body_copies::unit_key_for_work(state.db(), &id).await {
             Ok(key) => key,
             Err(error) => return internal(error),
         };
@@ -160,7 +160,7 @@ async fn request(
         &id,
         &user.account_id.as_uuid(),
         &source_key,
-        &chapter_key,
+        &unit_key,
         trust,
     )
     .await

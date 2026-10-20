@@ -296,7 +296,7 @@ fn imported_works_are_never_monetizable_in_original_mode() {
 
 #[test]
 fn early_access_is_a_scheduled_unlock_not_a_lock() {
-    // At public_at the chapter is free to everyone, permanently.
+    // At public_at the unit is free to everyone, permanently.
     assert!(!MoneyRules::early_access_unlocked(1_000, 999));
     assert!(MoneyRules::early_access_unlocked(1_000, 1_000));
 }
@@ -549,16 +549,16 @@ async fn create_work(client: &mut Client, title: &str) -> String {
     body["id"].as_str().unwrap().to_owned()
 }
 
-/// Add a chapter with content so the work can be published.
-async fn add_chapter(client: &mut Client, work_id: &str, title: &str, text: &str) -> String {
+/// Add a unit with content so the work can be published.
+async fn add_unit(client: &mut Client, work_id: &str, title: &str, text: &str) -> String {
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
             json!({ "title": title }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter_id = body["id"].as_str().unwrap().to_owned();
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit_id = body["id"].as_str().unwrap().to_owned();
     let version = body["version"].as_i64().unwrap_or(1);
     let doc = json!({
         "type": "doc",
@@ -567,12 +567,12 @@ async fn add_chapter(client: &mut Client, work_id: &str, title: &str, text: &str
     let (status, _) = client
         .send(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter_id}"),
+            &format!("/api/v1/chapters/{unit_id}"),
             Some(json!({ "expected_version": version, "document": doc })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "save chapter text");
-    chapter_id
+    assert_eq!(status, StatusCode::OK, "save unit text");
+    unit_id
 }
 
 /// Publish a work.
@@ -596,7 +596,7 @@ async fn a_purchased_work_is_readable_by_the_buyer() {
     register(&mut author, "m21-author3@example.com", "m21author3").await;
 
     let work_id = create_work(&mut author, "Paid Story").await;
-    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Once upon a time.").await;
+    let _unit_id = add_unit(&mut author, &work_id, "Unit 1", "Once upon a time.").await;
     publish_work(&mut author, &work_id, 1).await;
 
     // Price the work as purchase-only.
@@ -631,7 +631,7 @@ async fn a_paid_work_is_paywalled_for_non_buyers() {
     register(&mut author, "m21-author4@example.com", "m21author4").await;
 
     let work_id = create_work(&mut author, "Locked Story").await;
-    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Secret content.").await;
+    let _unit_id = add_unit(&mut author, &work_id, "Unit 1", "Secret content.").await;
     publish_work(&mut author, &work_id, 1).await;
 
     // Price the work.
@@ -663,7 +663,7 @@ async fn tip_only_work_is_free_to_read() {
     register(&mut author, "m21-author5@example.com", "m21author5").await;
 
     let work_id = create_work(&mut author, "Tip Jar").await;
-    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Have a story.").await;
+    let _unit_id = add_unit(&mut author, &work_id, "Unit 1", "Have a story.").await;
     publish_work(&mut author, &work_id, 1).await;
 
     // Price as tips-only (free to read).
@@ -694,7 +694,7 @@ async fn public_pricing_returns_price_for_purchased_work() {
     let mut author = fx.client();
     register(&mut author, "m21-author6@example.com", "m21author6").await;
     let work_id = create_work(&mut author, "Paid Story").await;
-    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Content.").await;
+    let _unit_id = add_unit(&mut author, &work_id, "Unit 1", "Content.").await;
     publish_work(&mut author, &work_id, 1).await;
 
     let (status, _) = author
@@ -726,7 +726,7 @@ async fn a_sale_notifies_the_author_through_the_inbox() {
 
     // The author publishes a priced work.
     let work_id = create_work(&mut author, "For Sale").await;
-    let _chapter = add_chapter(&mut author, &work_id, "Chapter 1", "Once upon a time.").await;
+    let _unit = add_unit(&mut author, &work_id, "Unit 1", "Once upon a time.").await;
     publish_work(&mut author, &work_id, 1).await;
 
     let (status, body) = author
@@ -783,7 +783,7 @@ async fn only_the_owner_may_price_a_work() {
     .await;
 
     let work_id = create_work(&mut author, "Priced By Owner").await;
-    let _chapter = add_chapter(&mut author, &work_id, "Chapter 1", "Text.").await;
+    let _unit = add_unit(&mut author, &work_id, "Unit 1", "Text.").await;
     publish_work(&mut author, &work_id, 1).await;
 
     // A stranger sees the work but cannot set or remove its pricing: the

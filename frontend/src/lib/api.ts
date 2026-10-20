@@ -501,10 +501,10 @@ export function patchContentSettings(patch: {
 }
 
 // ---------------------------------------------------------------------------
-// Milestone 3 — works, chapters, revisions and publication
+// Milestone 3 — works, units, revisions and publication
 //
 // These mirror `crates/app/src/routes/{works,collaborators}.rs`. Where the
-// server omits a field — a public work carries no owner, a public chapter
+// server omits a field — a public work carries no owner, a public unit
 // carries no editor document — there is no field here to depend on.
 // ---------------------------------------------------------------------------
 
@@ -519,13 +519,13 @@ export interface WorkSummary {
   updated_at: string;
   published_at: string | null;
   version: number;
-  chapter_count: number;
+  unit_count: number;
   word_count: number;
   role: string;
 }
 
-/** A chapter without its text. */
-export interface ChapterSummary {
+/** A unit without its text. */
+export interface UnitSummary {
   id: string;
   title: string;
   order_key: number;
@@ -566,7 +566,7 @@ export interface AuthorWork {
   /** How discussion happens around this work (thread_only/comments_only/both). */
   discussion_mode: string;
   role: string;
-  chapters: ChapterSummary[];
+  units: UnitSummary[];
   contributors: Contributor[];
   /** Why it cannot be published yet, in the interface's own language. */
   publication_blockers: string[];
@@ -595,7 +595,7 @@ export interface PublicWork {
   /** Public engagement counts (null when the owner opted out). */
   metrics: WorkMetricsView | null;
   authors: PublicAuthor[];
-  chapters: ChapterSummary[];
+  units: UnitSummary[];
 }
 
 /** Public engagement counts for a work card. */
@@ -620,9 +620,9 @@ export function isAuthorWork(work: AuthorWork | PublicWork): work is AuthorWork 
   return (work as AuthorWork).contributors !== undefined;
 }
 
-/** A chapter's text, and what may be done with it. */
-export interface ChapterContent {
-  chapter: ChapterSummary;
+/** A unit's text, and what may be done with it. */
+export interface UnitContent {
+  unit: UnitSummary;
   document: unknown | null;
   sanitized_html: string;
   plain_text: string;
@@ -630,8 +630,8 @@ export interface ChapterContent {
   revision_number: number | null;
   revision_id: string | null;
   editable: boolean;
-  previous_chapter_id: string | null;
-  next_chapter_id: string | null;
+  previous_unit_id: string | null;
+  next_unit_id: string | null;
   work: {
     id: string;
     title: string;
@@ -640,7 +640,7 @@ export interface ChapterContent {
   };
 }
 
-/** One entry in a chapter's revision history. */
+/** One entry in a unit's revision history. */
 export interface RevisionEntry {
   id: string;
   revision_number: number;
@@ -736,64 +736,64 @@ export function withdrawWork(
   });
 }
 
-/** Append a chapter. */
-export function addChapter(workId: string, title: string): Promise<ChapterSummary> {
-  return apiFetch<ChapterSummary>(`/works/${encodeURIComponent(workId)}/chapters`, {
+/** Append a unit. */
+export function addUnit(workId: string, title: string): Promise<UnitSummary> {
+  return apiFetch<UnitSummary>(`/works/${encodeURIComponent(workId)}/units`, {
     method: 'POST',
     body: JSON.stringify({ title }),
   });
 }
 
-/** Reorder the chapters of a work. The list must be the complete one. */
-export function reorderChapters(workId: string, chapters: string[]): Promise<ChapterSummary[]> {
-  return apiFetch<ChapterSummary[]>(`/works/${encodeURIComponent(workId)}/reorder-chapters`, {
+/** Reorder the units of a work. The list must be the complete one. */
+export function reorderUnits(workId: string, units: string[]): Promise<UnitSummary[]> {
+  return apiFetch<UnitSummary[]>(`/works/${encodeURIComponent(workId)}/reorder-units`, {
     method: 'POST',
-    body: JSON.stringify({ chapters }),
+    body: JSON.stringify({ units }),
   });
 }
 
 /**
- * Rename a chapter and/or save its text.
+ * Rename a unit and/or save its text.
  *
- * Saving text appends a revision, so `expected_version` is the chapter version
+ * Saving text appends a revision, so `expected_version` is the unit version
  * the editor last received; a mismatch is a `REVISION_CONFLICT`.
  */
-export function updateChapter(
+export function updateUnit(
   id: string,
   patch: { expected_version: number; title?: string; document?: unknown; note?: string },
-): Promise<ChapterSummary> {
-  return apiFetch<ChapterSummary>(`/chapters/${encodeURIComponent(id)}`, {
+): Promise<UnitSummary> {
+  return apiFetch<UnitSummary>(`/units/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });
 }
 
-/** A chapter's text. `document` is present only for a contributor. */
-export function fetchChapter(
+/** A unit's text. `document` is present only for a contributor. */
+export function fetchUnit(
   workId: string,
-  chapterId: string,
+  unitId: string,
   signal?: AbortSignal,
-): Promise<ChapterContent> {
-  return apiFetch<ChapterContent>(
-    `/works/${encodeURIComponent(workId)}/chapters/${encodeURIComponent(chapterId)}`,
+): Promise<UnitContent> {
+  return apiFetch<UnitContent>(
+    `/works/${encodeURIComponent(workId)}/units/${encodeURIComponent(unitId)}`,
     { signal },
   );
 }
 
-/** A chapter's revision history, newest first. */
+/** A unit's revision history, newest first. */
 export function fetchRevisions(
-  chapterId: string,
+  unitId: string,
   signal?: AbortSignal,
 ): Promise<RevisionEntry[]> {
-  return apiFetch<RevisionEntry[]>(`/chapters/${encodeURIComponent(chapterId)}/revisions`, {
+  return apiFetch<RevisionEntry[]>(`/units/${encodeURIComponent(unitId)}/revisions`, {
     signal,
   });
 }
 
 /** Bring an old revision back, as a new revision. */
-export function restoreRevision(chapterId: string, revisionId: string): Promise<ChapterSummary> {
-  return apiFetch<ChapterSummary>(
-    `/chapters/${encodeURIComponent(chapterId)}/restore-revision`,
+export function restoreRevision(unitId: string, revisionId: string): Promise<UnitSummary> {
+  return apiFetch<UnitSummary>(
+    `/units/${encodeURIComponent(unitId)}/restore-revision`,
     { method: 'POST', body: JSON.stringify({ revision_id: revisionId }) },
   );
 }
@@ -938,7 +938,7 @@ export interface TypographyView {
 export interface ProgressRequest {
   subject_type: 'work' | 'library_item';
   subject_id: string;
-  chapter_id?: string | null;
+  unit_id?: string | null;
   /** The revision the reader was looking at, when one is known. */
   content_revision?: string | null;
   paragraph_anchor?: string | null;
@@ -1377,7 +1377,7 @@ export async function getKarma(
 /** The work's linked discussion topic. */
 export interface ThreadResponse {
   topic_id: string;
-  chapter_id: string | null;
+  unit_id: string | null;
 }
 
 /** Get the linked forum topic for a work. */
@@ -1410,8 +1410,8 @@ export async function fetchLinkedWork(topicId: string, signal?: AbortSignal): Pr
 export interface ScheduleSection {
   position: number;
   title: string;
-  chapter_start: number;
-  chapter_end: number;
+  unit_start: number;
+  unit_end: number;
   unlocks_at: string;
   created_at: string;
 }
@@ -1426,7 +1426,7 @@ export async function getSchedule(topicId: string, signal?: AbortSignal): Promis
 
 export async function addScheduleSection(
   topicId: string,
-  input: { position: number; title: string; chapter_start: number; chapter_end: number; unlocks_at: string },
+  input: { position: number; title: string; unit_start: number; unit_end: number; unlocks_at: string },
 ): Promise<void> {
   await apiFetch(`/topics/${encodeURIComponent(topicId)}/schedule`, {
     method: 'POST',
@@ -1521,17 +1521,17 @@ export async function addContentWarning(
 }
 
 export async function getReaderProgress(workId: string, signal?: AbortSignal): Promise<number> {
-  const page = await apiFetch<{ last_chapter: number }>(
+  const page = await apiFetch<{ last_unit: number }>(
     `/works/${encodeURIComponent(workId)}/progress`,
     { signal },
   );
-  return page.last_chapter;
+  return page.last_unit;
 }
 
-export async function setReaderProgress(workId: string, lastChapter: number): Promise<void> {
+export async function setReaderProgress(workId: string, lastUnit: number): Promise<void> {
   await apiFetch(`/works/${encodeURIComponent(workId)}/progress`, {
     method: 'PUT',
-    body: JSON.stringify({ last_chapter: lastChapter }),
+    body: JSON.stringify({ last_unit: lastUnit }),
   });
 }
 
@@ -1863,9 +1863,9 @@ export interface SourceCapabilities {
   /** False for a source this build has no adapter for. */
   known: boolean;
   metadata?: boolean;
-  chapters?: boolean;
-  /** Whether a single chapter can be re-read without the whole work. */
-  per_chapter_fetch?: boolean;
+  units?: boolean;
+  /** Whether a single unit can be re-read without the whole work. */
+  per_unit_fetch?: boolean;
   bibliography?: boolean;
   incremental?: boolean;
   /** `none`, `token`, `password` or `session_cookie`. */
@@ -1910,10 +1910,10 @@ export interface PlanView {
   changes: unknown[];
 }
 
-/** One chapter as a preview lists it: identity, and no text. */
-export interface PreviewChapter {
+/** One unit as a preview lists it: identity, and no text. */
+export interface PreviewUnit {
   ordinal: number;
-  source_chapter_key: string;
+  source_unit_key: string;
   title: string;
 }
 
@@ -1929,8 +1929,8 @@ export interface PreviewView {
   language: string | null;
   word_count: number | null;
   status: string;
-  chapter_count: number;
-  chapters: PreviewChapter[];
+  unit_count: number;
+  units: PreviewUnit[];
   plan: PlanView;
   is_new: boolean;
   /** An apparent copy already held under another source. A warning, not a refusal. */
@@ -1963,19 +1963,19 @@ export interface ImportJobView {
   cancellable: boolean;
 }
 
-/** One stored chapter of an import, as the detail view lists it. */
-export interface ImportChapterView {
+/** One stored unit of an import, as the detail view lists it. */
+export interface ImportUnitView {
   ordinal: number;
-  source_chapter_key: string;
+  source_unit_key: string;
   title: string;
   state: string;
   checksum: string | null;
   note: string | null;
 }
 
-/** An import plus its chapters. */
+/** An import plus its units. */
 export interface ImportDetail extends ImportJobView {
-  chapters: ImportChapterView[];
+  units: ImportUnitView[];
 }
 
 /** An imported work in the reader's library, with its provenance. */
@@ -1991,13 +1991,13 @@ export interface LibraryItem {
   language: string | null;
   word_count: number | null;
   /**
-   * How many chapters of this work are stored and readable.
+   * How many units of this work are stored and readable.
    *
    * Counted by the server from what it holds, not copied from the source, so a
    * partial import reads as partial rather than as a complete copy of a work the
    * source describes in full.
    */
-  chapter_count: number;
+  unit_count: number;
   /** What the source is called, for a reader. Falls back to the key. */
   source_display_name: string;
   status: string;
@@ -2067,7 +2067,7 @@ export function fetchImports(
   return apiFetch<ImportList<ImportJobView>>(`/imports${suffix ? `?${suffix}` : ''}`, { signal });
 }
 
-/** One import, with the state of each of its chapters. */
+/** One import, with the state of each of its units. */
 export function fetchImport(id: string, signal?: AbortSignal): Promise<ImportDetail> {
   return apiFetch<ImportDetail>(`/imports/${encodeURIComponent(id)}`, { signal });
 }
@@ -2080,12 +2080,12 @@ export function cancelImport(id: string): Promise<{ import_id: string; state: st
   );
 }
 
-/** Queue another attempt at the chapters that failed, and only those. */
-export function retryFailedChapters(
+/** Queue another attempt at the units that failed, and only those. */
+export function retryFailedUnits(
   id: string,
-): Promise<{ import_id: string; job_id: string; state: string; failed_chapters: number }> {
-  return apiFetch<{ import_id: string; job_id: string; state: string; failed_chapters: number }>(
-    `/imports/${encodeURIComponent(id)}/retry-failed-chapters`,
+): Promise<{ import_id: string; job_id: string; state: string; failed_units: number }> {
+  return apiFetch<{ import_id: string; job_id: string; state: string; failed_units: number }>(
+    `/imports/${encodeURIComponent(id)}/retry-failed-units`,
     { method: 'POST' },
   );
 }
@@ -2154,7 +2154,7 @@ export interface RequestExportInput {
   acknowledgePrivacy: boolean;
   options?: {
     title_page?: boolean;
-    chapter_headings?: boolean;
+    unit_headings?: boolean;
     font_family?: string | null;
     font_size_pt?: number | null;
   };
@@ -2342,7 +2342,7 @@ export interface Bookmark {
   id: string;
   subject_type: string;
   subject_id: string;
-  chapter_id: string | null;
+  unit_id: string | null;
   position_permille: number | null;
   note: string;
   is_public: boolean;
@@ -2367,7 +2367,7 @@ export function fetchBookmarks(
 export function createBookmark(input: {
   subjectType: string;
   subjectId: string;
-  chapterId?: string;
+  unitId?: string;
   positionPermille?: number;
   note?: string;
   isPublic?: boolean;
@@ -2377,7 +2377,7 @@ export function createBookmark(input: {
     body: JSON.stringify({
       subject_type: input.subjectType,
       subject_id: input.subjectId,
-      chapter_id: input.chapterId ?? null,
+      unit_id: input.unitId ?? null,
       position_permille: input.positionPermille ?? null,
       note: input.note ?? '',
       // Private unless asked otherwise, and the server says the same.
@@ -3020,8 +3020,8 @@ export interface ForumTopic {
   locked: boolean;
   /** Thread mode: 'plain', 'reading_group', 'critique_circle', 'wiki_pin', 'prompt'. */
   mode: string;
-  /** Chapter to which spoiler scope is limited (null = whole topic). */
-  spoiler_scope_chapter?: number | null;
+  /** Unit to which spoiler scope is limited (null = whole topic). */
+  spoiler_scope_unit?: number | null;
   /** Seconds between posts (slow mode). */
   slow_mode_seconds?: number;
   /** Federation scope: 'public', 'local', 'unlisted'. */
@@ -3891,7 +3891,7 @@ export function fetchProviderReliability(): Promise<{ providers: ProviderReliabi
 export interface WorkMediaReferenceView {
   id: string;
   work_id: string;
-  chapter_id: string | null;
+  unit_id: string | null;
   context: string;
   display_url: string;
   author_note: string | null;
@@ -3938,13 +3938,13 @@ export interface AddMediaReferenceBody {
   work_id: string;
   url: string;
   context?: string;
-  chapter_id?: string;
+  unit_id?: string;
   author_note?: string;
 }
 
 export interface PostTargetedBountyBody {
   work_id: string;
-  chapter_id?: string;
+  unit_id?: string;
   media_reference_id?: string;
   reward: number;
   description?: string;
@@ -4431,7 +4431,7 @@ export interface AnalyticsCount {
  */
 export interface ReadingTotals {
   finished_works: number;
-  chapters_read: number;
+  units_read: number;
   words_read: number;
   /** An estimate: capped wall-clock between progress updates. */
   reading_seconds: number;
@@ -4635,10 +4635,10 @@ export interface SurfaceWork {
   completion: string;
   published_at?: string | null;
   /**
-   * Item 4: total words across the work's CURRENT chapter revisions.
+   * Item 4: total words across the work's CURRENT unit revisions.
    *
    * Required, not optional, because the server COALESCEs the aggregate to 0: a work with
-   * no chapters is 0 words, which is a true answer. Making it optional here would put
+   * no units is 0 words, which is a true answer. Making it optional here would put
    * `undefined` in front of every caller for a work that simply has no prose yet, and a
    * card that hides the count for "absent" would then also hide it for 0.
    */
@@ -4814,8 +4814,8 @@ export interface ContinueReading {
   positionPermille: number;
   /** Whole percent, already clamped to 0..=100 by the server. */
   percent: number;
-  chapterId: string | null;
-  chapterTitle: string | null;
+  unitId: string | null;
+  unitTitle: string | null;
   /** RFC 3339. When this reader last wrote this row. */
   updatedAt: string;
 }
@@ -4840,8 +4840,8 @@ export async function fetchContinueReading(signal?: AbortSignal): Promise<Contin
       title: raw.title,
       positionPermille: raw.position_permille,
       percent: raw.percent,
-      chapterId: raw.chapter_id,
-      chapterTitle: raw.chapter_title,
+      unitId: raw.unit_id,
+      unitTitle: raw.unit_title,
       updatedAt: raw.updated_at,
     };
   } catch (err) {
@@ -4856,8 +4856,8 @@ interface ContinueReadingWire {
   title: string;
   position_permille: number;
   percent: number;
-  chapter_id: string | null;
-  chapter_title: string | null;
+  unit_id: string | null;
+  unit_title: string | null;
   updated_at: string;
 }
 

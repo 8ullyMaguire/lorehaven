@@ -42,9 +42,9 @@ fn the_story_page_parses_metadata_and_chapter_list() {
 
     // Branch links on the page give 10 unique chapter links.
     assert!(
-        work.chapters.len() >= 5,
+        work.units.len() >= 5,
         "expected at least 5 chapters from the branch list, got {}",
-        work.chapters.len()
+        work.units.len()
     );
 
     // Tags are extracted from anchors matching /tag/{name}.
@@ -66,14 +66,14 @@ fn the_chapter_page_parses_its_body() {
     // A chapter page still carries the full branch list (same markup as the
     // story page), so the preview reflects all listed branches.
     assert!(
-        work.chapters.len() >= 5,
+        work.units.len() >= 5,
         "expected at least 5 chapters from the chapter page's branch list, got {}",
-        work.chapters.len()
+        work.units.len()
     );
 
-    // chapters_from_html on the chapter fixture returns the body.
+    // units_from_html on the chapter fixture returns the body.
     let chapters = adapter
-        .chapters_from_html(&fixture("chapter.html"), &work)
+        .units_from_html(&fixture("chapter.html"), &work)
         .expect("chapter fixture parses to a chapter");
     assert_eq!(chapters.len(), 1);
     assert!(

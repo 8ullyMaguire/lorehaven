@@ -46,7 +46,7 @@ mod dialogue_tests {
     #[test]
     fn an_unclosed_quote_is_closed_at_the_end_not_discarded() {
         // Text pasted from a word processor often has one unmatched quote.
-        // Discarding the rest of the chapter would under-report the ratio in a
+        // Discarding the rest of the unit would under-report the ratio in a
         // way that looks like a deliberate measurement.
         let text = format!("Then she said {} and after that everything changed", OPEN);
         assert_eq!(dialogue_word_count(&text), 5);

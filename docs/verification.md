@@ -1,3 +1,88 @@
+## 2026-10-20 — M4: the vocabulary is normative, and a work is not hidden for saying no
+
+**Milestone:** M4 · **Requirements:** `DM4-01` … `DM4-07`
+
+The content model: the work's own vocabulary, the event log that dates it, the three
+orthogonal state fields, the optimistic-concurrency contract, the "more like this" ladder,
+and the author's AI statement.
+
+### The vocabulary is normative — and it renumbers the bottom of the trust ladder too
+
+Spec §5: a **unit** is a part of a work, a **revision** is an append-only version of a
+unit's text. Migration `0122` renames the tables, eleven `chapter_id` columns and their
+indexes. **It does not rewrite the data**: every row keeps its identity, its order and its
+text.
+
+> **The public URL keeps its shape.** `/api/v1/works/{id}/chapters` and
+> `/api/v1/chapters/{id}` are unchanged — a URL is the most stable public surface an
+> instance has, and the *model* is what this change renames. The response field
+> `chapters` becomes `units`, which is the breaking change, and it is recorded in
+> `docs/changelog.md`.
+
+**Two places keep the source's word on purpose.** The metadata exchange's signal carries
+the source's `chapter_count` (§15.2 lists "chapter count" among a signal's fields, and a
+signal is about a *source*), and the source adapters keep the site's word — an adapter's
+job is to translate it, and the specification's own mapping says a unit is "a chapter, a
+track, an episode".
+
+**And the reachability probe learned to follow a rename.** It read the migrations as a
+*sequence* — create, rename, drop — rather than as a bag of `CREATE TABLE` statements, so a
+rebuild's intermediate name is not reported as a table and a renamed table is reported under
+the name the instance uses now. Before, it reported `units` as having neither a reader nor a
+writer: a finding about the probe and not about the instance.
+
+### Five of the six work columns already existed
+
+`format` (0024), `discussion_mode` (0038), `ai_training` (0022), `half_life_bp` (0049) and
+`contested_at` (0037) were already there; migration `0119` adds only `derived_activity`.
+
+**The defaults move and the rows do not.** A *new* work is a `fanwork` with a
+`thread_only` discussion; the rows that already existed keep `'prose'` and
+`'comments_only'` — which is what migrations 0024 and 0038 already said they should be.
+
+**And `half_life_bp` stays nullable, on the merits.** The scale is 0..10000, where **10000
+is the maximum** — an evergreen boost of 1.5× — and 0 is "no signal, neutral". A
+`NOT NULL DEFAULT 10000` would give every unscored work the largest boost the mechanism can
+give, and the unscored works are the newest ones.
+
+### The event log dates the work, and the two ages are different questions
+
+The update path moved the work's `updated_at` and wrote **no event** — so the `updated`
+sort had nothing to sort by, and the row's timestamp was the only answer, which is the
+answer the specification says is wrong. The update now writes an event in the same breath as
+the change, with the acting pseud.
+
+> A work published a year ago and edited today has a **publication age of a year** and an
+> **update age of a day**. It sorts late under `new` and early under `updated`, and the test
+> asserts the order *reverses*.
+
+### The 409 names the field, and the loser does not land
+
+A conflict that only refuses the second *request* is not a conflict — the point is that the
+second *change* never happened. And the response now carries the field and both versions,
+because a 409 that says "conflict" tells a client that it lost and not what it lost to.
+
+### The ladder's reasons, and the rungs that are not built
+
+Every row carries a reason, and **no two rows carry the same one** — a recommendation
+without a reason is an advertisement, and so is one whose reason is uniform. The three
+taste rungs are **named as unavailable**, and asking for one by name answers **404 with
+`MODULE_UNAVAILABLE`**: a new error code, because `NOT_IMPLEMENTED` is 501 and says "this
+instance does not do that", which is a claim about the *instance* rather than about the
+build.
+
+### The AI statement is a statement, and the work is still in the archive
+
+The default generated-content posture moves to **`allow`** (§6.9, D-4/N-4), and the reason
+is about this archive: the owner's corpus has 8 of 54 works carrying `ai-generated text`
+and **he writes them**. An archive whose default refuses the work its own author writes is
+an archive that refuses its author.
+
+The statement is shown as *"this author's stated preference, recorded"* — and the test
+asserts the wording **never contains "protect"**. A work with `ai_training = deny` and a
+declared-AI attribute is **still indexed and still recommended**: a statement about
+*training* says nothing about whether the work is in the archive.
+
 ## 2026-10-20 — M3: the trust ladder, and the four gates that did not exist
 
 **Milestone:** M3 · **Requirements:** `DM3-01` … `DM3-06`

@@ -4,9 +4,9 @@
 //! # What it does, and what it deliberately does not
 //!
 //! For each of the reader's library items it re-reads the source's **metadata**
-//! — the chapter list and the source's own "last changed" stamp — and writes
+//! — the unit list and the source's own "last changed" stamp — and writes
 //! down what differs from the copy that was imported. It never re-fetches a
-//! chapter body: the point is to tell the reader something changed, not to
+//! unit body: the point is to tell the reader something changed, not to
 //! change it, and an item the reader wants refreshed is a new import they ask
 //! for.
 //!
@@ -147,13 +147,13 @@ async fn check_one(state: &AppState, item: &imports::LibraryItem) -> ItemReport 
     };
 
     let mut changes = Vec::new();
-    let was_chapters = item.chapter_count;
-    let now_chapters = i64::try_from(work.chapters.len()).unwrap_or(i64::MAX);
-    if now_chapters != was_chapters {
+    let was_units = item.unit_count;
+    let now_units = i64::try_from(work.units.len()).unwrap_or(i64::MAX);
+    if now_units != was_units {
         changes.push(json!({
-            "field": "chapter_count",
-            "was": was_chapters,
-            "now": now_chapters,
+            "field": "unit_count",
+            "was": was_units,
+            "now": now_units,
         }));
     }
     if let Some(now_updated) = work.updated_at {

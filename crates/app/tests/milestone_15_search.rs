@@ -22,7 +22,7 @@
 //!   Both engines agree, but nothing in the SQL says so.
 //! - **The search predicate is the anonymous one.** Only works that are
 //!   `published`, `public` and not soft-deleted surface, because the term index
-//!   is not a visibility boundary: the worker fills it from chapter text
+//!   is not a visibility boundary: the worker fills it from unit text
 //!   regardless of lifecycle.
 //!
 //! `search_in_work` has no caller outside this module. It is tested anyway — a
@@ -153,32 +153,32 @@ impl Harness {
         }
     }
 
-    /// A chapter with `words` words in its live revision, so the `word_count`
+    /// A unit with `words` words in its live revision, so the `word_count`
     /// subquery has something to sum.
-    async fn chapter(&self, work: &WorkId, author: PseudId, order: i64, words: i64) {
-        let chapter = Uuid::new_v4();
+    async fn unit(&self, work: &WorkId, author: PseudId, order: i64, words: i64) {
+        let unit = Uuid::new_v4();
         let revision = Uuid::new_v4();
-        // `chapters.current_revision_id` and `chapter_revisions.chapter_id` form
-        // a reference cycle, so the chapter is inserted with a NULL current
+        // `units.current_revision_id` and `revisions.unit_id` form
+        // a reference cycle, so the unit is inserted with a NULL current
         // revision, the revision is added, and the pointer is set last. Doing it
         // the other way round trips the FK on the second insert.
         self.exec(&format!(
-            "INSERT INTO chapters \
+            "INSERT INTO units \
              (id, work_id, order_key, title, current_revision_id, created_at, updated_at) \
-             VALUES ('{chapter}', '{work}', {order}, 'Chapter {order}', NULL, \
+             VALUES ('{unit}', '{work}', {order}, 'Unit {order}', NULL, \
              '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
         ))
         .await;
         self.exec(&format!(
-            "INSERT INTO chapter_revisions \
-             (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, \
+            "INSERT INTO revisions \
+             (id, unit_id, revision_number, document_json, sanitized_html, plain_text, \
               word_count, created_by_pseud_id, created_at) \
-             VALUES ('{revision}', '{chapter}', 1, '{{}}', '', '', {words}, '{author}', \
+             VALUES ('{revision}', '{unit}', 1, '{{}}', '', '', {words}, '{author}', \
              '2026-01-01T00:00:00Z')"
         ))
         .await;
         self.exec(&format!(
-            "UPDATE chapters SET current_revision_id = '{revision}' WHERE id = '{chapter}'"
+            "UPDATE units SET current_revision_id = '{revision}' WHERE id = '{unit}'"
         ))
         .await;
     }
@@ -669,7 +669,7 @@ async fn a_repeated_match_raises_the_score() {
     );
 }
 
-/// **`word_count` is summed from live chapter revisions, not read from the
+/// **`word_count` is summed from live unit revisions, not read from the
 /// denormalised `works.word_count` column** — which the function's doc comment
 /// says is unmaintained, so it reports zero for every result.
 #[tokio::test]
@@ -677,21 +677,21 @@ async fn word_count_comes_from_live_revisions() {
     let h = Harness::new("search-wordcount").await;
     let (owner, _) = h.pseud("author").await;
     let work = h.work(owner, "Counted").await;
-    h.chapter(&work, owner, 1, 1200).await;
-    h.chapter(&work, owner, 2, 800).await;
+    h.unit(&work, owner, 1, 1200).await;
+    h.unit(&work, owner, 2, 800).await;
     rebuild_work_index(h.db(), &work, "countable text")
         .await
         .expect("rebuild");
 
     let results = search_works(h.db(), "countable", 50).await.expect("search");
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].word_count, 2000, "1200 + 800 across chapters");
+    assert_eq!(results[0].word_count, 2000, "1200 + 800 across units");
 }
 
-/// A work with no chapters has a word count of zero, not NULL — the
+/// A work with no units has a word count of zero, not NULL — the
 /// `COALESCE` in the subquery.
 #[tokio::test]
-async fn a_work_with_no_chapters_counts_zero() {
+async fn a_work_with_no_units_counts_zero() {
     let h = Harness::new("search-nocount").await;
     let (owner, _) = h.pseud("author").await;
     let work = h.work(owner, "Uncounted").await;

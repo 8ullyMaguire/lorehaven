@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * The chapter editor (spec §8.3).
+   * The unit editor (spec §8.3).
    *
    * The Tiptap schema here is the *client* half of the contract enforced on the
    * server: the same node and mark names, and nothing else. If the two ever
@@ -27,17 +27,17 @@
     ApiError,
     fetchRevisions,
     restoreRevision,
-    updateChapter,
+    updateUnit,
     type RevisionEntry,
   } from '../api';
-  import { ChapterAutosave, type SaveState } from '../autosave';
+  import { UnitAutosave, type SaveState } from '../autosave';
   import Button from './Button.svelte';
   import TextField from './TextField.svelte';
 
   interface Props {
-    chapterId: string;
+    unitId: string;
     workId: string;
-    /** The chapter version the server most recently gave us. */
+    /** The unit version the server most recently gave us. */
     version: number;
     /** The stored editor document, if there is one. */
     document: unknown | null;
@@ -48,7 +48,7 @@
     onrenamed?: (title: string) => void;
   }
 
-  let { chapterId, workId, version, document, title, onsaved, onrenamed }: Props = $props();
+  let { unitId, workId, version, document, title, onsaved, onrenamed }: Props = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let editor = $state<Editor | null>(null);
@@ -57,7 +57,7 @@
   let saveMessage = $state<string | undefined>(undefined);
   let wordCount = $state(0);
   /**
-   * The title field starts from the chapter's title and then belongs to the
+   * The title field starts from the unit's title and then belongs to the
    * writer; it is not a mirror of the prop.
    */
   let titleDraft = $state(untrack(() => title));
@@ -80,18 +80,18 @@
 
   /*
    * One autosave per mounted editor, deliberately: the parent keys this
-   * component by chapter, so switching chapters builds a new one. Reading the
+   * component by unit, so switching units builds a new one. Reading the
    * props through `untrack` says so out loud — an autosave that silently
-   * followed a *later* chapter would save into the wrong one.
+   * followed a *later* unit would save into the wrong one.
    */
   const autosave = untrack(() => autosaveFor(version));
 
   function autosaveFor(startVersion: number) {
-    return new ChapterAutosave(startVersion, {
-    storageKey: `darkhold:chapter:${chapterId}:draft`,
+    return new UnitAutosave(startVersion, {
+    storageKey: `darkhold:unit:${unitId}:draft`,
     storage: typeof window === 'undefined' ? null : window.localStorage,
     save: async (payload) => {
-      const saved = await updateChapter(chapterId, {
+      const saved = await updateUnit(unitId, {
         expected_version: payload.expected_version,
         document: payload.document,
         note: note.trim() || undefined,
@@ -197,7 +197,7 @@
     if (!showHistory || revisions) return;
     historyError = null;
     try {
-      revisions = await fetchRevisions(chapterId);
+      revisions = await fetchRevisions(unitId);
     } catch (failure) {
       historyError = failure;
     }
@@ -207,11 +207,11 @@
     restoring = true;
     historyError = null;
     try {
-      const restored = await restoreRevision(chapterId, revisionId);
-      const loaded = await fetchChapterDocument(restored.id);
+      const restored = await restoreRevision(unitId, revisionId);
+      const loaded = await fetchUnitDocument(restored.id);
       const instance = editor;
       if (instance && loaded) instance.commands.setContent(loaded as never);
-      revisions = await fetchRevisions(chapterId);
+      revisions = await fetchRevisions(unitId);
       autosave.setVersion(restored.version);
       onsaved?.(restored.version, restored.word_count);
     } catch (failure) {
@@ -222,13 +222,13 @@
   }
 
   /**
-   * Reload the chapter's text after a restore.
+   * Reload the unit's text after a restore.
    *
    * A restore appends a revision rather than rewriting one, so the text to
    * show is the *new* current revision, not the one that was picked.
    */
-  async function fetchChapterDocument(_chapterId: string): Promise<unknown | null> {
-    const response = await fetch(`/api/v1/works/${workId}/chapters/${chapterId}`, {
+  async function fetchUnitDocument(_unitId: string): Promise<unknown | null> {
+    const response = await fetch(`/api/v1/works/${workId}/chapters/${unitId}`, {
       headers: { accept: 'application/json' },
     });
     if (!response.ok) return null;
@@ -250,10 +250,10 @@
     recovered = null;
   }
 
-  async function renameChapter() {
+  async function renameUnit() {
     if (titleDraft === title) return;
     try {
-      await updateChapter(chapterId, {
+      await updateUnit(unitId, {
         expected_version: autosave.currentVersion,
         title: titleDraft,
       });
@@ -261,7 +261,7 @@
     } catch (failure) {
       saveState = 'error';
       saveMessage =
-        failure instanceof ApiError ? failure.message : 'The chapter could not be renamed.';
+        failure instanceof ApiError ? failure.message : 'The unit could not be renamed.';
     }
   }
 
@@ -282,11 +282,11 @@
   );
 </script>
 
-<section class="editor" aria-label="Chapter editor">
+<section class="editor" aria-label="Unit editor">
   {#if recovered}
     <div class="banner" role="status">
       <p>
-        A draft of this chapter was left in this browser and has not been sent to the server.
+        A draft of this unit was left in this browser and has not been sent to the server.
         Restoring it will replace what is loaded here.
       </p>
       <div class="banner-actions">
@@ -296,8 +296,8 @@
     </div>
   {/if}
 
-  <div class="chapter-meta">
-    <TextField label="Chapter title" bind:value={titleDraft} onblur={renameChapter} />
+  <div class="unit-meta">
+    <TextField label="Unit title" bind:value={titleDraft} onblur={renameUnit} />
     <TextField label="Revision note (optional)" bind:value={note} />
   </div>
 
@@ -418,7 +418,7 @@
     gap: var(--space-2);
   }
 
-  .chapter-meta {
+  .unit-meta {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-3);

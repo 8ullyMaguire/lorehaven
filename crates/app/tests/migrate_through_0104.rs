@@ -356,14 +356,14 @@ async fn work_warnings_refuse_impossible_shapes() {
     work(&db, "11111111-1111-1111-1111-111111111111").await;
     warning_node(&db, "wn1").await;
 
-    // `chapter` and `node` are passed already-quoted-or-NULL by the caller; the two
+    // `unit` and `node` are passed already-quoted-or-NULL by the caller; the two
     // enum-ish values are passed BARE and quoted exactly once here. Quoting in both
     // places produced ''"on_page"'' and a syntax error at "on_page", which is the
     // kind of double-quoting bug that reads as a database problem.
-    let insert = |chapter: &str, node: &str, severity: &str, depiction: &str, declaration: &str| {
+    let insert = |unit: &str, node: &str, severity: &str, depiction: &str, declaration: &str| {
         format!(
-            "INSERT INTO work_warnings (work_id, chapter_id, warning_node_id, severity, depiction, declaration, created_at, updated_at) \
-             VALUES ('11111111-1111-1111-1111-111111111111'__UUID__, {chapter}, {node}, {severity}, '{depiction}', '{declaration}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+            "INSERT INTO work_warnings (work_id, unit_id, warning_node_id, severity, depiction, declaration, created_at, updated_at) \
+             VALUES ('11111111-1111-1111-1111-111111111111'__UUID__, {unit}, {node}, {severity}, '{depiction}', '{declaration}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
         )
     };
 
@@ -423,7 +423,7 @@ async fn work_warnings_refuse_impossible_shapes() {
         .unwrap_or_else(|e| panic!("{declaration} must be accepted:\n{e}"));
     }
 
-    // Null-chapter uniqueness: NULL does not compare equal to NULL, so this is
+    // Null-unit uniqueness: NULL does not compare equal to NULL, so this is
     // where a plain UNIQUE would silently let a work-scoped warning land twice.
     warning_node(&db, "wn_dup").await;
     exec(
@@ -436,7 +436,7 @@ async fn work_warnings_refuse_impossible_shapes() {
     let err = refusal(&db, &dup).await;
     assert!(
         err.is_some(),
-        "the same work-scoped warning must not be insertable twice: a NULL chapter \
+        "the same work-scoped warning must not be insertable twice: a NULL unit \
          does not collide with itself under a plain UNIQUE, which is the whole \
          reason the uniqueness is an expression index / NULLS NOT DISTINCT"
     );
@@ -448,7 +448,7 @@ async fn work_warnings_refuse_impossible_shapes() {
             "sqlite"
         }
     );
-    // A chapter-scoped one is a different row and must be accepted.
+    // A unit-scoped one is a different row and must be accepted.
     exec(
         &db,
         &lit(
@@ -457,7 +457,7 @@ async fn work_warnings_refuse_impossible_shapes() {
         ),
     )
     .await
-    .expect("the same warning scoped to a chapter is a different row");
+    .expect("the same warning scoped to a unit is a different row");
 
     db.cleanup().await;
 }
@@ -559,10 +559,10 @@ async fn passages_refuse_impossible_offsets() {
     let db = TestDb::connect_with_dir("migrate_0105_passages", &dir).await;
     work(&db, "44444444-4444-4444-4444-444444444444").await;
 
-    let passage = |seq: i32, start: i32, end: i32, chapter: &str| {
+    let passage = |seq: i32, start: i32, end: i32, unit: &str| {
         format!(
-            "INSERT INTO work_passages (id, work_id, chapter_id, seq, text, start_offset, end_offset, created_at) \
-             VALUES ('p{seq}{start}', '44444444-4444-4444-4444-444444444444'__UUID__, {chapter}, {seq}, 'x', {start}, {end}, '2026-01-01T00:00:00Z')"
+            "INSERT INTO work_passages (id, work_id, unit_id, seq, text, start_offset, end_offset, created_at) \
+             VALUES ('p{seq}{start}', '44444444-4444-4444-4444-444444444444'__UUID__, {unit}, {seq}, 'x', {start}, {end}, '2026-01-01T00:00:00Z')"
         )
     };
     exec(&db, &lit(&db, &passage(0, 0, 120, "NULL")))
@@ -570,7 +570,7 @@ async fn passages_refuse_impossible_offsets() {
         .expect("a work-level passage inserts");
     exec(&db, &lit(&db, &passage(1, 100, 220, "'ch1'")))
         .await
-        .expect("a chapter passage inserts");
+        .expect("a unit passage inserts");
 
     assert!(
         refused(&db, &lit(&db, &passage(2, 200, 100, "'ch1'"))).await,
@@ -582,12 +582,12 @@ async fn passages_refuse_impossible_offsets() {
     );
     assert!(
         refused(&db, &lit(&db, &passage(1, 0, 50, "'ch1'"))).await,
-        "two passages of one chapter must not share a position"
+        "two passages of one unit must not share a position"
     );
-    // The same seq in a different chapter is a different position.
+    // The same seq in a different unit is a different position.
     exec(&db, &lit(&db, &passage(1, 0, 50, "'ch2'")))
         .await
-        .expect("the same seq in another chapter is a different passage");
+        .expect("the same seq in another unit is a different passage");
 
     db.cleanup().await;
 }

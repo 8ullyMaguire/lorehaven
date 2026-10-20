@@ -3,7 +3,7 @@
 /// Default daily action caps by tier (spec §20.3).
 pub const DEFAULT_CAPS: &[(&str, i64)] = &[
     ("daily_login", 1),
-    ("read_chapter", 10),
+    ("read_unit", 10),
     ("react", 20),
     ("daily_total", 50),
 ];

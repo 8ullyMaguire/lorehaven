@@ -13,7 +13,7 @@
 //!
 //! # Capabilities
 //!
-//! Metadata, chapters and per-chapter fetch are available. Bibliography is not:
+//! Metadata, units and per-chapter fetch are available. Bibliography is not:
 //! an author's story list is behind a search that this adapter does not run.
 //!
 //! The chapter list is the story's **branches** page — a tree of reading paths.
@@ -32,8 +32,8 @@ use scraper::{Html, Selector};
 use url::Url;
 
 use crate::{
-    attr_of, collapse_whitespace, text_of, AuthKind, ChapterRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult,
+    attr_of, collapse_whitespace, text_of, AuthKind, UnitRef, Credentials, Fetcher,
+    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
     SourceWork, WorkStatus,
 };
 
@@ -130,9 +130,9 @@ impl SourceAdapter for Chyoa {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             bibliography: false,
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             incremental: false,
             authentication: AuthKind::None,
             min_interval_millis: Some(1500),
@@ -188,37 +188,37 @@ impl SourceAdapter for Chyoa {
         self.preview_from_html(&story_html.body, url)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        if work.chapters.is_empty() {
+    ) -> SourceResult<Vec<SourceUnit>> {
+        if work.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "chyoa story {} lists no chapters",
                 work.source_work_key
             )));
         }
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for entry in &work.chapters {
-            let page = fetch.get(&entry.source_chapter_key).await.map_err(|e| {
+        let mut units = Vec::with_capacity(work.units.len());
+        for entry in &work.units {
+            let page = fetch.get(&entry.source_unit_key).await.map_err(|e| {
                 SourceError::Network(format!("reading chapter {}: {e}", entry.ordinal))
             })?;
-            chapters.push(self.parse_chapter(&page.body, work, entry.ordinal)?);
+            units.push(self.parse_chapter(&page.body, work, entry.ordinal)?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let entry = work
-            .chapters
+            .units
             .iter()
             .find(|e| e.ordinal == ordinal)
             .ok_or_else(|| {
@@ -228,7 +228,7 @@ impl SourceAdapter for Chyoa {
                 ))
             })?;
         let page = fetch
-            .get(&entry.source_chapter_key)
+            .get(&entry.source_unit_key)
             .await
             .map_err(|e| SourceError::Network(format!("reading chapter {ordinal}: {e}")))?;
         self.parse_chapter(&page.body, work, ordinal)
@@ -288,7 +288,7 @@ impl SourceAdapter for Chyoa {
         let chapter_sel =
             Selector::parse(".rd-story-branches .rd-story-branch-link[href*='/chapter/']")
                 .expect("static selector");
-        let mut chapters = Vec::new();
+        let mut units = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for a in document.select(&chapter_sel) {
             let href = a.value().attr("href").unwrap_or("");
@@ -300,20 +300,20 @@ impl SourceAdapter for Chyoa {
                 continue;
             }
             let title = collapse_whitespace(&a.text().collect::<String>());
-            chapters.push(ChapterRef {
-                ordinal: (chapters.len() + 1) as u32,
-                source_chapter_key: Self::chapter_url(chap_id),
+            units.push(UnitRef {
+                ordinal: (units.len() + 1) as u32,
+                source_unit_key: Self::chapter_url(chap_id),
                 title,
             });
         }
 
         // If no branch links found, check if the URL is itself a chapter page
         // and create a single-chapter list for it.
-        if chapters.is_empty() {
+        if units.is_empty() {
             if let Some(chap_id) = Self::chapter_id(url) {
-                chapters.push(ChapterRef {
+                units.push(UnitRef {
                     ordinal: 1,
-                    source_chapter_key: Self::chapter_url(&chap_id),
+                    source_unit_key: Self::chapter_url(&chap_id),
                     title: title.clone(),
                 });
             }
@@ -332,18 +332,18 @@ impl SourceAdapter for Chyoa {
             status: WorkStatus::Unknown,
             published_at: None,
             updated_at: None,
-            chapters,
+            units,
             rating_text: None,
             warning_texts: Vec::new(),
             tags,
         })
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // When given a chapter page, parse its body.
         if work.source_url.contains("/chapter/") {
             let chapter = self.parse_chapter(html, work, 1)?;
@@ -362,7 +362,7 @@ impl Chyoa {
         html: &str,
         work: &SourceWork,
         ordinal: u32,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let document = Html::parse_document(html);
 
         let body_sel =
@@ -375,9 +375,9 @@ impl Chyoa {
         let image_urls = crate::sanitize::extract_image_urls(&content_html, None);
         let title = text_of(&document, "h1.rd-story-reading-title").unwrap_or_default();
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal,
-            source_chapter_key: Self::chapter_url(&work.source_work_key),
+            source_unit_key: Self::chapter_url(&work.source_work_key),
             title,
             content_html,
             image_urls,

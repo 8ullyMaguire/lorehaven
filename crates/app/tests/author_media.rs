@@ -69,7 +69,7 @@ async fn targeted_bounty_post_and_claim() {
         None,
         author_id,
         50,
-        Some("Find a working mirror for the chapter 7 moodboard"),
+        Some("Find a working mirror for the unit 7 moodboard"),
     )
     .await
     .expect("post bounty");
@@ -100,33 +100,33 @@ async fn targeted_bounty_post_and_claim() {
 }
 
 #[tokio::test]
-async fn targeted_bounty_with_chapter() {
+async fn targeted_bounty_with_unit() {
     let dir = scratch_dir("tb-ch");
     let tdb = test_support::TestDb::connect_with_dir("am-tb-ch", &dir).await;
     let db = tdb.db();
 
     let bounty_id = "tb-002";
     let work_id = "work-002";
-    let chapter_id = "ch-007";
+    let unit_id = "ch-007";
 
     media_resilience::post_targeted_bounty(
         db,
         bounty_id,
         work_id,
-        Some(chapter_id),
+        Some(unit_id),
         None,
         "author-002",
         75,
-        Some("Mirror needed for chapter 7"),
+        Some("Mirror needed for unit 7"),
     )
     .await
-    .expect("post bounty with chapter");
+    .expect("post bounty with unit");
 
     let bounties = media_resilience::list_targeted_bounties_for_work(db, work_id)
         .await
         .expect("list bounties");
     assert_eq!(bounties.len(), 1);
-    assert_eq!(bounties[0].chapter_id, Some(chapter_id.to_string()));
+    assert_eq!(bounties[0].unit_id, Some(unit_id.to_string()));
     assert_eq!(bounties[0].reward, 75);
 }
 

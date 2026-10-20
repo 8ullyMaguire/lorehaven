@@ -137,7 +137,7 @@ async fn register(client: &mut Client, email: &str, handle: &str) {
     );
 }
 
-async fn create_work_with_chapter(client: &mut Client, title: &str) -> (String, String) {
+async fn create_work_with_unit(client: &mut Client, title: &str) -> (String, String) {
     let (status, body) = client
         .post("/api/v1/works", json!({ "title": title }))
         .await;
@@ -145,15 +145,32 @@ async fn create_work_with_chapter(client: &mut Client, title: &str) -> (String, 
     let work_id = body["id"].as_str().unwrap().to_owned();
     let work_version = body["version"].as_i64().unwrap();
 
+    // **The discussion mode is `comments_only`** -- the legacy shape, supported
+    // indefinitely (spec §13.2). A *new* work is `thread_only` by default and
+    // its text discussion lives in the linked forum thread, so a test that
+    // comments on a work has to say which shape it wants.
+    let (status, body) = client
+        .patch(
+            &format!("/api/v1/works/{work_id}"),
+            json!({
+                "expected_version": work_version,
+                "discussion_mode": "comments_only",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set the discussion mode: {body}");
+
+    let work_version = body["version"].as_i64().unwrap();
+
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
-            json!({ "title": "Chapter 1" }),
+            json!({ "title": "Unit 1" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "create chapter: {body}");
-    let chapter_id = body["id"].as_str().unwrap().to_owned();
-    let chapter_version = body["version"].as_i64().unwrap();
+    assert_eq!(status, StatusCode::CREATED, "create unit: {body}");
+    let unit_id = body["id"].as_str().unwrap().to_owned();
+    let unit_version = body["version"].as_i64().unwrap();
 
     let doc = json!({ "type": "doc", "content": [
         { "type": "paragraph", "content": [{ "type": "text", "text": "First paragraph." }] },
@@ -162,16 +179,16 @@ async fn create_work_with_chapter(client: &mut Client, title: &str) -> (String, 
     ] });
     let (status, _) = client
         .patch(
-            &format!("/api/v1/chapters/{chapter_id}"),
-            json!({ "expected_version": chapter_version, "document": doc }),
+            &format!("/api/v1/chapters/{unit_id}"),
+            json!({ "expected_version": unit_version, "document": doc }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "save chapter");
+    assert_eq!(status, StatusCode::OK, "save unit");
 
     let (status, _) = client.post(&format!("/api/v1/works/{work_id}/publish"), json!({ "expected_version": work_version, "idempotency_key": format!("m24-{work_id}") })).await;
     assert_eq!(status, StatusCode::OK, "publish work");
 
-    (work_id, chapter_id)
+    (work_id, unit_id)
 }
 
 #[tokio::test]
@@ -182,7 +199,7 @@ async fn anchored_comments_round_trip() {
     let mut client = Client::new(app);
 
     register(&mut client, "anchored@example.com", "anchored").await;
-    let (work_id, chapter_id) = create_work_with_chapter(&mut client, "Anchored Work").await;
+    let (work_id, unit_id) = create_work_with_unit(&mut client, "Anchored Work").await;
 
     let (status, body) = client
         .post(
@@ -193,7 +210,7 @@ async fn anchored_comments_round_trip() {
     assert_eq!(status, StatusCode::OK, "whole-work comment: {body}");
     let whole_comment_id = body["id"].as_str().unwrap().to_owned();
 
-    let (status, body) = client.post(&format!("/api/v1/works/{work_id}/comments"), json!({ "body": "Anchored to paragraph 1", "anchor_kind": "paragraph", "anchor_value": "1", "anchor_chapter_id": chapter_id })).await;
+    let (status, body) = client.post(&format!("/api/v1/works/{work_id}/comments"), json!({ "body": "Anchored to paragraph 1", "anchor_kind": "paragraph", "anchor_value": "1", "anchor_unit_id": unit_id })).await;
     assert_eq!(status, StatusCode::OK, "anchored comment: {body}");
     let anchored_comment_id = body["id"].as_str().unwrap().to_owned();
 
@@ -228,7 +245,7 @@ async fn anchored_comment_validation() {
     let mut client = Client::new(app);
 
     register(&mut client, "anchored-val@example.com", "anchoredval").await;
-    let (work_id, chapter_id) = create_work_with_chapter(&mut client, "Validation Work").await;
+    let (work_id, unit_id) = create_work_with_unit(&mut client, "Validation Work").await;
 
     let (status, _) = client
         .post(
@@ -239,14 +256,14 @@ async fn anchored_comment_validation() {
     assert_eq!(
         status,
         StatusCode::UNPROCESSABLE_ENTITY,
-        "paragraph needs chapter_id"
+        "paragraph needs unit_id"
     );
 
-    let (status, _) = client.post(&format!("/api/v1/works/{work_id}/comments"), json!({ "body": "bad", "anchor_kind": "timestamp", "anchor_value": "42", "anchor_chapter_id": chapter_id })).await;
+    let (status, _) = client.post(&format!("/api/v1/works/{work_id}/comments"), json!({ "body": "bad", "anchor_kind": "timestamp", "anchor_value": "42", "anchor_unit_id": unit_id })).await;
     assert_eq!(
         status,
         StatusCode::UNPROCESSABLE_ENTITY,
-        "timestamp rejects chapter_id"
+        "timestamp rejects unit_id"
     );
 
     let (status, _) = client
@@ -329,7 +346,7 @@ async fn the_creator_dashboard_reports_banded_aggregates() {
 
     let mut author = Client::new(app.clone());
     register(&mut author, "author@example.com", "author").await;
-    let (work_id, _) = create_work_with_chapter(&mut author, "Dashboarded Work").await;
+    let (work_id, _) = create_work_with_unit(&mut author, "Dashboarded Work").await;
 
     // A second work, left as a draft, so the published/unpublished split is
     // visible rather than inferred.
@@ -354,12 +371,12 @@ async fn the_creator_dashboard_reports_banded_aggregates() {
     assert!(floor >= 1, "the dashboard must state its floor: {body}");
 
     // Works and words are the author's own facts about their own text, so they
-    // are exact: banding a chapter count would make the dashboard useless.
+    // are exact: banding a unit count would make the dashboard useless.
     assert_eq!(body["works"]["total"].as_i64(), Some(2), "{body}");
     assert_eq!(body["works"]["published"].as_i64(), Some(1), "{body}");
     assert_eq!(body["works"]["unpublished"].as_i64(), Some(1), "{body}");
     assert!(
-        body["works"]["chapters"].as_i64().unwrap_or(0) >= 1,
+        body["works"]["units"].as_i64().unwrap_or(0) >= 1,
         "{body}"
     );
     assert!(body["works"]["words"].as_i64().unwrap_or(0) > 0, "{body}");

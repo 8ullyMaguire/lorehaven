@@ -17,7 +17,7 @@
 
   const modes = [
     { value: 'plain', label: 'Plain', desc: 'Free-form discussion' },
-    { value: 'reading_group', label: 'Reading Group', desc: 'Scheduled chapter releases' },
+    { value: 'reading_group', label: 'Reading Group', desc: 'Scheduled unit releases' },
     { value: 'critique_circle', label: 'Critique Circle', desc: 'Peer review queue' },
     { value: 'wiki', label: 'Wiki', desc: 'Collaborative knowledge base' },
     { value: 'prompt', label: 'Prompt', desc: 'Creative writing challenge' },

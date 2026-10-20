@@ -3,7 +3,7 @@
 //! These run against the real router, a real SQLite file, a real storage
 //! directory, the real worker and the real Archive-software parser. The only
 //! thing replaced is the network: a test adapter answers `preview` and
-//! `fetch_chapters` from the pages recorded in
+//! `fetch_units` from the pages recorded in
 //! `crates/scrapers/tests/fixtures/ao3/`, which are the bytes a live fetch
 //! returned. A test that reaches the network fails on a plane, and an importer
 //! only ever exercised against a live site is an importer whose retry and
@@ -11,13 +11,13 @@
 //!
 //! What is proven here, and could not be proven any other way:
 //!
-//! * a queued import becomes stored chapters, through the worker;
+//! * a queued import becomes stored units, through the worker;
 //! * a preview stores nothing;
 //! * a disabled source is a refusal that names the operator's reason;
 //! * a source that needs a credential is refused *before* anything is fetched;
-//! * a chapter already held is not stored twice;
+//! * a unit already held is not stored twice;
 //! * a transient fetch failure leaves the queue holding the retry;
-//! * a dry run reports the plan and stores no chapters;
+//! * a dry run reports the plan and stores no units;
 //! * a credential's plaintext is in no response and not in the database file.
 
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ use darkhold_scrapers::async_trait;
 use darkhold_scrapers::registry::Registry;
 use darkhold_scrapers::sites::ao3::ArchiveSoftware;
 use darkhold_scrapers::{
-    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceError,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError,
     SourceKey, SourceResult, SourceWork, Wall,
 };
 use serde_json::{json, Value};
@@ -61,7 +61,7 @@ const SOURCE: &str = "ao3";
 /// The Archive-software adapter with the network removed.
 ///
 /// It delegates parsing to the real adapter: `preview_from_html` and
-/// `chapters_from_html` are the trait's own fixture seam, so this is the same
+/// `units_from_html` are the trait's own fixture seam, so this is the same
 /// parser the live path uses rather than a stand-in for it. What it does not do
 /// is fetch. It is handed a fetcher and deliberately never touches it — a test
 /// adapter that reached the network would be a test that fails offline, and the
@@ -69,16 +69,16 @@ const SOURCE: &str = "ao3";
 /// tests.
 struct FixtureArchive {
     inner: ArchiveSoftware,
-    /// The work page: the metadata and the chapter list.
+    /// The work page: the metadata and the unit list.
     work_html: String,
-    /// The whole-work page: every chapter body.
+    /// The whole-work page: every unit body.
     full_html: String,
-    /// When set, `fetch_chapters` fails with this. Proves the retry path.
-    fail_chapters: Option<SourceError>,
-    /// Fails the PREVIEW rather than the chapter read. Separate from
-    /// `fail_chapters` because the two are different failures with different
+    /// When set, `fetch_units` fails with this. Proves the retry path.
+    fail_units: Option<SourceError>,
+    /// Fails the PREVIEW rather than the unit read. Separate from
+    /// `fail_units` because the two are different failures with different
     /// consequences: a preview failure is where a vanished origin is first
-    /// detected (§11.15's `works_past_saving`), and a chapter failure is
+    /// detected (§11.15's `works_past_saving`), and a unit failure is
     /// where a body is lost (M59-08). One fixture that could do both would
     /// make the two tests indistinguishable.
     fail_preview: Option<SourceError>,
@@ -97,7 +97,7 @@ struct FixtureArchive {
 struct Calls {
     previews: AtomicUsize,
     bulk_fetches: AtomicUsize,
-    /// Every ordinal passed to `fetch_chapter`, in order.
+    /// Every ordinal passed to `fetch_unit`, in order.
     single_fetches: std::sync::Mutex<Vec<u32>>,
 }
 
@@ -124,7 +124,7 @@ impl FixtureArchive {
             inner: ArchiveSoftware::new(),
             work_html: fixture("work.html"),
             full_html: fixture("work-full.html"),
-            fail_chapters: None,
+            fail_units: None,
             fail_preview: None,
             requires_auth: false,
             wall: Wall::None,
@@ -153,22 +153,22 @@ impl FixtureArchive {
         Arc::clone(&self.calls)
     }
 
-    /// An adapter whose chapter read fails with a network fault, which is the
+    /// An adapter whose unit read fails with a network fault, which is the
     /// transient case: the queue's answer is to try again.
     fn failing(message: &str) -> Self {
         Self {
-            fail_chapters: Some(SourceError::Network(message.to_owned())),
+            fail_units: Some(SourceError::Network(message.to_owned())),
             ..Self::new()
         }
     }
 
-    /// An adapter whose chapter read fails because the source will not serve the
+    /// An adapter whose unit read fails because the source will not serve the
     /// work at all. The error is carried rather than described, because the
     /// queue's decision is made from the *category* and a test that could only
     /// inject one category could not tell the categories apart.
     fn refusing(error: SourceError) -> Self {
         Self {
-            fail_chapters: Some(error),
+            fail_units: Some(error),
             ..Self::new()
         }
     }
@@ -243,41 +243,41 @@ impl SourceAdapter for FixtureArchive {
         self.inner.preview_from_html(&self.work_html, url)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         _fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         self.calls.bulk_fetches.fetch_add(1, Ordering::SeqCst);
-        if let Some(error) = &self.fail_chapters {
+        if let Some(error) = &self.fail_units {
             return Err(error.clone());
         }
-        self.inner.chapters_from_html(&self.full_html, work)
+        self.inner.units_from_html(&self.full_html, work)
     }
 
-    /// One chapter, read from the recorded whole-work page.
+    /// One unit, read from the recorded whole-work page.
     ///
-    /// This is what a retry uses, so it is also where a chapter that the source
+    /// This is what a retry uses, so it is also where a unit that the source
     /// serves badly is simulated: the ordinal is counted whatever happens, so a
-    /// test can assert that a retry asked for the failed chapter and no other.
-    async fn fetch_chapter(
+    /// test can assert that a retry asked for the failed unit and no other.
+    async fn fetch_unit(
         &self,
         _fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         self.calls
             .single_fetches
             .lock()
             .expect("the call log is not poisoned")
             .push(ordinal);
 
-        let chapters = self.inner.chapters_from_html(&self.full_html, work)?;
-        chapters
+        let units = self.inner.units_from_html(&self.full_html, work)?;
+        units
             .into_iter()
-            .find(|chapter| chapter.ordinal == ordinal)
+            .find(|unit| unit.ordinal == ordinal)
             .ok_or(SourceError::NotFound)
     }
 
@@ -285,12 +285,12 @@ impl SourceAdapter for FixtureArchive {
         self.inner.preview_from_html(html, url)
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        self.inner.chapters_from_html(html, work)
+    ) -> SourceResult<Vec<SourceUnit>> {
+        self.inner.units_from_html(html, work)
     }
 }
 
@@ -677,9 +677,9 @@ async fn import_row(harness: &Harness, id: &str) -> imports::ImportJob {
 // The import, end to end
 // ---------------------------------------------------------------------------
 
-/// The milestone's central criterion: a queued import becomes stored chapters.
+/// The milestone's central criterion: a queued import becomes stored units.
 #[tokio::test]
-async fn an_import_stores_a_works_chapters() {
+async fn an_import_stores_a_works_units() {
     let harness = Harness::new("import-happy").await;
     let (_client, account, pseud) = signed_in(&harness, "reader@example.org", "reader").await;
 
@@ -705,18 +705,18 @@ async fn an_import_stores_a_works_chapters() {
         "the library row keeps the address it was imported from"
     );
 
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    assert_eq!(chapters.len(), 3, "the fixture holds three chapters");
+        .expect("units");
+    assert_eq!(units.len(), 3, "the fixture holds three units");
 
     let store = harness.store();
-    for chapter in &chapters {
-        assert_eq!(chapter.state, "stored", "chapter {:?}", chapter.ordinal);
-        let checksum = chapter
+    for unit in &units {
+        assert_eq!(unit.state, "stored", "unit {:?}", unit.ordinal);
+        let checksum = unit
             .content_blob_checksum
             .as_ref()
-            .expect("a stored chapter names its blob");
+            .expect("a stored unit names its blob");
         let bytes = store
             .get(harness.tdb.db(), checksum)
             .await
@@ -724,13 +724,13 @@ async fn an_import_stores_a_works_chapters() {
             .expect("the blob exists");
         assert!(
             !bytes.is_empty(),
-            "chapter {:?} stored nothing",
-            chapter.ordinal
+            "unit {:?} stored nothing",
+            unit.ordinal
         );
         assert!(
             !String::from_utf8_lossy(&bytes).contains("<script"),
-            "chapter {:?} stored a script tag",
-            chapter.ordinal
+            "unit {:?} stored a script tag",
+            unit.ordinal
         );
     }
 
@@ -744,7 +744,7 @@ async fn an_import_stores_a_works_chapters() {
     harness.cleanup().await;
 }
 
-/// A preview writes nothing: no item, no chapter, no import.
+/// A preview writes nothing: no item, no unit, no import.
 #[tokio::test]
 async fn a_preview_stores_nothing() {
     let harness = Harness::new("preview-readonly").await;
@@ -768,7 +768,7 @@ async fn a_preview_stores_nothing() {
     assert_eq!(status, StatusCode::OK, "preview: {body}");
     assert_eq!(body["source_key"], SOURCE);
     assert_eq!(body["plan"]["plan"], "create");
-    assert_eq!(body["chapter_count"], 3);
+    assert_eq!(body["unit_count"], 3);
     assert_eq!(body["is_new"], true);
     assert!(
         body["title"]
@@ -822,10 +822,10 @@ async fn a_disabled_source_is_refused_with_its_reason() {
         "the operator's reason reaches the reader: {report}"
     );
 
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    assert!(chapters.is_empty(), "nothing should have been stored");
+        .expect("units");
+    assert!(units.is_empty(), "nothing should have been stored");
 
     harness.cleanup().await;
 }
@@ -917,7 +917,7 @@ async fn the_same_source_is_readable_once_a_solver_is_configured() {
         .post("/api/v1/imports/preview", json!({ "url": WORK_URL }))
         .await;
     assert_eq!(status, StatusCode::OK, "preview with a solver: {body}");
-    assert_eq!(body["chapter_count"], 3);
+    assert_eq!(body["unit_count"], 3);
     assert_eq!(
         calls.previews(),
         1,
@@ -1481,60 +1481,60 @@ async fn a_missing_credential_is_refused_before_any_fetch() {
     );
     assert_eq!(job.attempts, 1);
 
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    assert!(chapters.is_empty());
+        .expect("units");
+    assert!(units.is_empty());
 
     harness.cleanup().await;
 }
 
-/// A chapter already held is not stored a second time.
+/// A unit already held is not stored a second time.
 ///
 /// The rule this pins: a re-run of an import compares against what is recorded
 /// and skips it, rather than re-reading and re-storing the whole work. The
 /// assertion is on the *checksum* rather than on a count, because a check that
-/// only counted rows would pass even if every chapter were fetched and written
+/// only counted rows would pass even if every unit were fetched and written
 /// again under the same checksum.
 #[tokio::test]
-async fn a_chapter_already_held_is_not_stored_again() {
+async fn a_unit_already_held_is_not_stored_again() {
     let harness = Harness::new("resume").await;
     let (_client, account, pseud) = signed_in(&harness, "resumer@example.org", "resumer").await;
 
     // A first import that completes, so there is something to resume from.
     let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let first = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let first = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
+        .expect("units");
     assert_eq!(first.len(), 3);
     let expected: Vec<(String, Option<String>)> = first
         .iter()
-        .map(|chapter| {
+        .map(|unit| {
             (
-                chapter.source_chapter_key.clone(),
-                chapter.content_blob_checksum.clone(),
+                unit.source_unit_key.clone(),
+                unit.content_blob_checksum.clone(),
             )
         })
         .collect();
 
-    // A second import of the same work: the same item, and each chapter's row
+    // A second import of the same work: the same item, and each unit's row
     // still pointing at the blob it already had.
     let second = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let now = imports::list_import_chapters(harness.tdb.db(), &second)
+    let now = imports::list_import_units(harness.tdb.db(), &second)
         .await
-        .expect("chapters");
+        .expect("units");
     let after: Vec<(String, Option<String>)> = now
         .iter()
-        .map(|chapter| {
+        .map(|unit| {
             (
-                chapter.source_chapter_key.clone(),
-                chapter.content_blob_checksum.clone(),
+                unit.source_unit_key.clone(),
+                unit.content_blob_checksum.clone(),
             )
         })
         .collect();
     assert_eq!(
         after, expected,
-        "the chapters were re-stored rather than recognised as already held"
+        "the units were re-stored rather than recognised as already held"
     );
 
     // And the work is still one item, not two.
@@ -1610,10 +1610,10 @@ async fn a_transient_fetch_failure_stays_queued_for_retry() {
 
     // Nothing was stored, so a retry starts from nothing and does not have to
     // unpick a half-written item.
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    assert!(chapters.is_empty());
+        .expect("units");
+    assert!(units.is_empty());
 
     harness.cleanup().await;
 }
@@ -1664,17 +1664,17 @@ async fn a_source_that_withholds_a_work_fails_the_job_instead_of_retrying() {
 
     let row = import_row(&harness, &import_id).await;
     assert_ne!(row.state, "completed");
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    assert!(chapters.is_empty(), "nothing was stored");
+        .expect("units");
+    assert!(units.is_empty(), "nothing was stored");
 
     harness.cleanup().await;
 }
 
-/// A dry run reports the plan and stores no chapters.
+/// A dry run reports the plan and stores no units.
 #[tokio::test]
-async fn a_dry_run_reports_without_storing_chapters() {
+async fn a_dry_run_reports_without_storing_units() {
     let harness = Harness::new("dry-run").await;
     let (_client, account, pseud) = signed_in(&harness, "dry@example.org", "dry").await;
 
@@ -1687,13 +1687,13 @@ async fn a_dry_run_reports_without_storing_chapters() {
     assert_eq!(report["dry_run"], true);
     assert_eq!(report["plan"], "create");
 
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
+        .expect("units");
     assert!(
-        chapters.is_empty(),
-        "a dry run stores no chapters, found {}",
-        chapters.len()
+        units.is_empty(),
+        "a dry run stores no units, found {}",
+        units.len()
     );
 
     harness.cleanup().await;
@@ -1851,8 +1851,8 @@ async fn the_catalogue_reports_capabilities() {
         .find(|item| item["key"] == SOURCE)
         .expect("ao3 is in the catalogue");
     assert_eq!(ao3["capabilities"]["known"], true);
-    assert_eq!(ao3["capabilities"]["chapters"], true);
-    assert_eq!(ao3["capabilities"]["per_chapter_fetch"], true);
+    assert_eq!(ao3["capabilities"]["units"], true);
+    assert_eq!(ao3["capabilities"]["per_unit_fetch"], true);
     assert_eq!(ao3["capabilities"]["authentication"], "none");
     // The catalogue names the wall rather than leaving the field absent: "needs
     // a browser fingerprint" and "the build forgot to say" must not look the
@@ -1952,51 +1952,51 @@ async fn the_adapter_is_not_called_when_the_source_is_disabled() {
     run_passes(&state, 2).await;
 
     assert_eq!(calls.previews(), 0, "the preview must not have run");
-    assert_eq!(calls.bulk_fetches(), 0, "no chapter fetch must have run");
+    assert_eq!(calls.bulk_fetches(), 0, "no unit fetch must have run");
     assert!(
         calls.single_fetches().is_empty(),
-        "no single-chapter fetch must have run"
+        "no single-unit fetch must have run"
     );
     assert_eq!(import_row(&harness, &import_id).await.state, "failed");
 
     harness.cleanup().await;
 }
 
-/// A retry re-reads the chapters that failed and nothing else.
+/// A retry re-reads the units that failed and nothing else.
 ///
 /// The record is seeded the way an abandoned attempt would leave it — one
-/// chapter failed, the rest already stored — because that is the state the rule
+/// unit failed, the rest already stored — because that is the state the rule
 /// is about. The assertion is on which ordinals the adapter was asked for: a
-/// retry that re-read the whole work would still end with every chapter stored,
+/// retry that re-read the whole work would still end with every unit stored,
 /// so counting rows would prove nothing.
 #[tokio::test]
-async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
-    let harness = Harness::new("retry-failed-chapters").await;
+async fn a_failed_unit_is_retried_without_refetching_the_rest() {
+    let harness = Harness::new("retry-failed-units").await;
     let (_client, account, pseud) = signed_in(&harness, "resume2@example.org", "resume2").await;
 
-    // A completed import, to learn the source's own chapter keys and the
-    // checksums the good chapters ended up with.
+    // A completed import, to learn the source's own unit keys and the
+    // checksums the good units ended up with.
     let done = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let stored = imports::list_import_chapters(harness.tdb.db(), &done)
+    let stored = imports::list_import_units(harness.tdb.db(), &done)
         .await
-        .expect("chapters");
+        .expect("units");
     assert_eq!(stored.len(), 3);
     let keys: Vec<String> = stored
         .iter()
-        .map(|chapter| chapter.source_chapter_key.clone())
+        .map(|unit| unit.source_unit_key.clone())
         .collect();
     let checksums: HashMap<String, Option<String>> = stored
         .iter()
-        .map(|chapter| {
+        .map(|unit| {
             (
-                chapter.source_chapter_key.clone(),
-                chapter.content_blob_checksum.clone(),
+                unit.source_unit_key.clone(),
+                unit.content_blob_checksum.clone(),
             )
         })
         .collect();
 
     // A second import of the same work, left the way an attempt that lost one
-    // chapter would leave it: two stored, the middle one failed.
+    // unit would leave it: two stored, the middle one failed.
     let retry_id = darkhold_domain::ImportJobId::new().to_string();
     let job_id = jobs::enqueue(
         harness.tdb.db(),
@@ -2032,12 +2032,12 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
         } else {
             ("stored".to_owned(), checksums.get(key).cloned().flatten())
         };
-        imports::upsert_import_chapter(
+        imports::upsert_import_unit(
             harness.tdb.db(),
             &retry_id,
             Some(&item.id),
-            &imports::ImportChapterInput {
-                source_chapter_key: key.clone(),
+            &imports::ImportUnitInput {
+                source_unit_key: key.clone(),
                 ordinal: i64::try_from(index + 1).expect("ordinal"),
                 title: String::new(),
                 state,
@@ -2046,7 +2046,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
             },
         )
         .await
-        .expect("seed chapter");
+        .expect("seed unit");
     }
 
     // The retry.
@@ -2058,7 +2058,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
     assert_eq!(
         calls.single_fetches(),
         vec![2],
-        "the retry asked for the failed chapter and nothing else"
+        "the retry asked for the failed unit and nothing else"
     );
     assert_eq!(
         calls.bulk_fetches(),
@@ -2066,20 +2066,20 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
         "the retry must not re-read the whole work"
     );
 
-    let after = imports::list_import_chapters(harness.tdb.db(), &retry_id)
+    let after = imports::list_import_units(harness.tdb.db(), &retry_id)
         .await
-        .expect("chapters");
+        .expect("units");
     assert_eq!(after.len(), 3);
-    for chapter in &after {
-        assert_eq!(chapter.state, "stored", "chapter {}", chapter.ordinal);
+    for unit in &after {
+        assert_eq!(unit.state, "stored", "unit {}", unit.ordinal);
         assert_eq!(
-            chapter.content_blob_checksum,
+            unit.content_blob_checksum,
             checksums
-                .get(&chapter.source_chapter_key)
+                .get(&unit.source_unit_key)
                 .cloned()
                 .flatten(),
-            "chapter {} was re-stored rather than left alone",
-            chapter.ordinal
+            "unit {} was re-stored rather than left alone",
+            unit.ordinal
         );
     }
 
@@ -2132,10 +2132,10 @@ async fn an_import_is_queued_and_does_not_block_the_request() {
     );
 
     // And nothing has been fetched or stored yet.
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    assert!(chapters.is_empty(), "the request must not fetch chapters");
+        .expect("units");
+    assert!(units.is_empty(), "the request must not fetch units");
     let items = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("items");
@@ -2222,7 +2222,7 @@ async fn an_expired_credential_is_reported_before_the_import_starts() {
     harness.cleanup().await;
 }
 
-/// The retry route queues an attempt at the chapters that failed, and refuses
+/// The retry route queues an attempt at the units that failed, and refuses
 /// when there are none.
 #[tokio::test]
 async fn the_retry_route_queues_only_when_something_failed() {
@@ -2235,7 +2235,7 @@ async fn the_retry_route_queues_only_when_something_failed() {
     // Nothing failed, so there is nothing to retry.
     let (status, body) = client
         .post(
-            &format!("/api/v1/imports/{import_id}/retry-failed-chapters"),
+            &format!("/api/v1/imports/{import_id}/retry-failed-units"),
             json!({}),
         )
         .await;
@@ -2246,19 +2246,19 @@ async fn the_retry_route_queues_only_when_something_failed() {
     );
 
     // Now record a failure, as an abandoned attempt would.
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
-    let second = chapters
+        .expect("units");
+    let second = units
         .iter()
-        .find(|chapter| chapter.ordinal == 2)
-        .expect("chapter two");
-    imports::upsert_import_chapter(
+        .find(|unit| unit.ordinal == 2)
+        .expect("unit two");
+    imports::upsert_import_unit(
         harness.tdb.db(),
         &import_id,
         None,
-        &imports::ImportChapterInput {
-            source_chapter_key: second.source_chapter_key.clone(),
+        &imports::ImportUnitInput {
+            source_unit_key: second.source_unit_key.clone(),
             ordinal: 2,
             title: second.title.clone(),
             state: "failed".to_owned(),
@@ -2271,12 +2271,12 @@ async fn the_retry_route_queues_only_when_something_failed() {
 
     let (status, body) = client
         .post(
-            &format!("/api/v1/imports/{import_id}/retry-failed-chapters"),
+            &format!("/api/v1/imports/{import_id}/retry-failed-units"),
             json!({}),
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED, "retry: {body}");
-    assert_eq!(body["failed_chapters"], 1);
+    assert_eq!(body["failed_units"], 1);
     assert_eq!(import_row(&harness, &import_id).await.state, "queued");
 
     harness.cleanup().await;
@@ -2549,16 +2549,16 @@ async fn the_revision_cache_surface_belongs_to_the_operator() {
 ///
 /// The bytes are the point of the test. `content_blobs` is shared with the
 /// snapshots a reader is reading, so a cache that deleted its own blobs would be
-/// a cache that could delete somebody's chapter.
+/// a cache that could delete somebody's unit.
 #[tokio::test]
 async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
     let harness = Harness::new("revisions-clear").await;
     let (_reader, account, _pseud) = signed_in(&harness, "keeper@example.org", "keeper").await;
 
-    // A chapter's bytes, stored the way an import stores them.
+    // A unit's bytes, stored the way an import stores them.
     let store = harness.store();
     let (checksum, _key) = store
-        .put(harness.tdb.db(), b"<html>a chapter</html>", "text/html")
+        .put(harness.tdb.db(), b"<html>a unit</html>", "text/html")
         .await
         .expect("store the snapshot");
 
@@ -2590,7 +2590,7 @@ async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
     assert_eq!(revisions::count(harness.tdb.db()).await.expect("count"), 0);
 
     // The bytes are still there. A cache is an optimisation; losing it costs
-    // requests, and losing a snapshot costs a reader their chapter.
+    // requests, and losing a snapshot costs a reader their unit.
     assert!(
         store
             .get(harness.tdb.db(), &checksum)
@@ -2653,21 +2653,21 @@ async fn the_catalogue_lists_the_builds_sources_before_any_row_exists() {
         "nothing has been tried, so nothing is claimed about it"
     );
     assert_eq!(source["capabilities"]["known"], true);
-    assert_eq!(source["capabilities"]["chapters"], true);
+    assert_eq!(source["capabilities"]["units"], true);
 
     harness.cleanup().await;
 }
 
-/// The library says how many chapters of a work it actually holds.
+/// The library says how many units of a work it actually holds.
 ///
 /// Counted from what was stored, not copied from the source's own number. The
 /// two answer different questions and diverge the moment an import is partial:
 /// a card showing the source's count would describe a complete copy of a work
 /// the reader holds a third of. The browser journey is where this was noticed —
 /// the card carried the author, the status, the word count and both dates, and
-/// never said how many chapters had arrived.
+/// never said how many units had arrived.
 #[tokio::test]
-async fn the_library_reports_how_many_chapters_are_stored() {
+async fn the_library_reports_how_many_units_are_stored() {
     let harness = Harness::new("library-count").await;
     let (_client, account, pseud) = signed_in(&harness, "counted@example.org", "counted").await;
 
@@ -2680,21 +2680,21 @@ async fn the_library_reports_how_many_chapters_are_stored() {
     assert!(before.is_empty(), "nothing is imported yet");
 
     let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let stored = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let stored = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("the import's chapters")
+        .expect("the import's units")
         .iter()
-        .filter(|chapter| chapter.state == "stored")
+        .filter(|unit| unit.state == "stored")
         .count();
-    assert_eq!(stored, 3, "the fixture holds three chapters");
+    assert_eq!(stored, 3, "the fixture holds three units");
 
     let items = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("list the library");
     let item = items.first().expect("the imported item");
     assert_eq!(
-        item.chapter_count, 3,
-        "the copy reports the chapters it holds, not the source's claim"
+        item.unit_count, 3,
+        "the copy reports the units it holds, not the source's claim"
     );
 
     harness.cleanup().await;
@@ -2716,10 +2716,10 @@ async fn the_library_reports_how_many_chapters_are_stored() {
 /// because that turns a temporary source failure into a permanent loss of
 /// something the reader asked this instance to keep."
 ///
-/// The failure is in the *bulk* fetch (`fetch_chapters`), which is the path the
-/// spec is about. A per-chapter failure is already handled — it writes a
-/// `failed` import_chapter row and the retry re-reads only that chapter — so
-/// testing the per-chapter case here would test the part that already works.
+/// The failure is in the *bulk* fetch (`fetch_units`), which is the path the
+/// spec is about. A per-unit failure is already handled — it writes a
+/// `failed` import_unit row and the retry re-reads only that unit — so
+/// testing the per-unit case here would test the part that already works.
 ///
 /// Three properties, and the middle one is the one a green suite lies about:
 ///
@@ -2763,25 +2763,25 @@ async fn a_body_that_fails_to_fetch_leaves_a_retryable_import_and_never_a_silent
     );
 
     // (2) THE SILENT LINK. The item exists — the import writes it before the
-    // chapters, so that a cancelled import leaves a readable stub — and it
+    // units, so that a cancelled import leaves a readable stub — and it
     // carries the source URL. That is precisely the shape the rule forbids: a
     // work page with a title, a summary and a link to elsewhere, which a reader
     // cannot tell from an imported work.
     //
-    // What is asserted is that no chapter was recorded as stored, so nothing
+    // What is asserted is that no unit was recorded as stored, so nothing
     // downstream can present this as a work this instance holds. The item
     // itself is left in place deliberately: deleting it would be the deletion
     // workflow of §10.4, not an import's decision to make.
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
+        .expect("units");
     assert!(
-        chapters.iter().all(|chapter| chapter.state != "stored"),
-        "no chapter may be recorded as stored when the body fetch failed: {chapters:?}"
+        units.iter().all(|unit| unit.state != "stored"),
+        "no unit may be recorded as stored when the body fetch failed: {units:?}"
     );
     assert!(
-        chapters.is_empty(),
-        "the bulk fetch failed before any chapter was written: {chapters:?}"
+        units.is_empty(),
+        "the bulk fetch failed before any unit was written: {units:?}"
     );
 
     // (3) The queue row is queued for another attempt, not failed. A body that
@@ -2854,22 +2854,22 @@ async fn an_aggregating_instance_imports_the_metadata_and_stores_no_body() {
     );
 
     // And the body is not.
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
+        .expect("units");
     assert!(
-        chapters.is_empty(),
-        "an aggregating instance stores no body, and the fixture has three chapters to \
-         store: {chapters:?}"
+        units.is_empty(),
+        "an aggregating instance stores no body, and the fixture has three units to \
+         store: {units:?}"
     );
     let blobs = harness.store();
-    for chapter in &chapters {
-        let Some(checksum) = chapter.content_blob_checksum.as_ref() else {
+    for unit in &units {
+        let Some(checksum) = unit.content_blob_checksum.as_ref() else {
             continue;
         };
         assert!(
             blobs.get(harness.tdb.db(), checksum).await.is_err(),
-            "no blob may exist for a chapter an aggregating instance declined to store"
+            "no blob may exist for a unit an aggregating instance declined to store"
         );
     }
 
@@ -2905,12 +2905,12 @@ async fn a_per_source_override_narrows_one_source_and_not_another() {
     let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
     let row = import_row(&harness, &import_id).await;
     assert_eq!(row.state, "completed", "{:?}", row.report_json);
-    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+    let units = imports::list_import_units(harness.tdb.db(), &import_id)
         .await
-        .expect("chapters");
+        .expect("units");
     assert!(
-        chapters.is_empty(),
-        "the overridden source is not aggregated, so no body is stored: {chapters:?}"
+        units.is_empty(),
+        "the overridden source is not aggregated, so no body is stored: {units:?}"
     );
 
     harness.cleanup().await;

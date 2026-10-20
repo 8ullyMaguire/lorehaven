@@ -183,7 +183,7 @@ pub enum Authority {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scope {
     // -- the reader's own reading -------------------------------------------
-    /// Words, chapters, streak and session length.
+    /// Words, units, streak and session length.
     OwnReadingBasic,
     /// Fandom, tag and mood distribution of own reads.
     OwnReadingDistribution,
@@ -199,19 +199,19 @@ pub enum Scope {
     OwnContributionHistory,
 
     // -- the reader's own works ---------------------------------------------
-    /// Reader count, word count, chapter count.
+    /// Reader count, word count, unit count.
     OwnWorkBasic,
     /// Quick-reaction counts, labels with at least five uses.
     OwnWorkReactions,
-    /// Per-chapter drop-off curve.
+    /// Per-unit drop-off curve.
     OwnWorkRetention,
-    /// Aggregate seconds per chapter.
+    /// Aggregate seconds per unit.
     OwnWorkTimeOnPage,
-    /// Histogram of chapter number at first bookmark.
+    /// Histogram of unit number at first bookmark.
     OwnWorkBookmarkTiming,
     /// Early-versus-late comment distribution.
     OwnWorkCommentTiming,
-    /// "Reached chapter X" counters.
+    /// "Reached unit X" counters.
     OwnWorkSegments,
     /// Dominant moods in comments and reactions.
     OwnWorkMood,
@@ -227,7 +227,7 @@ pub enum Scope {
     OwnWorkSeriesCascade,
 
     // -- public ------------------------------------------------------------
-    /// Word and chapter count, publication date.
+    /// Word and unit count, publication date.
     PublicWorkBasic,
     /// Mean and count. Never a histogram (§9.4).
     PublicWorkRating,
@@ -515,7 +515,7 @@ impl Scope {
         use Scope::*;
         match self {
             OwnReadingBasic => Method::new(
-                "Words and chapters the viewer's own reading events completed, summed over the window; session length is wall-clock between two progress updates on the same chapter, capped at 30 minutes per gap.",
+                "Words and units the viewer's own reading events completed, summed over the window; session length is wall-clock between two progress updates on the same unit, capped at 30 minutes per gap.",
                 Freshness::NearRealTime,
                 "Session length and pace are estimates; the 30-minute cap per gap is the disclosed approximation.",
             ),
@@ -525,7 +525,7 @@ impl Scope {
                 "Exact given the reader's own history; taxonomy labels are as stored.",
             ),
             OwnReadingTrend => Method::new(
-                "Words and chapters completed per ISO week over the trailing window, divided by the number of weeks in the window.",
+                "Words and units completed per ISO week over the trailing window, divided by the number of weeks in the window.",
                 Freshness::Hourly,
                 "Exact. A partial current week is shown in full and is not averaged down.",
             ),
@@ -550,7 +550,7 @@ impl Scope {
                 "Exact.",
             ),
             OwnWorkBasic => Method::new(
-                "Distinct pseudonyms with a reading event on this work in the window, plus its word and chapter counts.",
+                "Distinct pseudonyms with a reading event on this work in the window, plus its word and unit counts.",
                 Freshness::Hourly,
                 "Reader count is distinct pseudonyms, not sessions and not accounts.",
             ),
@@ -560,17 +560,17 @@ impl Scope {
                 "Exact. The per-label floor is the disclosure, and it is why a new work shows nothing.",
             ),
             OwnWorkRetention => Method::new(
-                "Per chapter, readers who reached it divided by readers who reached chapter one; non-increasing by construction.",
+                "Per unit, readers who reached it divided by readers who reached unit one; non-increasing by construction.",
                 Freshness::Hourly,
                 "Exact from reading events. A reader who opened the work page and left is not a denominator.",
             ),
             OwnWorkTimeOnPage => Method::new(
-                "Wall-clock between consecutive progress updates on the same chapter, summed, capped at 30 minutes per gap.",
+                "Wall-clock between consecutive progress updates on the same unit, summed, capped at 30 minutes per gap.",
                 Freshness::Hourly,
-                "Estimated. A reader who closed the tab without a final update contributes nothing for that chapter.",
+                "Estimated. A reader who closed the tab without a final update contributes nothing for that unit.",
             ),
             OwnWorkBookmarkTiming => Method::new(
-                "Chapter number at each reader's first bookmark, bucketed by chapter, with at least five readers per bucket.",
+                "Unit number at each reader's first bookmark, bucketed by unit, with at least five readers per bucket.",
                 Freshness::Daily,
                 "Exact. Buckets below the floor are omitted rather than merged upward.",
             ),
@@ -580,7 +580,7 @@ impl Scope {
                 "Exact. 'Early' is relative to this work's own publication, not an instance-wide constant.",
             ),
             OwnWorkSegments => Method::new(
-                "Cumulative distinct readers who reached each chapter, over the window, at the self-or-others floor.",
+                "Cumulative distinct readers who reached each unit, over the window, at the self-or-others floor.",
                 Freshness::Hourly,
                 "Exact.",
             ),
@@ -605,7 +605,7 @@ impl Scope {
                 "Requires at least ten readers on this work first; below that the whole capability is withheld rather than coarsened.",
             ),
             OwnWorkLongRetention => Method::new(
-                "Share of this work's readers who opened it again at least seven days after their first chapter, over the window.",
+                "Share of this work's readers who opened it again at least seven days after their first unit, over the window.",
                 Freshness::Daily,
                 "Exact. A reader who finished once is counted as retained only on a second distinct session.",
             ),
@@ -615,7 +615,7 @@ impl Scope {
                 "Exact. Series membership is the taxonomy parent, not a manual list.",
             ),
             PublicWorkBasic => Method::new(
-                "The work's own stored word count, chapter count and publication date.",
+                "The work's own stored word count, unit count and publication date.",
                 Freshness::Daily,
                 "Exact. A single-entity fact, so no population floor applies.",
             ),
@@ -640,7 +640,7 @@ impl Scope {
                 "Exact at the public-works floor. Alias-spelled tags roll up to one canonical fandom.",
             ),
             PublicInstanceCounts => Method::new(
-                "Instance totals per §24.2: public works, public chapters and words, active public contributors, translation coverage by language.",
+                "Instance totals per §24.2: public works, public units and words, active public contributors, translation coverage by language.",
                 Freshness::Daily,
                 "Counts of public content only. Private imports are never counted as holdings.",
             ),
@@ -670,7 +670,7 @@ impl Scope {
                 "Raw queries are never retained (§24.3). Terms are normalised to the field or tag they resolve to, and a term that resolves to a single work is not returned at all.",
             ),
             CommunityInstanceActivity => Method::new(
-                "Instance words read, chapters completed and works finished today, as rolling sums over reading events.",
+                "Instance words read, units completed and works finished today, as rolling sums over reading events.",
                 Freshness::Hourly,
                 "Exact. A rolling day, not a calendar day, so it does not spike at midnight.",
             ),

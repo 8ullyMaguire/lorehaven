@@ -416,12 +416,12 @@ async fn a_masked_dump_still_carries_the_dataset() {
     tdb.cleanup().await;
 }
 
-/// §11.16.6 — an AGGREGATING instance must publish a snapshot with no chapter
+/// §11.16.6 — an AGGREGATING instance must publish a snapshot with no unit
 /// body text.
 ///
 /// Written before the gate existed, so the first run is the control: the mask had
 /// no notion of retention mode and this test is red. The canary here is a real
-/// chapter body, distinct from the identity canaries, because a body leak is a
+/// unit body, distinct from the identity canaries, because a body leak is a
 /// DIFFERENT failure from an identity leak: nothing in the identity canary set
 /// would catch it, and §7.7's audience rule is not expressible in a SQL dump.
 ///
@@ -429,9 +429,9 @@ async fn a_masked_dump_still_carries_the_dataset() {
 /// meaningful: if bodies were redacted unconditionally, the aggregate test would
 /// pass while the snapshot was useless. §11.16.6 permits bodies on a caching
 /// instance precisely because that is a decision its operator made.
-const CANARY_BODY: &str = "leak-canary-chapter-body-the-whole-text-of-a-chapter";
+const CANARY_BODY: &str = "leak-canary-unit-body-the-whole-text-of-a-unit";
 
-/// A pseudonym the seeded work and revision hang off. The chapters are NOT
+/// A pseudonym the seeded work and revision hang off. The units are NOT
 /// anonymous: ownership is part of the behavioural graph, and a body seeded
 /// against no owner would be a shape the real schema cannot hold.
 const PSEUD: &str = "66666666-6666-6666-6666-666666666666";
@@ -440,14 +440,14 @@ const PSEUD: &str = "66666666-6666-6666-6666-666666666666";
 /// the two seeds compose and the identity mask is exercised in the body tests too.
 const ACCOUNT: &str = "11111111-1111-1111-1111-111111111111";
 
-/// Insert a chapter and a revision carrying a body canary.
+/// Insert a unit and a revision carrying a body canary.
 async fn seed_body_canary(tdb: &TestDb) {
     let pool = tdb.db().postgres_pool().expect("postgres handle");
     // The account is the identity canary from seed_canaries, so an aggregating
     // snapshot must still mask it even while redacting the body.
     seed_canaries(tdb).await;
     let work = "33333333-3333-3333-3333-333333333333";
-    let chapter = "44444444-4444-4444-4444-444444444444";
+    let unit = "44444444-4444-4444-4444-444444444444";
     let revision = "55555555-5555-5555-5555-555555555555";
 
     sqlx::query(
@@ -480,10 +480,10 @@ async fn seed_body_canary(tdb: &TestDb) {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at)
-         VALUES ($1::uuid, $2::uuid, 1, 'leak canary chapter', now(), now())",
+        "INSERT INTO units (id, work_id, order_key, title, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 1, 'leak canary unit', now(), now())",
     )
-    .bind(chapter)
+    .bind(unit)
     .bind(work)
     .execute(pool)
     .await
@@ -491,15 +491,15 @@ async fn seed_body_canary(tdb: &TestDb) {
 
     // All THREE body shapes, because masking one and shipping the other two
     // publishes the same text. This is the failure the 11.16.6 policy entries
-    // for chapter_revisions now prevent.
+    // for revisions now prevent.
     sqlx::query(
-        "INSERT INTO chapter_revisions
-           (id, chapter_id, revision_number, document_json, sanitized_html,
+        "INSERT INTO revisions
+           (id, unit_id, revision_number, document_json, sanitized_html,
             plain_text, word_count, created_by_pseud_id, created_at)
          VALUES ($1::uuid, $2::uuid, 1, $3, $4, $5, 1, $6::uuid, now())",
     )
     .bind(revision)
-    .bind(chapter)
+    .bind(unit)
     .bind(format!("{{\"text\":\"{CANARY_BODY}\"}}"))
     .bind(format!("<p>{CANARY_BODY}</p>"))
     .bind(CANARY_BODY)
@@ -542,7 +542,7 @@ async fn apply_mask_in_mode(tdb: &TestDb, mode: &str) {
     );
 
     let sql = std::fs::read_to_string(&sql_path).expect("generated sql");
-    // In AGGREGATE mode chapter_revisions must appear in the generated mask --
+    // In AGGREGATE mode revisions must appear in the generated mask --
     // a table that is not mentioned is a table the operator dumps from `public`,
     // which is how the body ships in the clear. In CACHE mode the opposite holds
     // and asserting it would be asserting the bug: a caching instance ships the
@@ -550,10 +550,10 @@ async fn apply_mask_in_mode(tdb: &TestDb, mode: &str) {
     // asymmetry is the whole of 11.16.6, and both halves are asserted.
     if mode == "aggregate" {
         assert!(
-            sql.contains("CREATE TABLE snapshot_masked.chapter_revisions"),
-            "no chapter_revisions in the aggregate mask. A table the generator \
+            sql.contains("CREATE TABLE snapshot_masked.revisions"),
+            "no revisions in the aggregate mask. A table the generator \
              does not mention is a table dumped from `public` in the clear -- and \
-             this one holds the chapter body."
+             this one holds the unit body."
         );
     }
     sqlx::raw_sql(&sql)
@@ -563,7 +563,7 @@ async fn apply_mask_in_mode(tdb: &TestDb, mode: &str) {
 }
 
 #[tokio::test]
-async fn an_aggregating_instance_publishes_no_chapter_body_text() {
+async fn an_aggregating_instance_publishes_no_unit_body_text() {
     let Some(_) = pg_url() else { return };
     let tdb = TestDb::connect_with_dir(
         "snapshot_leak_aggregate",
@@ -582,7 +582,7 @@ async fn an_aggregating_instance_publishes_no_chapter_body_text() {
 
     assert!(
         !text.contains(CANARY_BODY),
-        "an AGGREGATING instance published chapter body text. 11.16.6: an \
+        "an AGGREGATING instance published unit body text. 11.16.6: an \
          instance that never fetched a body has none to publish, and a dump that \
          publishes every body undoes 7.7's audience rule for every audience at \
          once -- a rule that is not expressible in a SQL dump."
@@ -590,8 +590,8 @@ async fn an_aggregating_instance_publishes_no_chapter_body_text() {
     // The three shapes are asserted separately: a mask that redacts plain_text
     // but ships sanitized_html publishes the same text.
     assert!(
-        !text.contains("leak canary chapter") || !text.contains("leak-canary-chapter"),
-        "the chapter TITLE leaked on an aggregating instance"
+        !text.contains("leak canary unit") || !text.contains("leak-canary-unit"),
+        "the unit TITLE leaked on an aggregating instance"
     );
     tdb.cleanup().await;
 }

@@ -8,7 +8,7 @@ vi.mock('../lib/api', async (importOriginal) => {
   return {
     ...actual,
     fetchWork: vi.fn(),
-    fetchChapter: vi.fn(),
+    fetchUnit: vi.fn(),
     updateWork: vi.fn(),
     fetchWorkPricing: vi.fn(),
     setWorkPricing: vi.fn(),
@@ -35,10 +35,10 @@ const WORK = {
   show_public_ratings: true,
   discussion_mode: 'thread_only',
   role: 'owner',
-  chapters: [
+  units: [
     {
       id: 'ch-1',
-      title: 'Chapter 1',
+      title: 'Unit 1',
       order_key: 1,
       word_count: 1000,
       revision_count: 1,
@@ -81,10 +81,10 @@ describe('WorkEditor page', () => {
     expect(screen.getByText('Details')).toBeInTheDocument();
   });
 
-  it('shows chapters section', async () => {
+  it('shows units section', async () => {
     render(WorkEditor, { props: { workId: 'work-1' } });
     await waitFor(() => expect(screen.getByText('Editable Story')).toBeInTheDocument());
-    expect(screen.getByText('Chapters')).toBeInTheDocument();
-    expect(screen.getByText('Chapter 1')).toBeInTheDocument();
+    expect(screen.getByText('Units')).toBeInTheDocument();
+    expect(screen.getByText('Unit 1')).toBeInTheDocument();
   });
 });

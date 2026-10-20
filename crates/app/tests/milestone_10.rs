@@ -208,15 +208,15 @@ async fn published_work(harness: &Harness, email: &str, handle: &str, title: &st
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter").to_owned();
-    let chapter_version = body["version"].as_i64().expect("version");
-    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+    assert_eq!(status, StatusCode::CREATED, "unit: {body}");
+    let unit = body["id"].as_str().expect("unit").to_owned();
+    let unit_version = body["version"].as_i64().expect("version");
+    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = author
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "save: {body}");
@@ -337,7 +337,7 @@ async fn search_in_work_returns_paragraph_positions() {
 
     // Search within the work.
     let (status, body) = client
-        .get(&format!("/api/v1/search/in-work/{work_id}?q=chapter"))
+        .get(&format!("/api/v1/search/in-work/{work_id}?q=unit"))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // The body is an array of InWorkMatch objects.
@@ -591,7 +591,7 @@ async fn set_visibility(harness: &Harness, work_id: &str, visibility: &str) {
     }
 }
 
-/// A work with a chapter, left unpublished, carrying a distinctive word in the
+/// A work with a unit, left unpublished, carrying a distinctive word in the
 /// text so the index row for it is unambiguous.
 async fn draft_with_marker(client: &mut Client, marker: &str) -> String {
     let (status, body) = client
@@ -608,19 +608,19 @@ async fn draft_with_marker(client: &mut Client, marker: &str) -> String {
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter").to_owned();
+    assert_eq!(status, StatusCode::CREATED, "unit: {body}");
+    let unit = body["id"].as_str().expect("unit").to_owned();
     let version = body["version"].as_i64().expect("version");
     let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [
         { "type": "text", "text": format!("A {marker} grazes in the margins.") }] }] });
     let (status, body) = client
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
+            &format!("/api/v1/chapters/{unit}"),
             Some(json!({ "expected_version": version, "document": doc })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "save draft chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "save draft unit: {body}");
     work_id
 }
 
@@ -633,7 +633,7 @@ fn titles(body: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The index is not a visibility boundary: the worker fills it from chapter
+/// The index is not a visibility boundary: the worker fills it from unit
 /// text whatever the work's lifecycle, and a deindex can lag or be overtaken by
 /// a `Reindex` that lands after a withdrawal. The anonymous door is what keeps
 /// an unpublished work out of the results (spec §3.3).
@@ -754,7 +754,7 @@ async fn publishing_indexes_the_work_so_the_public_search_can_find_it() {
     );
 
     let mut anon = harness.client();
-    let (status, body) = anon.get("/api/v1/public/search?q=chapter").await;
+    let (status, body) = anon.get("/api/v1/public/search?q=unit").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         titles(&body),

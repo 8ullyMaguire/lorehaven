@@ -106,7 +106,7 @@ pub struct AddMediaReferenceBody {
     pub url: String,
     pub context: Option<String>,
     pub author_note: Option<String>,
-    pub chapter_id: Option<String>,
+    pub unit_id: Option<String>,
 }
 
 pub async fn add_media_reference(
@@ -168,7 +168,7 @@ pub async fn add_media_reference(
         state.db(),
         &Uuid::new_v4().to_string(),
         &work_id,
-        body.chapter_id.as_deref(),
+        body.unit_id.as_deref(),
         &reference_id,
         context,
         &body.url,

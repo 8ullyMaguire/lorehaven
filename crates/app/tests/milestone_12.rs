@@ -210,21 +210,39 @@ async fn published_work(harness: &Harness, email: &str, handle: &str, title: &st
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work_id = body["id"].as_str().expect("id").to_owned();
     let work_version = body["version"].as_i64().expect("version");
+    // **The discussion mode is `comments_only`** (the legacy shape, supported
+    // indefinitely -- spec §13.2). A *new* work is `thread_only` by default and
+    // its text discussion lives in the linked forum thread, so a test that
+    // comments on a work has to say which shape it wants.
+    let (status, body) = author
+        .request(
+            "PATCH",
+            &format!("/api/v1/works/{work_id}"),
+            Some(json!({
+                "expected_version": work_version,
+                "discussion_mode": "comments_only",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set the discussion mode: {body}");
+    // The PATCH moved the version on, so the publish's optimistic version is
+    // read back rather than remembered.
+    let work_version = body["version"].as_i64().expect("version");
     let (status, body) = author
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter").to_owned();
-    let chapter_version = body["version"].as_i64().expect("version");
-    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+    assert_eq!(status, StatusCode::CREATED, "unit: {body}");
+    let unit = body["id"].as_str().expect("unit").to_owned();
+    let unit_version = body["version"].as_i64().expect("version");
+    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = author
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "save: {body}");

@@ -16,10 +16,10 @@
 //! # Two phases, on purpose
 //!
 //! A preview can only see what the source publishes *before* it reads the
-//! chapter bodies: the chapter list, their identifiers, their order, their
+//! unit bodies: the unit list, their identifiers, their order, their
 //! titles. So [`plan_import`] reports changes in those terms. Whether a
-//! chapter's **text** changed is a question that cannot be answered until the
-//! chapter has been fetched and hashed, and it is answered then — by comparing
+//! unit's **text** changed is a question that cannot be answered until the
+//! unit has been fetched and hashed, and it is answered then — by comparing
 //! the new content checksum against the one the previous import recorded. The
 //! two are kept apart rather than blurred, because a plan that claimed to know
 //! about text changes before reading any text would be lying.
@@ -29,31 +29,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use darkhold_decisions::reconcile::{self, QualityCall};
 use serde::{Deserialize, Serialize};
 
-/// One chapter as the planner sees it: where it sits, what identifies it, and
+/// One unit as the planner sees it: where it sits, what identifies it, and
 /// what it is called.
 ///
 /// The identifier is the source's own when the source has one, because that is
-/// what survives an author inserting a chapter in the middle. A planner that
-/// keyed on position would report every later chapter as changed whenever one
+/// what survives an author inserting a unit in the middle. A planner that
+/// keyed on position would report every later unit as changed whenever one
 /// was added near the front.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChapterIdentity {
-    /// The source's stable identifier for this chapter.
-    pub source_chapter_key: String,
+pub struct UnitIdentity {
+    /// The source's stable identifier for this unit.
+    pub source_unit_key: String,
     /// 1-based position in the work.
     pub ordinal: u32,
-    /// The chapter's title as the source shows it.
+    /// The unit's title as the source shows it.
     pub title: String,
-    /// The chapter's word count, if the source reports one.
+    /// The unit's word count, if the source reports one.
     pub word_count: Option<u32>,
 }
 
-impl ChapterIdentity {
+impl UnitIdentity {
     /// Build an identity.
     #[must_use]
     pub fn new(key: impl Into<String>, ordinal: u32, title: impl Into<String>) -> Self {
         Self {
-            source_chapter_key: key.into(),
+            source_unit_key: key.into(),
             ordinal,
             title: title.into(),
             word_count: None,
@@ -82,28 +82,28 @@ pub struct ImportedWork {
     /// The author as displayed. Free text; most sources have no account to point
     /// at.
     pub author_text: String,
-    /// The chapters, in the order the source lists them.
-    pub chapters: Vec<ChapterIdentity>,
+    /// The units, in the order the source lists them.
+    pub units: Vec<UnitIdentity>,
     /// Total word count, if the source reports one. None means unknown.
     pub word_count: Option<u32>,
 }
 
 impl ImportedWork {
-    /// A work with no chapters yet.
+    /// A work with no units yet.
     #[must_use]
     pub fn new(title: impl Into<String>, author_text: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             author_text: author_text.into(),
-            chapters: Vec::new(),
+            units: Vec::new(),
             word_count: None,
         }
     }
 
-    /// Add a chapter.
+    /// Add a unit.
     #[must_use]
-    pub fn with_chapter(mut self, chapter: ChapterIdentity) -> Self {
-        self.chapters.push(chapter);
+    pub fn with_unit(mut self, unit: UnitIdentity) -> Self {
+        self.units.push(unit);
         self
     }
 
@@ -130,7 +130,7 @@ impl ImportedWork {
             };
         }
 
-        let total_words: u32 = self.chapters.iter().filter_map(|c| c.word_count).sum();
+        let total_words: u32 = self.units.iter().filter_map(|c| c.word_count).sum();
         if total_words == 0 {
             return ImportQuality::Held {
                 reason: "no word count: cannot determine if content is real".into(),
@@ -202,7 +202,7 @@ fn is_placeholder_title(title: &str) -> bool {
     matches!(
         lower.as_str(),
         "untitled" | "no title" | "unknown" | "title tbd" | "work" | "story"
-    ) || lower.starts_with("chapter ")
+    ) || lower.starts_with("unit ")
         || lower.starts_with("work ")
         || lower.trim().is_empty()
 }
@@ -222,35 +222,35 @@ pub enum ImportQuality {
 /// One difference between what we hold and what the source now offers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "change", rename_all = "snake_case")]
-pub enum ChapterChange {
-    /// A chapter the source has and we do not.
+pub enum UnitChange {
+    /// A unit the source has and we do not.
     Added {
-        /// The chapter.
-        chapter: ChapterIdentity,
+        /// The unit.
+        unit: UnitIdentity,
     },
-    /// A chapter we hold that the source no longer lists.
+    /// A unit we hold that the source no longer lists.
     ///
     /// Reported rather than acted on: spec §11.13 requires a *notice* for
-    /// removed chapters, and deleting a reader's copy of a chapter because an
+    /// removed units, and deleting a reader's copy of a unit because an
     /// author unpublished it would destroy notes and progress the reader owns.
     Removed {
-        /// The chapter as we hold it.
-        chapter: ChapterIdentity,
+        /// The unit as we hold it.
+        unit: UnitIdentity,
     },
-    /// A chapter that moved. Its text is untouched; only its position changed.
+    /// A unit that moved. Its text is untouched; only its position changed.
     Reordered {
-        /// The source's identifier for the chapter.
-        source_chapter_key: String,
+        /// The source's identifier for the unit.
+        source_unit_key: String,
         /// Where it was.
         from: u32,
         /// Where it is now.
         to: u32,
     },
-    /// A chapter whose title changed. The text may or may not have; that is
+    /// A unit whose title changed. The text may or may not have; that is
     /// answered after the fetch.
     Retitled {
-        /// The source's identifier for the chapter.
-        source_chapter_key: String,
+        /// The source's identifier for the unit.
+        source_unit_key: String,
         /// The title we hold.
         was: String,
         /// The title the source now shows.
@@ -266,17 +266,17 @@ pub enum ImportPlan {
     Create,
     /// A copy is held and the source differs. The import produces a new
     /// snapshot; the reader's notes, progress and ratings are mapped onto it
-    /// where the chapter identities match.
+    /// where the unit identities match.
     Update {
         /// Every difference found, in a stable order.
-        changes: Vec<ChapterChange>,
+        changes: Vec<UnitChange>,
     },
     /// A copy is held and nothing the preview can see has changed.
     ///
     /// This is not "the text is identical" — that is only knowable after
     /// fetching. It is "re-importing would add, remove, move and rename
     /// nothing", which is the honest answer a preview can give, and it is what
-    /// lets the reader decline a pointless fetch of a two-hundred-chapter work.
+    /// lets the reader decline a pointless fetch of a two-hundred-unit work.
     NoChange,
 }
 
@@ -295,46 +295,46 @@ impl ImportPlan {
 
     /// The changes, when there are any.
     #[must_use]
-    pub fn changes(&self) -> &[ChapterChange] {
+    pub fn changes(&self) -> &[UnitChange] {
         match self {
             Self::Update { changes } => changes,
             Self::Create | Self::NoChange => &[],
         }
     }
 
-    /// How many chapters the plan would add.
+    /// How many units the plan would add.
     #[must_use]
     pub fn added(&self) -> usize {
         self.changes()
             .iter()
-            .filter(|change| matches!(change, ChapterChange::Added { .. }))
+            .filter(|change| matches!(change, UnitChange::Added { .. }))
             .count()
     }
 
-    /// How many chapters the source no longer lists.
+    /// How many units the source no longer lists.
     #[must_use]
     pub fn removed(&self) -> usize {
         self.changes()
             .iter()
-            .filter(|change| matches!(change, ChapterChange::Removed { .. }))
+            .filter(|change| matches!(change, UnitChange::Removed { .. }))
             .count()
     }
 
-    /// How many chapters moved.
+    /// How many units moved.
     #[must_use]
     pub fn reordered(&self) -> usize {
         self.changes()
             .iter()
-            .filter(|change| matches!(change, ChapterChange::Reordered { .. }))
+            .filter(|change| matches!(change, UnitChange::Reordered { .. }))
             .count()
     }
 
-    /// How many chapters were renamed.
+    /// How many units were renamed.
     #[must_use]
     pub fn retitled(&self) -> usize {
         self.changes()
             .iter()
-            .filter(|change| matches!(change, ChapterChange::Retitled { .. }))
+            .filter(|change| matches!(change, UnitChange::Retitled { .. }))
             .count()
     }
 }
@@ -343,19 +343,19 @@ impl ImportPlan {
 ///
 /// # The rules
 ///
-/// * Identity is the source's chapter key, never the position. A chapter that
-///   keeps its key and moves is [`ChapterChange::Reordered`] — the reader's
+/// * Identity is the source's unit key, never the position. A unit that
+///   keeps its key and moves is [`UnitChange::Reordered`] — the reader's
 ///   notes and progress stay attached to it, which is the whole point of having
 ///   a key.
-/// * A chapter we hold and the source no longer lists is [`ChapterChange::Removed`].
+/// * A unit we hold and the source no longer lists is [`UnitChange::Removed`].
 ///   It is reported, never deleted: spec §11.13 requires a notice, and the
 ///   reader's copy is the reader's.
-/// * A chapter with the same key and a different title is
-///   [`ChapterChange::Retitled`]. Whether its text changed too is decided after
+/// * A unit with the same key and a different title is
+///   [`UnitChange::Retitled`]. Whether its text changed too is decided after
 ///   the fetch.
-/// * Two chapters with the same key in the source's own list is a source fault,
-///   and it is reported as [`ChapterChange::Removed`] for the duplicate rather
-///   than silently collapsing the two — an import that quietly drops a chapter
+/// * Two units with the same key in the source's own list is a source fault,
+///   and it is reported as [`UnitChange::Removed`] for the duplicate rather
+///   than silently collapsing the two — an import that quietly drops a unit
 ///   the source lists is worse than one that says so.
 ///
 /// # Ordering
@@ -372,37 +372,37 @@ pub fn plan_import(existing: Option<&ImportedWork>, fetched: &ImportedWork) -> I
     let mut changes = Vec::new();
 
     // Index the two sides by the source's own key.
-    let mut held: BTreeMap<&str, &ChapterIdentity> = BTreeMap::new();
+    let mut held: BTreeMap<&str, &UnitIdentity> = BTreeMap::new();
     let mut duplicates: BTreeSet<String> = BTreeSet::new();
-    for chapter in &existing.chapters {
+    for unit in &existing.units {
         if held
-            .insert(chapter.source_chapter_key.as_str(), chapter)
+            .insert(unit.source_unit_key.as_str(), unit)
             .is_some()
         {
-            duplicates.insert(chapter.source_chapter_key.clone());
+            duplicates.insert(unit.source_unit_key.clone());
         }
     }
-    let fetched_by_key: BTreeMap<&str, &ChapterIdentity> = fetched
-        .chapters
+    let fetched_by_key: BTreeMap<&str, &UnitIdentity> = fetched
+        .units
         .iter()
-        .map(|chapter| (chapter.source_chapter_key.as_str(), chapter))
+        .map(|unit| (unit.source_unit_key.as_str(), unit))
         .collect();
 
     // Additions, in the source's order.
     let mut seen: BTreeSet<&str> = BTreeSet::new();
-    for chapter in &fetched.chapters {
-        let key = chapter.source_chapter_key.as_str();
+    for unit in &fetched.units {
+        let key = unit.source_unit_key.as_str();
         if !held.contains_key(key) {
-            changes.push(ChapterChange::Added {
-                chapter: chapter.clone(),
+            changes.push(UnitChange::Added {
+                unit: unit.clone(),
             });
         } else if seen.contains(key) {
             // A key the source lists twice. Recorded as a duplicate rather than
-            // imported twice; the unique constraint on the chapter table would
+            // imported twice; the unique constraint on the unit table would
             // refuse the second write anyway, and failing the whole import over
             // it would help nobody.
-            changes.push(ChapterChange::Removed {
-                chapter: chapter.clone(),
+            changes.push(UnitChange::Removed {
+                unit: unit.clone(),
             });
         } else {
             seen.insert(key);
@@ -410,49 +410,49 @@ pub fn plan_import(existing: Option<&ImportedWork>, fetched: &ImportedWork) -> I
     }
 
     // Removals, in the order we held them.
-    for chapter in &existing.chapters {
-        if !fetched_by_key.contains_key(chapter.source_chapter_key.as_str()) {
-            changes.push(ChapterChange::Removed {
-                chapter: chapter.clone(),
+    for unit in &existing.units {
+        if !fetched_by_key.contains_key(unit.source_unit_key.as_str()) {
+            changes.push(UnitChange::Removed {
+                unit: unit.clone(),
             });
         }
     }
 
     // Moves and renames, over the keys both sides know.
-    for chapter in &fetched.chapters {
-        let Some(previous) = held.get(chapter.source_chapter_key.as_str()) else {
+    for unit in &fetched.units {
+        let Some(previous) = held.get(unit.source_unit_key.as_str()) else {
             continue;
         };
-        if previous.ordinal != chapter.ordinal {
-            changes.push(ChapterChange::Reordered {
-                source_chapter_key: chapter.source_chapter_key.clone(),
+        if previous.ordinal != unit.ordinal {
+            changes.push(UnitChange::Reordered {
+                source_unit_key: unit.source_unit_key.clone(),
                 from: previous.ordinal,
-                to: chapter.ordinal,
+                to: unit.ordinal,
             });
         }
-        if previous.title != chapter.title {
-            changes.push(ChapterChange::Retitled {
-                source_chapter_key: chapter.source_chapter_key.clone(),
+        if previous.title != unit.title {
+            changes.push(UnitChange::Retitled {
+                source_unit_key: unit.source_unit_key.clone(),
                 was: previous.title.clone(),
-                now: chapter.title.clone(),
+                now: unit.title.clone(),
             });
         }
     }
 
     // A duplicate key in what we hold is not a change to report — it is data we
     // should never have written — but surfacing it means the import does not
-    // quietly look "unchanged" while holding two rows for one chapter. This runs
+    // quietly look "unchanged" while holding two rows for one unit. This runs
     // *before* the no-change decision, because a work with a doubled row is not
     // unchanged: it is wrong, and saying "nothing to do" would leave it wrong.
     for key in &duplicates {
-        changes.push(ChapterChange::Retitled {
-            source_chapter_key: key.clone(),
+        changes.push(UnitChange::Retitled {
+            source_unit_key: key.clone(),
             was: format!("(held twice: {key})"),
             now: String::new(),
         });
     }
 
-    // A work whose *metadata* changed with no chapter changing is still a
+    // A work whose *metadata* changed with no unit changing is still a
     // change: a renamed work or a corrected author is what an update is for.
     let metadata_changed =
         existing.title != fetched.title || existing.author_text != fetched.author_text;
@@ -522,10 +522,10 @@ pub fn normalize_author(raw: &str) -> String {
 mod tests {
     use super::*;
 
-    fn work(title: &str, chapters: &[(&str, u32, &str)]) -> ImportedWork {
+    fn work(title: &str, units: &[(&str, u32, &str)]) -> ImportedWork {
         let mut work = ImportedWork::new(title, "an author");
-        for (key, ordinal, chapter_title) in chapters {
-            work = work.with_chapter(ChapterIdentity::new(*key, *ordinal, *chapter_title));
+        for (key, ordinal, unit_title) in units {
+            work = work.with_unit(UnitIdentity::new(*key, *ordinal, *unit_title));
         }
         work
     }
@@ -548,9 +548,9 @@ mod tests {
     }
 
     #[test]
-    fn a_new_chapter_is_an_addition_not_everything_after_it_changing() {
-        // The point of keying on the source's identifier: chapter 3 arriving at
-        // the end must not look like chapters 1 and 2 having moved.
+    fn a_new_unit_is_an_addition_not_everything_after_it_changing() {
+        // The point of keying on the source's identifier: unit 3 arriving at
+        // the end must not look like units 1 and 2 having moved.
         let held = work("W", &[("1", 1, "One"), ("2", 2, "Two")]);
         let fetched = work("W", &[("1", 1, "One"), ("2", 2, "Two"), ("3", 3, "Three")]);
         let plan = plan_import(Some(&held), &fetched);
@@ -560,14 +560,14 @@ mod tests {
         assert_eq!(plan.retitled(), 0);
         assert_eq!(
             plan.changes(),
-            &[ChapterChange::Added {
-                chapter: ChapterIdentity::new("3", 3, "Three")
+            &[UnitChange::Added {
+                unit: UnitIdentity::new("3", 3, "Three")
             }]
         );
     }
 
     #[test]
-    fn a_chapter_inserted_at_the_front_moves_the_others_without_renaming_them() {
+    fn a_unit_inserted_at_the_front_moves_the_others_without_renaming_them() {
         let held = work("W", &[("10", 1, "First"), ("20", 2, "Second")]);
         let fetched = work(
             "W",
@@ -581,17 +581,17 @@ mod tests {
         assert_eq!(plan.added(), 1);
         assert_eq!(plan.reordered(), 2);
         assert_eq!(plan.removed(), 0);
-        // The chapters that moved keep their keys, so a reader's notes on
+        // The units that moved keep their keys, so a reader's notes on
         // "First" stay on "First".
-        assert!(plan.changes().contains(&ChapterChange::Reordered {
-            source_chapter_key: "10".to_owned(),
+        assert!(plan.changes().contains(&UnitChange::Reordered {
+            source_unit_key: "10".to_owned(),
             from: 1,
             to: 2,
         }));
     }
 
     #[test]
-    fn a_chapter_the_source_dropped_is_reported_and_not_forgotten() {
+    fn a_unit_the_source_dropped_is_reported_and_not_forgotten() {
         let held = work("W", &[("1", 1, "One"), ("2", 2, "Two")]);
         let fetched = work("W", &[("1", 1, "One")]);
         let plan = plan_import(Some(&held), &fetched);
@@ -601,7 +601,7 @@ mod tests {
             .changes()
             .iter()
             .find_map(|change| match change {
-                ChapterChange::Removed { chapter } => Some(chapter.clone()),
+                UnitChange::Removed { unit } => Some(unit.clone()),
                 _ => None,
             })
             .expect("a removal");
@@ -609,24 +609,24 @@ mod tests {
     }
 
     #[test]
-    fn a_renamed_chapter_is_reported_as_a_rename() {
-        let held = work("W", &[("1", 1, "Chapter One")]);
+    fn a_renamed_unit_is_reported_as_a_rename() {
+        let held = work("W", &[("1", 1, "Unit One")]);
         let fetched = work("W", &[("1", 1, "The Beginning")]);
         let plan = plan_import(Some(&held), &fetched);
         assert_eq!(plan.retitled(), 1);
         assert_eq!(plan.added(), 0);
         assert_eq!(
             plan.changes(),
-            &[ChapterChange::Retitled {
-                source_chapter_key: "1".to_owned(),
-                was: "Chapter One".to_owned(),
+            &[UnitChange::Retitled {
+                source_unit_key: "1".to_owned(),
+                was: "Unit One".to_owned(),
                 now: "The Beginning".to_owned(),
             }]
         );
     }
 
     #[test]
-    fn a_retitled_work_with_no_chapter_change_is_still_a_change() {
+    fn a_retitled_work_with_no_unit_change_is_still_a_change() {
         let held = work("Old Name", &[("1", 1, "One")]);
         let fetched = work("New Name", &[("1", 1, "One")]);
         let plan = plan_import(Some(&held), &fetched);
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn a_key_the_source_lists_twice_does_not_silently_drop_a_chapter() {
+    fn a_key_the_source_lists_twice_does_not_silently_drop_a_unit() {
         let held = work("W", &[("1", 1, "One")]);
         let fetched = work("W", &[("1", 1, "One"), ("1", 2, "One again")]);
         let plan = plan_import(Some(&held), &fetched);
@@ -674,10 +674,10 @@ mod tests {
             .changes()
             .iter()
             .map(|change| match change {
-                ChapterChange::Added { .. } => "added",
-                ChapterChange::Removed { .. } => "removed",
-                ChapterChange::Reordered { .. } => "reordered",
-                ChapterChange::Retitled { .. } => "retitled",
+                UnitChange::Added { .. } => "added",
+                UnitChange::Removed { .. } => "removed",
+                UnitChange::Reordered { .. } => "reordered",
+                UnitChange::Retitled { .. } => "retitled",
             })
             .collect();
         assert_eq!(kinds, vec!["added", "removed", "reordered", "retitled"]);
@@ -740,14 +740,14 @@ mod tests {
     #[test]
     fn classify_accepted_real_work() {
         let work = ImportedWork::new("A Real Title", "Some Author")
-            .with_chapter(ChapterIdentity::new("1", 1, "Chapter One").with_word_count(500));
+            .with_unit(UnitIdentity::new("1", 1, "Unit One").with_word_count(500));
         assert_eq!(work.classify_quality(), ImportQuality::Accepted);
     }
 
     #[test]
     fn classify_rejected_empty_title() {
         let work = ImportedWork::new("", "Author")
-            .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
+            .with_unit(UnitIdentity::new("1", 1, "Ch").with_word_count(100));
         assert_eq!(
             work.classify_quality(),
             ImportQuality::Rejected {
@@ -763,11 +763,11 @@ mod tests {
             "no title",
             "unknown",
             "title tbd",
-            "chapter 1",
+            "unit 1",
             "work",
         ] {
             let work = ImportedWork::new(*title, "Author")
-                .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
+                .with_unit(UnitIdentity::new("1", 1, "Ch").with_word_count(100));
             assert_eq!(
                 work.classify_quality(),
                 ImportQuality::Rejected {
@@ -782,7 +782,7 @@ mod tests {
     #[test]
     fn classify_rejected_empty_author() {
         let work = ImportedWork::new("Title", "")
-            .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
+            .with_unit(UnitIdentity::new("1", 1, "Ch").with_word_count(100));
         assert_eq!(
             work.classify_quality(),
             ImportQuality::Rejected {
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn classify_held_zero_word_count() {
         let work =
-            ImportedWork::new("Title", "Author").with_chapter(ChapterIdentity::new("1", 1, "Ch"));
+            ImportedWork::new("Title", "Author").with_unit(UnitIdentity::new("1", 1, "Ch"));
         assert_eq!(
             work.classify_quality(),
             ImportQuality::Held {
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_held_no_chapters() {
+    fn classify_held_no_units() {
         let work = ImportedWork::new("Title", "Author");
         assert_eq!(
             work.classify_quality(),
@@ -818,7 +818,7 @@ mod tests {
     fn classify_quality_is_pure() {
         // Same input always produces same output.
         let work = ImportedWork::new("Story", "Writer")
-            .with_chapter(ChapterIdentity::new("1", 1, "One").with_word_count(100));
+            .with_unit(UnitIdentity::new("1", 1, "One").with_word_count(100));
         let first = work.classify_quality();
         let second = work.classify_quality();
         assert_eq!(first, second);
@@ -834,14 +834,14 @@ mod tests {
 
     fn a_real_work() -> ImportedWork {
         ImportedWork::new("A Long Quiet River", "someone")
-            .with_chapter(ChapterIdentity::new("c1", 1, "One").with_word_count(4_000))
+            .with_unit(UnitIdentity::new("c1", 1, "One").with_word_count(4_000))
     }
 
     /// A real title and a real author that reports no counted words. §11.14's
     /// held case, and the one a rule that called junk would lose without trace.
     fn a_work_with_no_words() -> ImportedWork {
         ImportedWork::new("A Real Work", "someone")
-            .with_chapter(ChapterIdentity::new("c1", 1, "One"))
+            .with_unit(UnitIdentity::new("c1", 1, "One"))
     }
 
     /// A real title, real words, and an author who is whitespace. The
@@ -849,7 +849,7 @@ mod tests {
     /// model can argue with because it is not a judgement.
     fn a_work_with_no_author() -> ImportedWork {
         ImportedWork::new("A Real Title", "   ")
-            .with_chapter(ChapterIdentity::new("c1", 1, "One").with_word_count(1_000))
+            .with_unit(UnitIdentity::new("c1", 1, "One").with_word_count(1_000))
     }
 
     /// With no model consulted, the calibrated call is exactly the deterministic

@@ -8,7 +8,7 @@
 //! review meaningful — for a declarative adapter the manifest *is* the whole
 //! artifact, so a reviewer is looking at CSS selectors and the parsed output
 //! those selectors produce. A pass/fail boolean would leave that reviewer asking
-//! "did it get the chapters?", which is the question the sample parses answer.
+//! "did it get the units?", which is the question the sample parses answer.
 //!
 //! Two design commitments, both about honesty rather than coverage:
 //!
@@ -56,10 +56,10 @@ pub enum ShapeRule {
     UrlPresent,
     /// The work has an identity the import can key on.
     SourceWorkKeyPresent,
-    /// The work has at least one chapter. §4.3's chapter list is what an import
+    /// The work has at least one unit. §4.3's unit list is what an import
     /// iterates; an empty one is indistinguishable from a source that refused us.
-    HasChapters,
-    /// Chapter ordinals are 1-based and strictly increasing. A reader's progress
+    HasUnits,
+    /// Unit ordinals are 1-based and strictly increasing. A reader's progress
     /// and notes map onto these ordinals across a re-import, so a zero-based or
     /// gapped list silently attaches every reader's history to the wrong place.
     OrdinalsAreOneBased,
@@ -75,7 +75,7 @@ impl ShapeRule {
         Self::TitlePresent,
         Self::UrlPresent,
         Self::SourceWorkKeyPresent,
-        Self::HasChapters,
+        Self::HasUnits,
         Self::OrdinalsAreOneBased,
         Self::SummaryIsPlainText,
     ];
@@ -88,7 +88,7 @@ impl ShapeRule {
             Self::TitlePresent => "title_present",
             Self::UrlPresent => "url_present",
             Self::SourceWorkKeyPresent => "source_work_key_present",
-            Self::HasChapters => "has_chapters",
+            Self::HasUnits => "has_units",
             Self::OrdinalsAreOneBased => "ordinals_are_one_based",
             Self::SummaryIsPlainText => "summary_is_plain_text",
         }
@@ -122,32 +122,32 @@ impl ShapeRule {
                     Ok(())
                 }
             }
-            Self::HasChapters => {
-                if work.chapters.is_empty() {
-                    Err("no chapters were parsed".to_owned())
+            Self::HasUnits => {
+                if work.units.is_empty() {
+                    Err("no units were parsed".to_owned())
                 } else {
                     Ok(())
                 }
             }
             Self::OrdinalsAreOneBased => {
                 let mut previous: Option<u32> = None;
-                for chapter in &work.chapters {
+                for unit in &work.units {
                     match previous {
-                        None if chapter.ordinal != 1 => {
+                        None if unit.ordinal != 1 => {
                             return Err(format!(
-                                "the first chapter is at ordinal {}, not 1",
-                                chapter.ordinal
+                                "the first unit is at ordinal {}, not 1",
+                                unit.ordinal
                             ));
                         }
-                        Some(prev) if chapter.ordinal != prev + 1 => {
+                        Some(prev) if unit.ordinal != prev + 1 => {
                             return Err(format!(
                                 "ordinals jump from {prev} to {}",
-                                chapter.ordinal
+                                unit.ordinal
                             ));
                         }
                         _ => {}
                     }
-                    previous = Some(chapter.ordinal);
+                    previous = Some(unit.ordinal);
                 }
                 Ok(())
             }
@@ -358,8 +358,8 @@ impl CheckReport {
                         "author": work.author_text,
                         "summary_excerpt": excerpt(&work.summary),
                         "word_count": work.word_count,
-                        "chapters": work.chapters.len(),
-                        "chapter_titles": work.chapters.iter().take(5)
+                        "units": work.units.len(),
+                        "unit_titles": work.units.iter().take(5)
                             .map(|c| c.title.clone()).collect::<Vec<_>>(),
                     })),
                     _ => None,
@@ -413,7 +413,7 @@ impl CheckReport {
             match &work.outcome {
                 CheckOutcome::Parsed { work, failures } => {
                     out.push_str(&format!(
-                        "    title    {}\n    author   {}\n    summary  {}\n    chapters {}\n",
+                        "    title    {}\n    author   {}\n    summary  {}\n    units {}\n",
                         work.title,
                         if work.author_text.is_empty() {
                             "(none)"
@@ -421,7 +421,7 @@ impl CheckReport {
                             &work.author_text
                         },
                         excerpt(&work.summary),
-                        work.chapters.len(),
+                        work.units.len(),
                     ));
                     for (rule, detail) in failures {
                         out.push_str(&format!("    FAILED {rule}: {detail}\n"));
@@ -654,7 +654,7 @@ name: Example Fictions
 base_url: https://example-fictions.test
 rate_limit_per_second: 1.0
 work_pattern: /works/{id}
-chapter_pattern: /works/{id}/chapters/{num}
+unit_pattern: /works/{id}/units/{num}
 selectors:
   title: "h1.title"
   author: "span.byline"
@@ -671,7 +671,7 @@ auth:
         .to_owned()
     }
 
-    fn work_page(title: &str, chapters: usize) -> String {
+    fn work_page(title: &str, units: usize) -> String {
         let mut html = format!(
             r#"<html><body>
               <h1 class="title">{title}</h1>
@@ -682,9 +682,9 @@ auth:
               <ul class="tags"><li>tag-one</li></ul>
             "#
         );
-        for n in 1..=chapters {
+        for n in 1..=units {
             html.push_str(&format!(
-                r#"<li class="chapter"><a href="/works/w1/chapters/{n}">Chapter {n}</a></li>"#
+                r#"<li class="unit"><a href="/works/w1/units/{n}">Unit {n}</a></li>"#
             ));
         }
         html.push_str("</ul></body></html>");
@@ -713,7 +713,7 @@ auth:
         f
     }
 
-    fn a_work(chapters: Vec<u32>) -> SourceWork {
+    fn a_work(units: Vec<u32>) -> SourceWork {
         SourceWork {
             source_key: crate::SourceKey("example".to_owned()),
             source_work_key: "w1".to_owned(),
@@ -727,12 +727,12 @@ auth:
             status: WorkStatus::Ongoing,
             published_at: None,
             updated_at: None,
-            chapters: chapters
+            units: units
                 .into_iter()
-                .map(|ordinal| crate::ChapterRef {
+                .map(|ordinal| crate::UnitRef {
                     ordinal,
-                    source_chapter_key: ordinal.to_string(),
-                    title: format!("Chapter {ordinal}"),
+                    source_unit_key: ordinal.to_string(),
+                    title: format!("Unit {ordinal}"),
                 })
                 .collect(),
             rating_text: None,
@@ -823,7 +823,7 @@ auth:
             "https://example-fictions.test/works/w1",
             r#"<html><body><h2>Not a title element</h2>
                      <div class="summary">plain</div>
-                     <ul class="chapter"><li><a href="/works/w1/chapters/1">One</a></li></ul>
+                     <ul class="unit"><li><a href="/works/w1/units/1">One</a></li></ul>
                    </body></html>"#,
         );
 
@@ -892,11 +892,11 @@ auth:
             "{rendered}"
         );
         // And a rule the work passed is not printed as a failure.
-        assert!(!rendered.contains("FAILED has_chapters"), "{rendered}");
+        assert!(!rendered.contains("FAILED has_units"), "{rendered}");
     }
 
     #[tokio::test]
-    async fn a_work_with_no_chapters_fails_rather_than_parsing_as_empty() {
+    async fn a_work_with_no_units_fails_rather_than_parsing_as_empty() {
         let source = compiled();
         let fetcher = FixtureFetcher::new().with_page(
             "https://example-fictions.test/works/w1",
@@ -915,7 +915,7 @@ auth:
 
         assert!(!report.passed());
         assert!(
-            report.render().contains("has_chapters"),
+            report.render().contains("has_units"),
             "{}",
             report.render()
         );
@@ -1222,8 +1222,8 @@ auth:
     }
 
     #[test]
-    fn an_empty_chapter_list_does_not_violate_the_ordinal_rule() {
-        // `HasChapters` is the rule that owns "no chapters". If this case also
+    fn an_empty_unit_list_does_not_violate_the_ordinal_rule() {
+        // `HasUnits` is the rule that owns "no units". If this case also
         // failed the ordinal rule, a report would print two failures for one cause
         // and a curator would go looking for a second problem that is not there.
         assert_eq!(

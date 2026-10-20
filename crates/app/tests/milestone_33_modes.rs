@@ -269,7 +269,7 @@ async fn schedule_sections_come_back_in_position_order_not_insertion_order() {
 }
 
 #[tokio::test]
-async fn a_schedules_chapter_range_and_unlock_time_survive_the_round_trip() {
+async fn a_schedules_unit_range_and_unlock_time_survive_the_round_trip() {
     let h = Db::new("schedule-fields").await;
     let (t, _post) = topic(&h, "reading-group").await;
 
@@ -290,8 +290,8 @@ async fn a_schedules_chapter_range_and_unlock_time_survive_the_round_trip() {
     let row = &schedule[0];
     assert_eq!(row["title"], "Act One");
     assert_eq!(row["position"], 0);
-    assert_eq!(row["chapter_start"], 3);
-    assert_eq!(row["chapter_end"], 17);
+    assert_eq!(row["unit_start"], 3);
+    assert_eq!(row["unit_end"], 17);
     // The unlock time is a string in both dialects; on PostgreSQL a TIMESTAMPTZ
     // column read into `String` is a decode error, so this assertion is the one
     // that would catch a cast being dropped.

@@ -134,7 +134,7 @@ fn the_pages_add_up_to_the_count_and_the_last_page_is_the_short_one() {
     assert_eq!(chapters.len(), 113);
     assert_eq!(chapters[0].ordinal, 1);
     assert_eq!(chapters[112].ordinal, 113);
-    assert_eq!(chapters[0].source_chapter_key, "2357479");
+    assert_eq!(chapters[0].source_unit_key, "2357479");
     assert_eq!(chapters[0].title, "about the novel :)");
 }
 
@@ -258,7 +258,7 @@ fn a_chapter_page_is_read_for_its_prose_and_states_which_chapter_it_is() {
         .parse_chapter(&fixture("chapter-1.html"), &work, "2357479")
         .expect("the recorded chapter page parses");
 
-    assert_eq!(chapter.source_chapter_key, "2357479");
+    assert_eq!(chapter.source_unit_key, "2357479");
     assert_eq!(chapter.ordinal, 1);
     assert_eq!(chapter.title, "about the novel :)");
     assert!(

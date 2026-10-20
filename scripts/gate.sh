@@ -199,6 +199,7 @@ run_dialects() {
 run_repo() {
     cd "$REPO_ROOT"
     python3 "$REPO_ROOT/scripts/reachability.py"
+    python3 "$REPO_ROOT/scripts/check-vocabulary.py"
     python3 "$REPO_ROOT/scripts/check-split-spec.py"
 }
 

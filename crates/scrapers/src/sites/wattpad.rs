@@ -43,7 +43,7 @@
 //! * **A part may be media rather than prose.** The recorded work's first three
 //!   parts are `Photo Gallery`, `Playlist` and `Cast` — 54, 865 and 998
 //!   characters of the same `<p>` markup, one of them holding an `<img>`. They
-//!   are parts the reader is shown, so they are chapters here for the same reason
+//!   are parts the reader is shown, so they are units here for the same reason
 //!   Royal Road's announcement posts are: the site lists them, and an adapter
 //!   that silently dropped them would report a work as shorter than its author
 //!   published it. The sanitizer removes the images, which is what makes them
@@ -94,7 +94,7 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    AuthKind, ChapterRef, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceChapter,
+    AuthKind, UnitRef, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit,
     SourceError, SourceKey, SourceResult, SourceWork, WorkStatus,
 };
 
@@ -233,15 +233,15 @@ impl Wattpad {
             )));
         }
 
-        let chapters: Vec<ChapterRef> = published
+        let units: Vec<UnitRef> = published
             .iter()
             .enumerate()
-            .map(|(index, part)| ChapterRef {
+            .map(|(index, part)| UnitRef {
                 ordinal: (index as u32) + 1,
                 // The site's own id for the part, which is what its prose
                 // endpoint takes as a parameter. It is stable across edits, so
                 // it is the key rather than the position.
-                source_chapter_key: part.id.to_string(),
+                source_unit_key: part.id.to_string(),
                 title: part.title.clone(),
             })
             .collect();
@@ -279,7 +279,7 @@ impl Wattpad {
             },
             published_at,
             updated_at,
-            chapters,
+            units,
             rating_text: None,
             warning_texts: Vec::new(),
             tags: payload.tags,
@@ -288,14 +288,14 @@ impl Wattpad {
 
     /// Read one part's prose from the fragment the text endpoint returns.
     ///
-    /// # Why this is not [`SourceAdapter::chapters_from_html`]
+    /// # Why this is not [`SourceAdapter::units_from_html`]
     ///
     /// Because a Wattpad chapter document **cannot identify itself**. The prose
     /// endpoint is addressed by the *chapter's* id, so the response is a
     /// fragment with no marker saying which part it is — unlike a FanFiction.net
     /// chapter page, whose `selected` option states its own position. The caller
     /// is the only party that knows, so the ordinal is a parameter here and the
-    /// trait's `chapters_from_html` is deliberately left at its default rather
+    /// trait's `units_from_html` is deliberately left at its default rather
     /// than given a guess. The fixture tests drive this method directly.
     #[must_use]
     pub fn chapter_from_text(
@@ -304,12 +304,12 @@ impl Wattpad {
         work: &SourceWork,
         ordinal: u32,
         base: Option<&Url>,
-    ) -> SourceChapter {
-        let chapter = work.chapters.iter().find(|entry| entry.ordinal == ordinal);
-        SourceChapter {
+    ) -> SourceUnit {
+        let chapter = work.units.iter().find(|entry| entry.ordinal == ordinal);
+        SourceUnit {
             ordinal,
-            source_chapter_key: chapter
-                .map(|entry| entry.source_chapter_key.clone())
+            source_unit_key: chapter
+                .map(|entry| entry.source_unit_key.clone())
                 .unwrap_or_else(|| ordinal.to_string()),
             title: chapter.map(|entry| entry.title.clone()).unwrap_or_default(),
             content_html: sanitize_fragment(text, base),
@@ -336,12 +336,12 @@ impl SourceAdapter for Wattpad {
             // it. Whether a given instance may fetch it is the instance's
             // `imports.honour_robots`, answered per instance rather than
             // compiled into an adapter — and reporting `false` here would tell a
-            // compliant instance that chapters are impossible, which is a
+            // compliant instance that units are impossible, which is a
             // different claim and a wrong one.
-            chapters: true,
+            units: true,
             // One part is one request to an endpoint addressed by the part's own
             // id, so a retry re-reads exactly the chapter that failed.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             // Author profiles exist; their markup has not been recorded.
             bibliography: false,
             // The story document carries `modifyDate`, so an update check costs
@@ -393,35 +393,35 @@ impl SourceAdapter for Wattpad {
         self.parse_story(&page.body, &story_id)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
-        if work.chapters.is_empty() {
+    ) -> SourceResult<Vec<SourceUnit>> {
+        if work.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "wattpad work {} lists no parts",
                 work.source_work_key
             )));
         }
 
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for entry in &work.chapters {
-            chapters.push(self.fetch_chapter(fetch, work, entry.ordinal, None).await?);
+        let mut units = Vec::with_capacity(work.units.len());
+        for entry in &work.units {
+            units.push(self.fetch_unit(fetch, work, entry.ordinal, None).await?);
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let entry = work
-            .chapters
+            .units
             .iter()
             .find(|entry| entry.ordinal == ordinal)
             .ok_or_else(|| {
@@ -431,7 +431,7 @@ impl SourceAdapter for Wattpad {
                 ))
             })?;
 
-        let target = self.text_url(&entry.source_chapter_key);
+        let target = self.text_url(&entry.source_unit_key);
         let page = fetch.get(&target).await?;
         // The fragment is relative-free but sanitised against the canonical work
         // URL anyway, so a link that does appear resolves to the site rather

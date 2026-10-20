@@ -214,8 +214,8 @@
                       <dd>{totals.finished_works.toLocaleString()}</dd>
                     </div>
                     <div>
-                      <dt>Chapters read</dt>
-                      <dd>{totals.chapters_read.toLocaleString()}</dd>
+                      <dt>Units read</dt>
+                      <dd>{totals.units_read.toLocaleString()}</dd>
                     </div>
                     <div>
                       <dt>Words read</dt>

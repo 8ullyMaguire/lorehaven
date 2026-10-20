@@ -108,8 +108,8 @@ async fn get_schedule(
 struct ScheduleSectionBody {
     position: i64,
     title: String,
-    chapter_start: i64,
-    chapter_end: i64,
+    unit_start: i64,
+    unit_end: i64,
     unlocks_at: String,
 }
 
@@ -132,8 +132,8 @@ async fn add_schedule_section(
         &id,
         body.position,
         &body.title,
-        body.chapter_start,
-        body.chapter_end,
+        body.unit_start,
+        body.unit_end,
         &body.unlocks_at,
     )
     .await

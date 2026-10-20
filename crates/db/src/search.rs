@@ -8,7 +8,7 @@
 //! existed — the term index keeps a deleted work's terms until a deindex event
 //! lands, and a withdrawal or a takedown request is a soft delete, so a removed
 //! work stayed findable by anyone who knew a word in it. The same guard the
-//! `word_count` subquery already applied to `chapters` is now applied to
+//! `word_count` subquery already applied to `units` is now applied to
 //! `works` in the outer predicate too.
 
 use crate::{Backend, Database};
@@ -185,11 +185,11 @@ async fn rebuild_work_index_postgres(
 /// This is the anonymous door (`GET /api/v1/public/search`), so the predicate
 /// is the anonymous one from `ast_search`: only `published` works with
 /// `visibility = 'public'`. The term index is not a visibility boundary — the
-/// worker fills it from chapter text regardless of lifecycle, and a deindex
+/// worker fills it from unit text regardless of lifecycle, and a deindex
 /// event can lag or be overtaken by a `Reindex` that lands after a withdrawal,
 /// so the route is what keeps an unpublished work out of the results (§3.3).
 ///
-/// `word_count` is summed from live chapter revisions, the same way
+/// `word_count` is summed from live unit revisions, the same way
 /// `ast_search` computes it: the denormalised `works.word_count` column is not
 /// maintained, so reading it reported zero for every result.
 pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec<SearchResult>> {
@@ -213,8 +213,8 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
             let sql = format!(
                 "SELECT w.id, w.title, a.handle AS author_handle, \
                         (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0) \
-                         FROM chapters c \
-                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
+                         FROM units c \
+                         JOIN revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count, \
                         COUNT(t.term) AS score \
                  FROM works_index_terms t \
@@ -259,8 +259,8 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
             let sql = format!(
                 "SELECT w.id::text, w.title, a.handle AS author_handle, \
                         (SELECT COALESCE(SUM(cr.word_count), 0)::bigint \
-                         FROM chapters c \
-                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
+                         FROM units c \
+                         JOIN revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count, \
                         COUNT(t.term) AS score \
                  FROM works_index_terms t \

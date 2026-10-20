@@ -112,16 +112,16 @@ describe('routing', () => {
     expect(work.id).toBe('work-read');
     expect(work.params?.workId).toBe('6f2a9c-1');
 
-    const chapter = matchRoute('/works/6f2a9c-1/chapters/aaa-2');
-    expect(chapter.id).toBe('chapter-read');
-    expect(chapter.params?.workId).toBe('6f2a9c-1');
-    expect(chapter.params?.chapterId).toBe('aaa-2');
+    const unit = matchRoute('/works/6f2a9c-1/units/aaa-2');
+    expect(unit.id).toBe('unit-read');
+    expect(unit.params?.workId).toBe('6f2a9c-1');
+    expect(unit.params?.unitId).toBe('aaa-2');
   });
 
   it('decodes percent-encoded identifiers, because a URL is not a request', () => {
-    const match = matchRoute('/works/a%20b/chapters/c%2Fd');
+    const match = matchRoute('/works/a%20b/units/c%2Fd');
     expect(match.params?.workId).toBe('a b');
-    expect(match.params?.chapterId).toBe('c/d');
+    expect(match.params?.unitId).toBe('c/d');
   });
 
   it('ignores trailing slashes so links and URLs agree', () => {

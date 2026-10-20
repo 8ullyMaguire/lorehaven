@@ -42,7 +42,7 @@ function createPrefs(overrides: Record<string, unknown> = {}): Record<string, un
 function cachedPosition(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     workId: 'work-1',
-    chapterId: 'chapter-1',
+    unitId: 'unit-1',
     position: {
       revision: null,
       anchor: null,
@@ -68,7 +68,7 @@ describe('reading position cache', () => {
     const read = readCachedPosition('work-1');
     expect(read).not.toBeNull();
     expect(read!.workId).toBe('work-1');
-    expect(read!.chapterId).toBe('chapter-1');
+    expect(read!.unitId).toBe('unit-1');
     expect(read!.position.position_permille).toBe(500);
   });
 

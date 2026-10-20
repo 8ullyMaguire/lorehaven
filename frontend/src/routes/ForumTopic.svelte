@@ -111,7 +111,7 @@
     {:else if session.isSignedIn}
       <ReplyForm
         {topicId}
-        spoilerScopeChapter={topic.spoiler_scope_chapter}
+        spoilerScopeUnit={topic.spoiler_scope_unit}
         onCreated={() => { void load(); }}
       />
     {:else}

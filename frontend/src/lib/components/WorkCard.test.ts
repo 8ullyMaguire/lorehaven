@@ -12,7 +12,7 @@ function sampleWork(overrides: Partial<WorkSummary> = {}): WorkSummary {
     rating: 'general',
     centralRelationships: [],
     wordCount: 5000,
-    chapters: 3,
+    units: 3,
     ...overrides,
   };
 }

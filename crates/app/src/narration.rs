@@ -61,19 +61,19 @@ pub async fn handle_narration(
         )));
     }
 
-    // 2. Collect the work's text, chapter by chapter.
+    // 2. Collect the work's text, unit by unit.
     let work_id: darkhold_domain::WorkId = edition.work_id.parse().map_err(|_| {
         HandlerError::Fatal(format!(
             "narration edition {edition_id} holds an invalid work id"
         ))
     })?;
-    let chapters = darkhold_db::content::chapters_for_work(db, work_id)
+    let units = darkhold_db::content::units_for_work(db, work_id)
         .await
         .map_err(transient)?;
 
     let mut full_text = String::new();
-    for chapter in &chapters {
-        let text = chapter.plain_text.trim();
+    for unit in &units {
+        let text = unit.plain_text.trim();
         if text.is_empty() {
             continue;
         }

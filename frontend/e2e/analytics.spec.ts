@@ -135,7 +135,7 @@ test('the analytics page is reachable, and a new reader sees zeroes not an error
   // these count the viewer's own behaviour, so `Subject::Self_` means no floor.
   const totals = await readingTotals(page);
   expect(totals['Works finished']).toBe('0');
-  expect(totals['Chapters read']).toBe('0');
+  expect(totals['Units read']).toBe('0');
   expect(totals['Time reading']).toBe('0 min');
 
   // The estimate travels with its method, so no number is ever unexplained.
@@ -167,15 +167,15 @@ test('a reader marks a locally published work finished, and the count moves', as
   await page.fill('input[id^=field-]', 'The Analytics Odyssey');
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type('One chapter, read by a test so the count moves.');
-  const chapterSaved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+  await page.keyboard.type('One unit, read by a test so the count moves.');
+  const unitSaved = page.waitForResponse(
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
-  await chapterSaved;
+  await unitSaved;
   await page.click('button:text-is("Publish")');
   await expect(page.getByText('Republish')).toBeVisible();
   const workId = page.url().split('/').pop()!;
@@ -237,11 +237,11 @@ test('the library status door refuses a work id', async ({ page }) => {
   await page.fill('input[id^=field-]', 'A Work Id Is Not An Item Id');
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   await page.locator('.tiptap.ProseMirror').click();
-  await page.keyboard.type('A chapter, so the work can be published.');
+  await page.keyboard.type('A unit, so the work can be published.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -356,11 +356,11 @@ test('a reader records where they got to, and the dashboard counts it', async ({
   await page.fill('input[id^=field-]', 'A Work To Keep Track Of');
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   await page.locator('.tiptap.ProseMirror').click();
-  await page.keyboard.type('A chapter, read so the work can be published.');
+  await page.keyboard.type('A unit, read so the work can be published.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

@@ -281,7 +281,7 @@ async fn a_note_is_stored_but_does_not_become_a_reason() {
     let (status, body) = post(
         &mut client,
         &format!("/api/v1/works/{work}/kudos"),
-        json!({ "note": "the second chapter undoes the first" }),
+        json!({ "note": "the second unit undoes the first" }),
     )
     .await;
     assert_eq!(

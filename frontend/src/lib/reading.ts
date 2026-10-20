@@ -22,7 +22,7 @@ export const TYPOGRAPHY_STORAGE_KEY = 'darkhold.typography';
 /** A reading position stored locally. */
 export interface CachedPosition {
   workId: string;
-  chapterId: string;
+  unitId: string;
   position: ServerPosition;
   savedAt: number;
 }
@@ -113,7 +113,7 @@ export function applyTypography(prefs: TypographyPrefs, root: HTMLElement): void
 /** A pending position flush. */
 interface PendingFlush {
   workId: string;
-  chapterId: string;
+  unitId: string;
   revision: string | null;
   anchor: string | null;
   fraction: number;
@@ -228,7 +228,7 @@ export async function savePosition(
   // Write to localStorage first so a lost request still leaves a position.
   const cached: CachedPosition = {
     workId: position.workId,
-    chapterId: position.chapterId,
+    unitId: position.unitId,
     position: {
       revision: position.revision,
       anchor: position.anchor,

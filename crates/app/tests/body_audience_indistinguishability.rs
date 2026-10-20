@@ -25,7 +25,7 @@
 //!
 //! **A test asserting `status == 404` is not this test.** It passes while an
 //! `X-Body-Cached: true` header, a `Retry-After`, a different `content-type`,
-//! or a body carrying `"chapter_count": 3` leaks the fact. That is precisely
+//! or a body carrying `"unit_count": 3` leaks the fact. That is precisely
 //! the shape of defect §7.7.3 exists to prevent, and it is why the comparison
 //! is over the whole response.
 //!
@@ -86,21 +86,21 @@ async fn published_work(client: &mut test_support::TestClient, title: &str) -> (
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter id").to_owned();
-    let chapter_version = body["version"].as_i64().expect("chapter version");
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit = body["id"].as_str().expect("unit id").to_owned();
+    let unit_version = body["version"].as_i64().expect("unit version");
 
     let doc = json!({ "type": "doc", "content": [
         { "type": "paragraph", "content": [
-            { "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+            { "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = client
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "write the chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "write the unit: {body}");
 
     let (status, body) = client.get(format!("/api/v1/works/{id}")).await;
     assert_eq!(status, StatusCode::OK, "reload work: {body}");
@@ -113,7 +113,7 @@ async fn published_work(client: &mut test_support::TestClient, title: &str) -> (
         )
         .await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
-    (id, chapter)
+    (id, unit)
 }
 
 async fn set_audience(tdb: &test_support::TestDb, work: &str, audience: &str) {
@@ -255,7 +255,7 @@ async fn a_gated_readers_responses_are_indistinguishable_from_a_non_existent_wor
 
     let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
     test_support::register(&mut author, "author@test.dev", "ba_ind_author").await;
-    let (work, chapter) = published_work(&mut author, "Held For Someone Else").await;
+    let (work, unit) = published_work(&mut author, "Held For Someone Else").await;
     set_audience(&tdb, &work, "trust_at_least:4").await;
 
     let mut reader = low_reader(&tdb, &dir, "ba_ind_low").await;
@@ -298,7 +298,7 @@ async fn a_gated_readers_responses_are_indistinguishable_from_a_non_existent_wor
             "status differs on {template}: gated={gated_status} absent={absent_status}"
         );
 
-        let ids = [work.as_str(), chapter.as_str(), ABSENT_WORK_ID];
+        let ids = [work.as_str(), unit.as_str(), ABSENT_WORK_ID];
         assert_eq!(
             normalise(&gated_body, &ids),
             normalise(&absent_body, &ids),
@@ -322,12 +322,12 @@ async fn a_gated_readers_responses_are_indistinguishable_from_a_non_existent_wor
     tdb.cleanup().await;
 }
 
-/// The chapter door must not be the one surface that leaks.
+/// The unit door must not be the one surface that leaks.
 ///
-/// Separate from the table above because the chapter door is addressed by
-/// *chapter* id, not work id, and a reader who cannot see the work can still
-/// ask for its chapter directly. This is the oracle §7.7.3 is most worried
-/// about: the work page might be correctly blank while `GET /chapters/{id}`
+/// Separate from the table above because the unit door is addressed by
+/// *unit* id, not work id, and a reader who cannot see the work can still
+/// ask for its unit directly. This is the oracle §7.7.3 is most worried
+/// about: the work page might be correctly blank while `GET /units/{id}`
 /// still serves the text.
 /// No route reports a work's audience, and `/api/v1/meta` does not either.
 ///
@@ -348,7 +348,7 @@ async fn no_surface_reports_a_gated_works_audience() {
 
     let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
     test_support::register(&mut author, "author@test.dev", "ba_al_author").await;
-    let (work, _chapter) = published_work(&mut author, "Held For Someone Else").await;
+    let (work, _unit) = published_work(&mut author, "Held For Someone Else").await;
     set_audience(&tdb, &work, "trust_at_least:4").await;
 
     let mut reader = low_reader(&tdb, &dir, "ba_al_low").await;
@@ -395,32 +395,32 @@ async fn no_surface_reports_a_gated_works_audience() {
 }
 
 #[tokio::test]
-async fn the_chapter_door_does_not_leak_a_gated_body_to_a_reader_of_the_chapter_id() {
-    let dir = test_support::scratch_dir("ba_chapter_leak");
-    let tdb = test_support::TestDb::connect_with_dir("ba-chapter-leak", &dir).await;
+async fn the_unit_door_does_not_leak_a_gated_body_to_a_reader_of_the_unit_id() {
+    let dir = test_support::scratch_dir("ba_unit_leak");
+    let tdb = test_support::TestDb::connect_with_dir("ba-unit-leak", &dir).await;
 
     let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
     test_support::register(&mut author, "author@test.dev", "ba_cl_author").await;
-    let (work, chapter) = published_work(&mut author, "Held For Someone Else").await;
+    let (work, unit) = published_work(&mut author, "Held For Someone Else").await;
     set_audience(&tdb, &work, "trust_at_least:4").await;
 
     let mut reader = low_reader(&tdb, &dir, "ba_cl_low").await;
 
-    let (leak_status, leak_body) = reader.get(format!("/api/v1/chapters/{chapter}")).await;
+    let (leak_status, leak_body) = reader.get(format!("/api/v1/chapters/{unit}")).await;
     let (absent_status, absent_body) = reader
         .get(format!("/api/v1/chapters/{ABSENT_WORK_ID}"))
         .await;
 
     assert_eq!(
         leak_status, absent_status,
-        "the chapter door answers differently for a gated chapter: {leak_status} vs {absent_status}"
+        "the unit door answers differently for a gated unit: {leak_status} vs {absent_status}"
     );
 
-    let ids = [work.as_str(), chapter.as_str(), ABSENT_WORK_ID];
+    let ids = [work.as_str(), unit.as_str(), ABSENT_WORK_ID];
     assert_eq!(
         normalise(&leak_body, &ids),
         normalise(&absent_body, &ids),
-        "the chapter door answers differently in the body\n  gated : {leak_body}\n  absent: {absent_body}"
+        "the unit door answers differently in the body\n  gated : {leak_body}\n  absent: {absent_body}"
     );
 
     tdb.cleanup().await;

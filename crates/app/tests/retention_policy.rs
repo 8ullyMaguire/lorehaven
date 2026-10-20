@@ -477,7 +477,7 @@ fn the_scratch_directory_is_per_test() {
 ///
 /// Driven at the store rather than through the route, because the exclusions
 /// are the claim and a route test can only see the total. The fixture is built
-/// by hand because the count reads `library_items`, `import_chapters` and
+/// by hand because the count reads `library_items`, `import_units` and
 /// `import_jobs` directly, and an import driven through the worker would make
 /// each clause depend on an adapter's behaviour rather than on the query.
 #[tokio::test]
@@ -510,7 +510,7 @@ async fn works_past_saving_counts_only_unreachable_works_with_no_body() {
         let item = seed_library_item(db, account).await;
         seed_import_job(db, account, pseud, &item, state, code).await;
         if body {
-            seed_stored_chapter(db, &item).await;
+            seed_stored_unit(db, &item).await;
         }
     }
 
@@ -676,24 +676,24 @@ async fn seed_import_job(
     }
 }
 
-/// Give a library item one stored chapter — which is what "this instance holds
+/// Give a library item one stored unit — which is what "this instance holds
 /// a body" means to the count.
-async fn seed_stored_chapter(db: &darkhold_db::Database, library_item_id: &str) {
+async fn seed_stored_unit(db: &darkhold_db::Database, library_item_id: &str) {
     let id = uuid::Uuid::new_v4().to_string();
     let sql = db.sql(
-        // `import_chapters` has no `version` column — unlike the tables above
+        // `import_units` has no `version` column — unlike the tables above
         // it, which is why this insert is not the app's own code path and is
         // written out. It has no `imports::` helper because the only question
-        // this test asks of it is "does a stored chapter exist", and the state
+        // this test asks of it is "does a stored unit exist", and the state
         // it is in is the whole answer.
-        "INSERT INTO import_chapters
-           (id, import_job_id, library_item_id, source_chapter_key, ordinal,
+        "INSERT INTO import_units
+           (id, import_job_id, library_item_id, source_unit_key, ordinal,
             title, state, created_at, updated_at)
          SELECT ?, id, ?, 'c1', 1, 'One', 'stored',
                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
            FROM import_jobs WHERE library_item_id = ?",
-        "INSERT INTO import_chapters
-           (id, import_job_id, library_item_id, source_chapter_key, ordinal,
+        "INSERT INTO import_units
+           (id, import_job_id, library_item_id, source_unit_key, ordinal,
             title, state, created_at, updated_at)
          SELECT $1::uuid, id, $2::uuid, 'c1', 1, 'One', 'stored',
                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
@@ -707,7 +707,7 @@ async fn seed_stored_chapter(db: &darkhold_db::Database, library_item_id: &str) 
                 .bind(library_item_id)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
-                .expect("seed a stored chapter");
+                .expect("seed a stored unit");
         }
         darkhold_db::Backend::Postgres => {
             sqlx::query(&sql)
@@ -715,7 +715,7 @@ async fn seed_stored_chapter(db: &darkhold_db::Database, library_item_id: &str) 
                 .bind(library_item_id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
-                .expect("seed a stored chapter");
+                .expect("seed a stored unit");
         }
     }
 }

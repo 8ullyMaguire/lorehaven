@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::document::{escape_text, Block, Document, Inline, Mark};
 
 pub use epub::{
-    CtaPlacement, EpubChapter, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance,
+    CtaPlacement, EpubUnit, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance,
 };
 
 /// A format a work can be exported to (spec §13.1).
@@ -228,8 +228,8 @@ impl ExportFormat {
 pub struct ExportOptions {
     /// Whether the rendered file opens with a title page.
     pub title_page: bool,
-    /// Whether each chapter is preceded by its own heading.
-    pub chapter_headings: bool,
+    /// Whether each unit is preceded by its own heading.
+    pub unit_headings: bool,
     /// A font stack to prefer, carried into formats that can express one.
     ///
     /// `None` means the export's own default rather than a reader's theme: the
@@ -250,7 +250,7 @@ pub struct ExportOptions {
 /// The instance CTA attached to an export (spec §42.1).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InstanceCta {
-    /// Placement: every chapter, the last chapter only, or nowhere.
+    /// Placement: every unit, the last unit only, or nowhere.
     pub placement: CtaPlacementSerde,
     /// Sanitized XHTML fragment.
     pub html: String,
@@ -261,7 +261,7 @@ pub struct InstanceCta {
 #[serde(rename_all = "snake_case")]
 pub enum CtaPlacementSerde {
     #[default]
-    PerChapter,
+    PerUnit,
     PerWork,
     Off,
 }
@@ -269,7 +269,7 @@ pub enum CtaPlacementSerde {
 impl From<CtaPlacementSerde> for epub::CtaPlacement {
     fn from(value: CtaPlacementSerde) -> Self {
         match value {
-            CtaPlacementSerde::PerChapter => Self::PerChapter,
+            CtaPlacementSerde::PerUnit => Self::PerUnit,
             CtaPlacementSerde::PerWork => Self::PerWork,
             CtaPlacementSerde::Off => Self::Off,
         }
@@ -277,13 +277,13 @@ impl From<CtaPlacementSerde> for epub::CtaPlacement {
 }
 
 impl ExportOptions {
-    /// What a reader gets when they choose nothing: attribution and chapter
+    /// What a reader gets when they choose nothing: attribution and unit
     /// headings, no title page, and no typography opinions.
     #[must_use]
     pub const fn defaults() -> Self {
         Self {
             title_page: false,
-            chapter_headings: true,
+            unit_headings: true,
             font_family: None,
             font_size_pt: None,
             instance_cta: None,
@@ -368,10 +368,10 @@ pub struct ExportProvenance {
     pub permission: Option<String>,
 }
 
-/// What a chapter's content is, which is one of exactly two things.
+/// What a unit's content is, which is one of exactly two things.
 ///
-/// An authored chapter is a [`Document`] — the editor's own format, with its
-/// structure intact. An **imported** chapter is sanitized HTML, because that is
+/// An authored unit is a [`Document`] — the editor's own format, with its
+/// structure intact. An **imported** unit is sanitized HTML, because that is
 /// what the importer stores: the source's page, reduced to the allow-listed
 /// subset, and never parsed back into the editor's model. Pretending the two are
 /// one shape would mean either losing the editor's structure or inventing an
@@ -380,14 +380,14 @@ pub struct ExportProvenance {
 /// The formats handle both, and the HTML side is a converter over exactly the
 /// tag set the sanitizer permits — a closed set, so the conversion is not a guess.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChapterBody {
-    /// An authored chapter, in the editor's format.
+pub enum UnitBody {
+    /// An authored unit, in the editor's format.
     Document(Document),
-    /// An imported chapter: sanitized HTML from a source page.
+    /// An imported unit: sanitized HTML from a source page.
     Html(String),
 }
 
-impl ChapterBody {
+impl UnitBody {
     /// The sanitized HTML rendering, which is what HTML and EPUB carry.
     #[must_use]
     pub fn to_sanitized_html(&self) -> String {
@@ -430,51 +430,51 @@ impl ChapterBody {
     }
 }
 
-/// One chapter, ready to render.
+/// One unit, ready to render.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExportChapter {
+pub struct ExportUnit {
     /// 1-based reading position.
     pub ordinal: u32,
-    /// The chapter's title as the author gave it. May be empty.
+    /// The unit's title as the author gave it. May be empty.
     pub title: String,
-    /// The chapter's content.
-    pub body: ChapterBody,
+    /// The unit's content.
+    pub body: UnitBody,
 }
 
-impl ExportChapter {
-    /// An authored chapter.
+impl ExportUnit {
+    /// An authored unit.
     #[must_use]
     pub fn authored(ordinal: u32, title: impl Into<String>, document: Document) -> Self {
         Self {
             ordinal,
             title: title.into(),
-            body: ChapterBody::Document(document),
+            body: UnitBody::Document(document),
         }
     }
 
-    /// An imported chapter, whose body is sanitized HTML.
+    /// An imported unit, whose body is sanitized HTML.
     #[must_use]
     pub fn imported(ordinal: u32, title: impl Into<String>, html: impl Into<String>) -> Self {
         Self {
             ordinal,
             title: title.into(),
-            body: ChapterBody::Html(html.into()),
+            body: UnitBody::Html(html.into()),
         }
     }
 }
 
-impl ExportChapter {
+impl ExportUnit {
     /// The label to show, which is the author's title or an honest number.
     ///
-    /// The fallback says `Chapter N` and nothing more, because that is what is
-    /// known: the eFiction port's `format!("Chapter {i}")` fallback looked
+    /// The fallback says `Unit N` and nothing more, because that is what is
+    /// known: the eFiction port's `format!("Unit {i}")` fallback looked
     /// plausible and discarded the author's real title wherever the selector
     /// missed, with nothing raised.
     #[must_use]
     pub fn label(&self) -> String {
         let title = self.title.trim();
         if title.is_empty() {
-            format!("Chapter {}", self.ordinal)
+            format!("Unit {}", self.ordinal)
         } else {
             title.to_owned()
         }
@@ -490,8 +490,8 @@ pub struct ExportWork {
     pub author: String,
     /// A BCP 47 language tag.
     pub language: String,
-    /// The chapters, in reading order.
-    pub chapters: Vec<ExportChapter>,
+    /// The units, in reading order.
+    pub units: Vec<ExportUnit>,
     /// Where it came from, for an imported work.
     pub provenance: Option<ExportProvenance>,
     /// A stable identifier for this export, which becomes the EPUB's
@@ -514,7 +514,7 @@ pub enum ExportError {
     },
     /// The work has nothing to export. Spec §13's fourth pitfall: an empty file
     /// reported as success is the failure that looks like success.
-    #[error("this work has no chapters, so there is nothing to export")]
+    #[error("this work has no units, so there is nothing to export")]
     Empty,
     /// The EPUB container could not be built.
     #[error(transparent)]
@@ -528,14 +528,14 @@ pub enum ExportError {
 ///
 /// # Errors
 /// [`ExportError::NeedsConverter`] for the three converter formats, which the
-/// caller produces instead; [`ExportError::Empty`] for a work with no chapters;
+/// caller produces instead; [`ExportError::Empty`] for a work with no units;
 /// and [`ExportError::Epub`] for a container that cannot be built.
 pub fn render(
     work: &ExportWork,
     format: ExportFormat,
     options: &ExportOptions,
 ) -> Result<Vec<u8>, ExportError> {
-    if work.chapters.is_empty() {
+    if work.units.is_empty() {
         return Err(ExportError::Empty);
     }
     Ok(match format {
@@ -543,25 +543,25 @@ pub fn render(
         ExportFormat::Html => render_html(work, options).into_bytes(),
         ExportFormat::Markdown => render_markdown(work, options).into_bytes(),
         ExportFormat::Epub => {
-            // The chapter borrows are assembled here rather than in a helper,
+            // The unit borrows are assembled here rather than in a helper,
             // because they borrow from a vector that has to outlive the call and
             // a helper returning them would return borrows of its own locals.
             // The bodies are rendered into strings this function owns, and the
-            // chapter list borrows from them: `EpubChapter` carries `&str`, so
+            // unit list borrows from them: `EpubUnit` carries `&str`, so
             // something has to outlive it, and a helper returning the vector
             // would be returning borrows of its own locals.
             let bodies: Vec<String> = work
-                .chapters
+                .units
                 .iter()
-                .map(|chapter| chapter.body.to_sanitized_html())
+                .map(|unit| unit.body.to_sanitized_html())
                 .collect();
-            let chapters: Vec<EpubChapter<'_>> = work
-                .chapters
+            let units: Vec<EpubUnit<'_>> = work
+                .units
                 .iter()
                 .zip(&bodies)
-                .map(|(chapter, body)| EpubChapter {
-                    ordinal: chapter.ordinal,
-                    title: chapter.title.as_str(),
+                .map(|(unit, body)| EpubUnit {
+                    ordinal: unit.ordinal,
+                    title: unit.title.as_str(),
                     body: body.as_str(),
                 })
                 .collect();
@@ -582,7 +582,7 @@ pub fn render(
                 author: &work.author,
                 language: &work.language,
                 modified: &work.modified,
-                chapters: &chapters,
+                units: &units,
                 provenance,
                 cta,
             })?
@@ -595,11 +595,11 @@ pub fn render(
 }
 
 // ---------------------------------------------------------------------------
-// Imported chapters: sanitized HTML in, text and Markdown out
+// Imported units: sanitized HTML in, text and Markdown out
 // ---------------------------------------------------------------------------
 //
-// These two functions exist because an imported chapter is stored as HTML rather
-// than as the editor's document (see [`ChapterBody`]). They are written against
+// These two functions exist because an imported unit is stored as HTML rather
+// than as the editor's document (see [`UnitBody`]). They are written against
 // **exactly the tag set `darkhold_scrapers::sanitize` permits**, which is a
 // closed set rather than "whatever the web contains":
 //
@@ -989,12 +989,12 @@ fn render_plain_text(work: &ExportWork, options: &ExportOptions) -> String {
         out.push_str(&work.author);
         out.push_str("\n\n");
     }
-    for chapter in &work.chapters {
-        if options.chapter_headings {
-            out.push_str(&chapter.label());
+    for unit in &work.units {
+        if options.unit_headings {
+            out.push_str(&unit.label());
             out.push_str("\n\n");
         }
-        out.push_str(&chapter.body.to_plain_text());
+        out.push_str(&unit.body.to_plain_text());
         out.push_str("\n\n");
     }
     if let Some(provenance) = &work.provenance {
@@ -1041,24 +1041,24 @@ fn render_html(work: &ExportWork, options: &ExportOptions) -> String {
     // The table of contents (spec §13.2). Anchored rather than linked to files,
     // because this is one document.
     out.push_str("<nav class=\"toc\" aria-label=\"Contents\">\n<h2>Contents</h2>\n<ol>\n");
-    for chapter in &work.chapters {
+    for unit in &work.units {
         out.push_str(&format!(
-            "<li><a href=\"#chapter-{}\">{}</a></li>\n",
-            chapter.ordinal,
-            escape_text(&chapter.label())
+            "<li><a href=\"#unit-{}\">{}</a></li>\n",
+            unit.ordinal,
+            escape_text(&unit.label())
         ));
     }
     out.push_str("</ol>\n</nav>\n");
 
-    for chapter in &work.chapters {
+    for unit in &work.units {
         out.push_str(&format!(
-            "<section class=\"chapter\" id=\"chapter-{}\">\n",
-            chapter.ordinal
+            "<section class=\"unit\" id=\"unit-{}\">\n",
+            unit.ordinal
         ));
-        if options.chapter_headings {
-            out.push_str(&format!("<h2>{}</h2>\n", escape_text(&chapter.label())));
+        if options.unit_headings {
+            out.push_str(&format!("<h2>{}</h2>\n", escape_text(&unit.label())));
         }
-        out.push_str(&chapter.body.to_sanitized_html());
+        out.push_str(&unit.body.to_sanitized_html());
         out.push_str("\n</section>\n");
     }
 
@@ -1086,7 +1086,7 @@ fn standalone_css(options: &ExportOptions) -> String {
     let mut css = String::from(
         "body { margin: 0 auto; max-width: 36em; padding: 1em; line-height: 1.5; }\n\
          .toc ol { padding-left: 1.2em; }\n\
-         .chapter { margin-top: 2.5em; }\n\
+         .unit { margin-top: 2.5em; }\n\
          .attribution { margin-top: 3em; font-size: 0.9em; color: #555; }\n",
     );
     // Typography travels only when it was chosen for this export (spec §13.2).
@@ -1126,20 +1126,20 @@ fn render_markdown(work: &ExportWork, options: &ExportOptions) -> String {
 
     // The table of contents, linking to headings by their text.
     out.push_str("## Contents\n\n");
-    for chapter in &work.chapters {
+    for unit in &work.units {
         out.push_str(&format!(
             "- [{}](#{})\n",
-            markdown_escape(&chapter.label()),
-            markdown_anchor(&chapter.label())
+            markdown_escape(&unit.label()),
+            markdown_anchor(&unit.label())
         ));
     }
     out.push('\n');
 
-    for chapter in &work.chapters {
-        if options.chapter_headings {
-            out.push_str(&format!("## {}\n\n", markdown_escape(&chapter.label())));
+    for unit in &work.units {
+        if options.unit_headings {
+            out.push_str(&format!("## {}\n\n", markdown_escape(&unit.label())));
         }
-        out.push_str(&chapter.body.to_markdown());
+        out.push_str(&unit.body.to_markdown());
         out.push('\n');
     }
 
@@ -1294,12 +1294,12 @@ fn markdown_anchor(label: &str) -> String {
 mod tests {
     use super::*;
 
-    fn work(chapters: Vec<ExportChapter>) -> ExportWork {
+    fn work(units: Vec<ExportUnit>) -> ExportWork {
         ExportWork {
             title: "A Work".to_owned(),
             author: "An Author".to_owned(),
             language: "en".to_owned(),
-            chapters,
+            units,
             provenance: Some(ExportProvenance {
                 source_name: "Archive of Our Own".to_owned(),
                 source_url: "https://archiveofourown.org/works/1".to_owned(),
@@ -1314,8 +1314,8 @@ mod tests {
 
     fn imported() -> ExportWork {
         work(vec![
-            ExportChapter::imported(1, "One", "<p>First <strong>bold</strong> word.</p>"),
-            ExportChapter::imported(
+            ExportUnit::imported(1, "One", "<p>First <strong>bold</strong> word.</p>"),
+            ExportUnit::imported(
                 2,
                 "",
                 "<p>Second.</p><hr /><blockquote><p>Quoted.</p></blockquote>\
@@ -1368,14 +1368,14 @@ mod tests {
         assert!(!text.contains('<'), "no markup survives: {text}");
         assert!(
             text.contains("One"),
-            "the chapter's title is a heading: {text}"
+            "the unit's title is a heading: {text}"
         );
-        // A chapter with no title gets a number and says so.
-        assert!(text.contains("Chapter 2"), "{text}");
+        // A unit with no title gets a number and says so.
+        assert!(text.contains("Unit 2"), "{text}");
     }
 
     #[test]
-    fn a_work_with_no_chapters_is_refused_in_every_format() {
+    fn a_work_with_no_units_is_refused_in_every_format() {
         let empty = work(Vec::new());
         for format in ExportFormat::ALL {
             let error =
@@ -1412,7 +1412,7 @@ mod tests {
         )
         .expect("utf-8");
         assert!(html.starts_with("<!DOCTYPE html>"), "{html}");
-        assert!(html.contains("<a href=\"#chapter-1\">One</a>"), "{html}");
+        assert!(html.contains("<a href=\"#unit-1\">One</a>"), "{html}");
         assert!(html.contains("A Work — An Author"), "attribution: {html}");
         assert!(
             html.contains("archiveofourown.org/works/1"),
@@ -1448,8 +1448,8 @@ mod tests {
     }
 
     #[test]
-    fn markdown_keeps_emphasis_links_and_structure_from_an_imported_chapter() {
-        let export = work(vec![ExportChapter::imported(
+    fn markdown_keeps_emphasis_links_and_structure_from_an_imported_unit() {
+        let export = work(vec![ExportUnit::imported(
             1,
             "One",
             "<p>Some <strong>bold</strong> and <em>italic</em> and \
@@ -1476,12 +1476,12 @@ mod tests {
     }
 
     #[test]
-    fn markdown_from_an_authored_chapter_keeps_its_headings_and_order() {
+    fn markdown_from_an_authored_unit_keeps_its_headings_and_order() {
         // The editor's own format takes the other path, and it must produce the
         // same shape of Markdown: this is the pair that would drift apart if only
         // one were tested.
         let document = Document::from_plain("First paragraph.\n\nSecond paragraph.");
-        let export = work(vec![ExportChapter::authored(1, "One", document)]);
+        let export = work(vec![ExportUnit::authored(1, "One", document)]);
         let markdown = String::from_utf8(
             render(&export, ExportFormat::Markdown, &ExportOptions::defaults()).expect("markdown"),
         )
@@ -1556,10 +1556,10 @@ mod tests {
     }
 
     #[test]
-    fn an_imported_chapter_to_epub_carries_its_prose_and_no_wrapper() {
+    fn an_imported_unit_to_epub_carries_its_prose_and_no_wrapper() {
         let export = imported();
         let bytes = render(&export, ExportFormat::Epub, &ExportOptions::defaults()).expect("epub");
         let facts = epub::validate(&bytes).expect("valid");
-        assert_eq!(facts.chapter_titles, ["One", "Chapter 2"]);
+        assert_eq!(facts.unit_titles, ["One", "Unit 2"]);
     }
 }

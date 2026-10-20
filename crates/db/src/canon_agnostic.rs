@@ -108,7 +108,7 @@ pub const NO_TEXT: &str = "no_text";
 /// coordinates. A caller that already holds a corpus uses
 /// [`store_canon_class`], which is what a backfill over many works wants.
 ///
-/// A work with no chapters returns `Ok(None)`: nothing was classified and
+/// A work with no units returns `Ok(None)`: nothing was classified and
 /// nothing was written. Storing "unclassified" for it would be a claim that
 /// somebody looked.
 pub async fn measure_work_and_store(

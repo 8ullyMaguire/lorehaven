@@ -28,7 +28,7 @@ const WORKS = [
     updated_at: '2026-09-21T12:00:00Z',
     published_at: '2026-09-21T11:00:00Z',
     version: 1,
-    chapter_count: 2,
+    unit_count: 2,
     word_count: 5000,
     role: 'author',
   },

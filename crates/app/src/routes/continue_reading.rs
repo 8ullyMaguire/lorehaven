@@ -46,8 +46,8 @@ pub struct ContinueReadingResponse {
     pub position_permille: i32,
     /// Whole percent, already clamped to 0..=100 by the store.
     pub percent: u8,
-    pub chapter_id: Option<String>,
-    pub chapter_title: Option<String>,
+    pub unit_id: Option<String>,
+    pub unit_title: Option<String>,
     /// RFC 3339. When this reader last wrote this row — useful for "you were reading
     /// this three days ago" copy without a second round trip.
     pub updated_at: String,
@@ -83,8 +83,8 @@ async fn continue_reading(
         title: row.title,
         position_permille: row.position_permille,
         percent,
-        chapter_id: row.chapter_id,
-        chapter_title: row.chapter_title,
+        unit_id: row.unit_id,
+        unit_title: row.unit_title,
         updated_at: row.updated_at,
     }))
 }

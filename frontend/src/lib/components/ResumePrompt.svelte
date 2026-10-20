@@ -13,16 +13,16 @@
   interface Props {
     workId: string;
     resolution: ProgressResolution;
-    /** The first chapter, used when a position names no chapter. */
-    firstChapterId: string | null;
+    /** The first unit, used when a position names no unit. */
+    firstUnitId: string | null;
   }
 
-  let { workId, resolution, firstChapterId }: Props = $props();
+  let { workId, resolution, firstUnitId }: Props = $props();
 
-  function href(chapterId: string | null, position: ServerPosition): string {
-    const target = chapterId ?? firstChapterId;
+  function href(unitId: string | null, position: ServerPosition): string {
+    const target = unitId ?? firstUnitId;
     if (!target) return `/works/${workId}`;
-    return `/works/${workId}/chapters/${target}#p-${position.position_permille}`;
+    return `/works/${workId}/units/${target}#p-${position.position_permille}`;
   }
 
   function describe(position: ServerPosition): string {

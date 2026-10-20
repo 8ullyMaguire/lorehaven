@@ -53,7 +53,7 @@
 //! rule is to use the source's own key, and the site has nothing better to
 //! offer. The chapter's address is `/s/{work id}/{ordinal}/{slug}` and the slug
 //! is decorative — verified live on both hosts, where `/s/{id}/2/` and
-//! `/s/{id}/` serve the same chapters as their slugged forms. A decorative slug
+//! `/s/{id}/` serve the same units as their slugged forms. A decorative slug
 //! must not be part of a key.
 //!
 //! The `selected` option states which chapter a page *is*. This site's pages do
@@ -100,8 +100,8 @@ use url::Url;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, text_of, AuthKind, ChapterRef, Credentials, Fetcher,
-    SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey, SourceResult,
+    attr_of, collapse_whitespace, html_of, text_of, AuthKind, UnitRef, Credentials, Fetcher,
+    SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey, SourceResult,
     SourceWork, Wall, WorkStatus,
 };
 
@@ -301,15 +301,15 @@ impl FanFiction {
             metadata.published_text.as_deref(),
         );
 
-        let chapters = chapter_refs(&document);
+        let units = chapter_refs(&document);
 
         // The site states its own chapter count beside a list it renders in
         // full. They disagree only when the page is not what it appears to be —
         // a partial render, a cached page from a different revision — and an
         // import that trusted the list would then import a fraction of a work
         // and report success.
-        if let Some(stated) = metadata.chapters {
-            let listed = chapters.len();
+        if let Some(stated) = metadata.units {
+            let listed = units.len();
             if listed > 0 && listed != stated as usize {
                 return Err(SourceError::Parse(format!(
                     "{} page for /s/{work_id}/ states {stated} chapters and lists {listed}",
@@ -350,7 +350,7 @@ impl FanFiction {
             status: metadata.status,
             published_at: published_epoch.and_then(utc),
             updated_at: updated_epoch.and_then(utc),
-            chapters,
+            units,
             rating_text: metadata.rating,
             warning_texts: Vec::new(),
             tags,
@@ -370,7 +370,7 @@ impl FanFiction {
         work_id: &str,
         ordinal: u32,
         title: &str,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let target = self.chapter_url(work_id, ordinal);
         let page = fetch.get(&target).await?;
         let base = Url::parse(&page.final_url)
@@ -398,11 +398,11 @@ impl FanFiction {
             ))
         })?;
 
-        Ok(SourceChapter {
+        Ok(SourceUnit {
             ordinal,
             // The ordinal is the source's own key: the chapter list carries no
             // per-chapter id, and the slug is decorative.
-            source_chapter_key: ordinal.to_string(),
+            source_unit_key: ordinal.to_string(),
             title: title.to_owned(),
             content_html: sanitize_fragment(&raw, Some(&base)),
             image_urls: crate::sanitize::extract_image_urls(&raw, Some(&base)),
@@ -429,11 +429,11 @@ impl SourceAdapter for FanFiction {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
+            units: true,
             // Every chapter has its own address, and the address is derivable
             // from the ordinal alone. So a retry re-reads one chapter and
             // touches nothing else.
-            per_chapter_fetch: true,
+            per_unit_fetch: true,
             // Author pages exist (`/u/{id}`) and their markup has not been
             // recorded, so this claims nothing about them.
             bibliography: false,
@@ -479,17 +479,17 @@ impl SourceAdapter for FanFiction {
         self.parse_work(&page.body, &work_id)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // A work whose list is empty is a parse failure, not an empty work: the
-        // adapter claims `chapters`, so it either enumerated them or it did not
+        // adapter claims `units`, so it either enumerated them or it did not
         // understand the page. Returning an empty vector here would be an import
         // that reports success having stored no prose.
-        if work.chapters.is_empty() {
+        if work.units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "{} work {} lists no chapters",
                 self.site.display_name(),
@@ -497,25 +497,25 @@ impl SourceAdapter for FanFiction {
             )));
         }
 
-        let mut chapters = Vec::with_capacity(work.chapters.len());
-        for entry in &work.chapters {
-            chapters.push(
+        let mut units = Vec::with_capacity(work.units.len());
+        for entry in &work.units {
+            units.push(
                 self.read_chapter(fetch, &work.source_work_key, entry.ordinal, &entry.title)
                     .await?,
             );
         }
-        Ok(chapters)
+        Ok(units)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         let title = work
-            .chapters
+            .units
             .iter()
             .find(|entry| entry.ordinal == ordinal)
             .map(|entry| entry.title.clone())
@@ -539,11 +539,11 @@ impl SourceAdapter for FanFiction {
         self.parse_work(html, &work_id)
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         // A chapter document holds one chapter. Its position comes from the
         // option the page marks `selected` — the page does not otherwise state
         // it — and the title from the work's own list when that list has the
@@ -562,7 +562,7 @@ impl SourceAdapter for FanFiction {
         })?;
 
         let title = work
-            .chapters
+            .units
             .iter()
             .find(|entry| entry.ordinal == ordinal)
             .map(|entry| entry.title.clone())
@@ -577,9 +577,9 @@ impl SourceAdapter for FanFiction {
             ))
         })?;
 
-        Ok(vec![SourceChapter {
+        Ok(vec![SourceUnit {
             ordinal,
-            source_chapter_key: ordinal.to_string(),
+            source_unit_key: ordinal.to_string(),
             title,
             content_html: sanitize_fragment(&raw, base.as_ref()),
             image_urls: crate::sanitize::extract_image_urls(&raw, base.as_ref()),
@@ -608,7 +608,7 @@ struct Metadata {
     language: Option<String>,
     genres: Vec<String>,
     characters: Vec<String>,
-    chapters: Option<u32>,
+    units: Option<u32>,
     words: Option<i64>,
     updated_text: Option<String>,
     published_text: Option<String>,
@@ -623,7 +623,7 @@ impl Default for Metadata {
             language: None,
             genres: Vec::new(),
             characters: Vec::new(),
-            chapters: None,
+            units: None,
             words: None,
             updated_text: None,
             published_text: None,
@@ -648,7 +648,7 @@ impl Metadata {
             if let Some(rest) = field.strip_prefix("Rated:") {
                 fields.rating = non_empty(rest);
             } else if let Some(rest) = field.strip_prefix("Chapters:") {
-                fields.chapters = count(rest);
+                fields.units = count(rest);
             } else if let Some(rest) = field.strip_prefix("Words:") {
                 fields.words = count(rest).map(i64::from);
             } else if let Some(rest) = field.strip_prefix("Updated:") {
@@ -849,7 +849,7 @@ fn utc(epoch: i64) -> Option<OffsetDateTime> {
 /// The list is rendered twice, in the top and bottom navigation, and the two are
 /// identical. This reads the first; a page where they disagreed would be a page
 /// whose shape has changed, and the fixture set is where that shows up.
-fn chapter_refs(document: &Html) -> Vec<ChapterRef> {
+fn chapter_refs(document: &Html) -> Vec<UnitRef> {
     let Some(select) = first_select(document) else {
         return Vec::new();
     };
@@ -865,11 +865,11 @@ fn chapter_refs(document: &Html) -> Vec<ChapterRef> {
                 return None;
             }
             let label = collapse_whitespace(&option.text().collect::<String>());
-            Some(ChapterRef {
+            Some(UnitRef {
                 ordinal,
                 // The site carries no per-chapter id in this list. The ordinal
                 // is what it addresses a chapter by, so it is the key.
-                source_chapter_key: ordinal.to_string(),
+                source_unit_key: ordinal.to_string(),
                 title: strip_ordinal_prefix(&label, ordinal),
             })
         })
@@ -879,7 +879,7 @@ fn chapter_refs(document: &Html) -> Vec<ChapterRef> {
 /// The ordinal of the option the page marks `selected`.
 ///
 /// This is how a chapter page states its own position, and it is the only thing
-/// on the page that does — which is `chapters_from_html`'s whole problem, and
+/// on the page that does — which is `units_from_html`'s whole problem, and
 /// how a page that answers with the wrong chapter is caught.
 fn selected_ordinal(document: &Html) -> Option<u32> {
     let select = first_select(document)?;
@@ -940,7 +940,7 @@ mod tests {
             fields.characters,
             vec!["J. Holtzmann", "Patty T.", "Erin G.", "Abby Y."]
         );
-        assert_eq!(fields.chapters, Some(2));
+        assert_eq!(fields.units, Some(2));
         assert_eq!(fields.words, Some(3_781));
         assert_eq!(fields.updated_text.as_deref(), Some("2/7/2017"));
         assert_eq!(fields.published_text.as_deref(), Some("1/31/2017"));

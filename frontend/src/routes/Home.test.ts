@@ -236,8 +236,8 @@ describe('Home page', () => {
       title: 'Stars Fall Softly',
       positionPermille: 420,
       percent: 42,
-      chapterId: 'chapter-7',
-      chapterTitle: 'Chapter 7: The Turn',
+      unitId: 'unit-7',
+      unitTitle: 'Unit 7: The Turn',
       updatedAt: '2026-10-03T10:00:00Z',
     });
 

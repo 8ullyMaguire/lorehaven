@@ -10,7 +10,7 @@ import SimilarWorksRail from './SimilarWorksRail.svelte';
  *
  * `recent_bookmarks` and `similarity` are optional on `SurfaceWork` so a fixture cannot
  * claim a measurement the server never took. `word_count` is NOT, and this fixture
- * compiling is the check: the server COALESCEs the aggregate to 0, so "no chapters" is a
+ * compiling is the check: the server COALESCEs the aggregate to 0, so "no units" is a
  * true 0 and never an absent field. Making it optional to silence a type error here would
  * reintroduce the `undefined` the store deliberately does not produce.
  */

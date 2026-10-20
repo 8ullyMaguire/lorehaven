@@ -344,16 +344,16 @@ async fn progress(
             device,
             per_mille,
             at,
-            chapter_id: None,
+            unit_id: None,
         },
     )
     .await;
 }
 
-/// The same row, naming the chapter the reader was on.
+/// The same row, naming the unit the reader was on.
 ///
 /// TWO templates rather than one with a nullable bind. `exec` takes `&[&str]`, so it
-/// cannot express SQL NULL, and passing an empty string for "no chapter" would insert
+/// cannot express SQL NULL, and passing an empty string for "no unit" would insert
 /// `''` into a column that is UUID on PostgreSQL -- `22P02 invalid input syntax for type
 /// uuid` there, while SQLite stores the empty string happily. NULL therefore has to be
 /// literal SQL text, which means the branch is in the template rather than the argument.
@@ -364,7 +364,7 @@ struct ProgressRow<'a> {
     device: &'a str,
     per_mille: i32,
     at: &'a str,
-    chapter_id: Option<&'a str>,
+    unit_id: Option<&'a str>,
 }
 
 /// A struct, not eight parameters.
@@ -380,11 +380,11 @@ async fn progress_at(db: &Database, row: ProgressRow<'_>) {
         device,
         per_mille,
         at,
-        chapter_id,
+        unit_id,
     } = row;
     let row_id = uuid::Uuid::new_v4().to_string();
     let per_mille = per_mille.to_string();
-    let (tmpl, args): (&str, Vec<&str>) = match chapter_id {
+    let (tmpl, args): (&str, Vec<&str>) = match unit_id {
         None => (
             "INSERT INTO reading_progress
                (id, account_id, pseud_id, subject_type, subject_id,
@@ -394,24 +394,24 @@ async fn progress_at(db: &Database, row: ProgressRow<'_>) {
                 &row_id, account_id, pseud_id, work_id, &per_mille, device, at,
             ],
         ),
-        Some(chapter) => (
+        Some(unit) => (
             "INSERT INTO reading_progress
-               (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+               (id, account_id, pseud_id, subject_type, subject_id, unit_id,
                 position_permille, device_id, created_at, updated_at)
              VALUES (?1#u, ?2#u, ?3#u, 'work', ?4#u, ?5#u, ?6#i, ?7, ?8, ?8)",
             vec![
-                &row_id, account_id, pseud_id, work_id, chapter, &per_mille, device, at,
+                &row_id, account_id, pseud_id, work_id, unit, &per_mille, device, at,
             ],
         ),
     };
     exec(db, tmpl, &args).await;
 }
 
-async fn chapter(db: &Database, work_id: &str, title: &str) -> String {
+async fn unit(db: &Database, work_id: &str, title: &str) -> String {
     let id = uuid::Uuid::new_v4().to_string();
     exec(
         db,
-        "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at)
+        "INSERT INTO units (id, work_id, order_key, title, created_at, updated_at)
          VALUES (?1#u, ?2#u, 10, ?3, ?4, ?4)",
         &[&id, work_id, title, NOW],
     )
@@ -465,8 +465,8 @@ async fn prefers_the_row_this_reader_wrote_most_recently() {
     let a = account(&db, "device").await;
     let p = pseud(&db, &a).await;
     let w = fixed_work(&db, &a, &p, 3, "Read On Two Devices", "in_progress").await;
-    let phone_chapter = chapter(&db, &w, "Chapter 1: The Phone Stop").await;
-    let laptop_chapter = chapter(&db, &w, "Chapter 9: The Laptop Stop").await;
+    let phone_unit = unit(&db, &w, "Unit 1: The Phone Stop").await;
+    let laptop_unit = unit(&db, &w, "Unit 9: The Laptop Stop").await;
     // The phone row is OLDER but FURTHER ALONG; the laptop row is newer and behind.
     // Ordering by `updated_at` must win over ordering by position, or the banner jumps
     // between devices every time a sync lands.
@@ -479,7 +479,7 @@ async fn prefers_the_row_this_reader_wrote_most_recently() {
             device: "phone",
             per_mille: 900,
             at: "2026-10-01T10:00:00Z",
-            chapter_id: Some(&phone_chapter),
+            unit_id: Some(&phone_unit),
         },
     )
     .await;
@@ -492,7 +492,7 @@ async fn prefers_the_row_this_reader_wrote_most_recently() {
             device: "laptop",
             per_mille: 150,
             at: "2026-10-03T10:00:00Z",
-            chapter_id: Some(&laptop_chapter),
+            unit_id: Some(&laptop_unit),
         },
     )
     .await;
@@ -504,29 +504,29 @@ async fn prefers_the_row_this_reader_wrote_most_recently() {
     assert_eq!(got.position_permille, 150, "the newer device's position");
     assert_eq!(got.updated_at, "2026-10-03T10:00:00Z");
     assert_eq!(
-        got.chapter_title.as_deref(),
-        Some("Chapter 9: The Laptop Stop"),
-        "the chapter must belong to the row that supplied the position"
+        got.unit_title.as_deref(),
+        Some("Unit 9: The Laptop Stop"),
+        "the unit must belong to the row that supplied the position"
     );
-    // The chapter travels with the POSITION, not with whichever row happened to carry
+    // The unit travels with the POSITION, not with whichever row happened to carry
     // one. Aggregating the columns independently let the position come from one device
-    // row and the chapter from another, which is how the banner ends up claiming the
-    // reader is 90% through while quoting chapter 1.
+    // row and the unit from another, which is how the banner ends up claiming the
+    // reader is 90% through while quoting unit 1.
     if let Some(s) = schema {
         drop_schema(&s).await;
     }
 }
 
 #[tokio::test]
-async fn resolves_the_chapter_title_the_reader_stopped_at() {
-    let (db, schema) = connect("chapter").await;
-    let a = account(&db, "chapter").await;
+async fn resolves_the_unit_title_the_reader_stopped_at() {
+    let (db, schema) = connect("unit").await;
+    let a = account(&db, "unit").await;
     let p = pseud(&db, &a).await;
-    let w = work(&db, &a, &p, "Has Chapters", "in_progress").await;
-    let c = chapter(&db, &w, "Chapter 7: The Turn").await;
+    let w = work(&db, &a, &p, "Has Units", "in_progress").await;
+    let c = unit(&db, &w, "Unit 7: The Turn").await;
     exec(&db,
         "INSERT INTO reading_progress
-           (id, account_id, pseud_id, subject_type, subject_id, chapter_id, position_permille, device_id, created_at, updated_at)
+           (id, account_id, pseud_id, subject_type, subject_id, unit_id, position_permille, device_id, created_at, updated_at)
          VALUES (?1#u, ?2#u, ?3#u, 'work', ?4#u, ?5#u, 333, 'laptop', ?6, ?6)",
         &[&uuid::Uuid::new_v4().to_string(), &a, &p, &w, &c, NOW]).await;
 
@@ -534,24 +534,24 @@ async fn resolves_the_chapter_title_the_reader_stopped_at() {
         .await
         .expect("query")
         .expect("a row");
-    assert_eq!(got.chapter_title.as_deref(), Some("Chapter 7: The Turn"));
+    assert_eq!(got.unit_title.as_deref(), Some("Unit 7: The Turn"));
     assert_eq!(got.position_permille, 333);
     if let Some(s) = schema {
         drop_schema(&s).await;
     }
 }
 
-/// A deleted chapter must cost the banner its chapter NAME, not the banner.
+/// A deleted unit must cost the banner its unit NAME, not the banner.
 #[tokio::test]
-async fn a_missing_chapter_does_not_fail_the_banner() {
+async fn a_missing_unit_does_not_fail_the_banner() {
     let (db, schema) = connect("nochapt").await;
     let a = account(&db, "nochapt").await;
     let p = pseud(&db, &a).await;
-    let w = work(&db, &a, &p, "Chapter Was Deleted", "in_progress").await;
-    // No `chapters` row exists for this id at all.
+    let w = work(&db, &a, &p, "Unit Was Deleted", "in_progress").await;
+    // No `units` row exists for this id at all.
     exec(&db,
         "INSERT INTO reading_progress
-           (id, account_id, pseud_id, subject_type, subject_id, chapter_id, position_permille, device_id, created_at, updated_at)
+           (id, account_id, pseud_id, subject_type, subject_id, unit_id, position_permille, device_id, created_at, updated_at)
          VALUES (?1#u, ?2#u, ?3#u, 'work', ?4#u, ?5#u, 500, 'laptop', ?6, ?6)",
         &[&uuid::Uuid::new_v4().to_string(), &a, &p, &w, &uuid::Uuid::new_v4().to_string(), NOW]).await;
 
@@ -560,10 +560,10 @@ async fn a_missing_chapter_does_not_fail_the_banner() {
         .expect("query")
         .expect("a row");
     assert_eq!(
-        got.chapter_title, None,
-        "a deleted chapter costs the name, not the banner"
+        got.unit_title, None,
+        "a deleted unit costs the name, not the banner"
     );
-    assert!(got.chapter_id.is_some(), "the chapter id is still reported");
+    assert!(got.unit_id.is_some(), "the unit id is still reported");
     if let Some(s) = schema {
         drop_schema(&s).await;
     }

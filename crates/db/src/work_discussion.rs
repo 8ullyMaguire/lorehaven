@@ -68,17 +68,17 @@ pub struct TopicWorkLink {
     pub id: String,
     pub topic_id: String,
     pub work_id: String,
-    pub chapter_id: Option<String>,
+    pub unit_id: Option<String>,
     pub created_at: String,
 }
 
 /// The linked topic for a work, if one exists.
 pub async fn linked_topic(db: &Database, work_id: &str) -> Result<Option<TopicWorkLink>> {
     let sql = db.sql(
-        "SELECT id, topic_id, work_id, chapter_id, created_at FROM topic_work_links WHERE work_id = ? ORDER BY created_at LIMIT 1",
+        "SELECT id, topic_id, work_id, unit_id, created_at FROM topic_work_links WHERE work_id = ? ORDER BY created_at LIMIT 1",
         // `work_id` is UUID (0038) and the struct field is String, exactly like
-        // `chapter_id` on the next column -- both need the cast.
-        "SELECT id, topic_id, work_id::text AS work_id, chapter_id::text AS chapter_id, created_at \
+        // `unit_id` on the next column -- both need the cast.
+        "SELECT id, topic_id, work_id::text AS work_id, unit_id::text AS unit_id, created_at \
          FROM topic_work_links WHERE work_id::text = $1 ORDER BY created_at LIMIT 1",
     );
     let row = match db.backend() {
@@ -99,12 +99,12 @@ pub async fn linked_topic(db: &Database, work_id: &str) -> Result<Option<TopicWo
 }
 
 /// Link a topic to a work. Idempotent per work: if a link already exists it
-/// is returned unchanged, so a chapter-publish hook that fires twice creates
+/// is returned unchanged, so a unit-publish hook that fires twice creates
 /// exactly one topic.
 pub async fn link_topic(
     db: &Database,
     work_id: &str,
-    chapter_id: Option<&str>,
+    unit_id: Option<&str>,
     category_id: &str,
     author_pseud: &str,
     title: &str,
@@ -116,8 +116,8 @@ pub async fn link_topic(
     let id = uuid::Uuid::new_v4().to_string();
     let now = now_rfc3339();
     let sql = db.sql(
-        "INSERT INTO topic_work_links (id, topic_id, work_id, chapter_id, created_at) VALUES (?, ?, ?, ?, ?)",
-        "INSERT INTO topic_work_links (id, topic_id, work_id, chapter_id, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)",
+        "INSERT INTO topic_work_links (id, topic_id, work_id, unit_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO topic_work_links (id, topic_id, work_id, unit_id, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -125,7 +125,7 @@ pub async fn link_topic(
                 .bind(&id)
                 .bind(&topic_id)
                 .bind(work_id)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
@@ -135,7 +135,7 @@ pub async fn link_topic(
                 .bind(&id)
                 .bind(&topic_id)
                 .bind(work_id)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -145,7 +145,7 @@ pub async fn link_topic(
         id,
         topic_id,
         work_id: work_id.to_owned(),
-        chapter_id: chapter_id.map(str::to_owned),
+        unit_id: unit_id.map(str::to_owned),
         created_at: now,
     })
 }

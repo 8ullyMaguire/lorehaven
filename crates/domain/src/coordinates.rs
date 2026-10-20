@@ -5,7 +5,7 @@
 //!
 //! Four numbers per work, each separating something a reader can feel and a
 //! reader cannot always name: sentence-length variance, dialogue ratio,
-//! vocabulary richness, and chapter-length distribution. §49.3's point is that
+//! vocabulary richness, and unit-length distribution. §49.3's point is that
 //! they are **dimensions the ranker scores against** — a reader who consistently
 //! likes varied, scene-driven prose can be modelled on them without ever being
 //! asked what "prose density" means.
@@ -53,9 +53,9 @@
 //! variance, and variance over fewer than ~30 sentences is dominated by sampling
 //! noise: two sentences of length 4 and 40 look "very varied" and two of length
 //! 20 and 21 look "very flat", with neither reading meaning anything. 500 words
-//! clears that comfortably while staying far below a typical chapter, so a short
-//! *work* made of several chapters is still measurable — the threshold is on
-//! the whole work's text, not on any one chapter.
+//! clears that comfortably while staying far below a typical unit, so a short
+//! *work* made of several units is still measurable — the threshold is on
+//! the whole work's text, not on any one unit.
 
 use serde::{Deserialize, Serialize};
 
@@ -77,8 +77,8 @@ pub const MIN_MEASURABLE_WORDS: usize = 500;
 /// only constructed when the work is measurable. A measure that cannot be
 /// computed for an otherwise-measurable work — a work with no dialogue at all
 /// has a dialogue ratio of exactly `0.0`, which is *not* the same as unmeasured,
-/// so that case is a real `Some(0.0)`; but a single-chapter work has no
-/// chapter-length *distribution* to speak of, and that is genuinely `None`.
+/// so that case is a real `Some(0.0)`; but a single-unit work has no
+/// unit-length *distribution* to speak of, and that is genuinely `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WorkCoordinates {
     /// Spread of sentence lengths. High = varied prose, low = flat.
@@ -100,16 +100,16 @@ pub struct WorkCoordinates {
     /// Case-folded and punctuation-stripped, because "The" and "the" are one
     /// word to a reader and two to a naive split. Bounded by the shortest of the
     /// four to measure in a stable way — a very short work has a spuriously high
-    /// TTR — so it is computed over the whole work's text and not per chapter.
+    /// TTR — so it is computed over the whole work's text and not per unit.
     pub vocabulary_richness: f64,
 
-    /// How the work's length is spread across its chapters, `0.0..=1.0`.
+    /// How the work's length is spread across its units, `0.0..=1.0`.
     ///
-    /// Coefficient of variation (stddev / mean) of chapter word counts, capped at
-    /// 1.0. High = a serial with wildly uneven chapters; low = uniform lengths or
-    /// a single chapter. `None` for a single-chapter work, which has no
+    /// Coefficient of variation (stddev / mean) of unit word counts, capped at
+    /// 1.0. High = a serial with wildly uneven units; low = uniform lengths or
+    /// a single unit. `None` for a single-unit work, which has no
     /// distribution to measure.
-    pub chapter_length_spread: Option<f64>,
+    pub unit_length_spread: Option<f64>,
 
     /// Word count the measures were computed over. Recorded so a stored
     /// coordinate can be checked against the text it came from without
@@ -139,8 +139,8 @@ impl WorkCoordinates {
                 self.vocabulary_richness,
             ),
         ];
-        if let Some(spread) = self.chapter_length_spread {
-            out.push((DIM_CHAPTER_LENGTH_SPREAD.to_string(), spread));
+        if let Some(spread) = self.unit_length_spread {
+            out.push((DIM_UNIT_LENGTH_SPREAD.to_string(), spread));
         }
         out
     }
@@ -152,15 +152,15 @@ pub const DIM_SENTENCE_LENGTH_VARIANCE: &str = "style_sentence_variance";
 pub const DIM_DIALOGUE_RATIO: &str = "style_dialogue_ratio";
 /// `arena_weights.dimension_key` for type-token ratio.
 pub const DIM_VOCABULARY_RICHNESS: &str = "style_vocabulary_richness";
-/// `arena_weights.dimension_key` for chapter-length spread.
-pub const DIM_CHAPTER_LENGTH_SPREAD: &str = "style_chapter_length_spread";
+/// `arena_weights.dimension_key` for unit-length spread.
+pub const DIM_UNIT_LENGTH_SPREAD: &str = "style_unit_length_spread";
 
-/// A chapter's text, as coordinates see it.
+/// A unit's text, as coordinates see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChapterText {
-    /// The chapter's plain text. `chapter_revisions.plain_text` (0003).
+pub struct UnitText {
+    /// The unit's plain text. `revisions.plain_text` (0003).
     pub plain_text: String,
-    /// The chapter's word count as the instance computed it at ingest.
+    /// The unit's word count as the instance computed it at ingest.
     ///
     /// Taken from the stored column rather than recounted, so coordinates agree
     /// with the number the rest of the platform shows. §49.3 wants reproducibility
@@ -177,7 +177,7 @@ pub struct ChapterText {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Unmeasurable {
-    /// No text at all — an empty work, or one whose chapters were never saved.
+    /// No text at all — an empty work, or one whose units were never saved.
     NoText,
     /// Below [`MIN_MEASURABLE_WORDS`]. Short-but-sharp, per §49.3.
     TooShort,
@@ -234,17 +234,17 @@ impl Coordinates {
     }
 }
 
-/// Everything §49.3's measures need: the whole work's text, and its chapters'
+/// Everything §49.3's measures need: the whole work's text, and its units'
 /// individual word counts.
 #[derive(Debug, Clone, Default)]
 pub struct Corpus {
-    /// Chapter texts in `order_key` order. Order matters for nothing in the
+    /// Unit texts in `order_key` order. Order matters for nothing in the
     /// measures themselves (they are order-independent) but is preserved so a
     /// caller can rely on the input being the reading order.
-    pub chapters: Vec<ChapterText>,
-    /// Words attributable to dialogue, summed across chapters.
+    pub units: Vec<UnitText>,
+    /// Words attributable to dialogue, summed across units.
     ///
-    /// Carried in rather than recomputed from `chapters` so the caller can read
+    /// Carried in rather than recomputed from `units` so the caller can read
     /// it from whatever it already has — a stored dialogue count, a tag, a
     /// parser's output — instead of re-deriving it. The measures only need the
     /// *sum*, and taking it from the caller is what makes this module usable
@@ -253,26 +253,26 @@ pub struct Corpus {
 }
 
 impl Corpus {
-    /// The whole work's text, chapters joined by a blank line.
+    /// The whole work's text, units joined by a blank line.
     ///
     /// The join matters and is not arbitrary: sentence segmentation must not run
-    /// two chapters together into one sentence, so a paragraph break is required
+    /// two units together into one sentence, so a paragraph break is required
     /// between them. `\n\n` is what `plain_text` already uses between
     /// paragraphs, so this introduces no new convention.
     pub fn text(&self) -> String {
         let mut out = String::new();
-        for (i, chapter) in self.chapters.iter().enumerate() {
+        for (i, unit) in self.units.iter().enumerate() {
             if i > 0 {
                 out.push_str("\n\n");
             }
-            out.push_str(&chapter.plain_text);
+            out.push_str(&unit.plain_text);
         }
         out
     }
 
     /// The work's total word count, as the instance recorded it.
     pub fn word_count(&self) -> usize {
-        self.chapters.iter().map(|c| c.word_count).sum()
+        self.units.iter().map(|c| c.word_count).sum()
     }
 }
 
@@ -292,7 +292,7 @@ impl Corpus {
 ///
 /// Unclosed quotes are handled by closing at end-of-text rather than by
 /// discarding: text pasted from a word processor often has an unmatched quote,
-/// and dropping the rest of the chapter would under-report the ratio in a way
+/// and dropping the rest of the unit would under-report the ratio in a way
 /// that looks like a deliberate measurement.
 ///
 /// Nested quotes are not tracked. Two levels of quotation inside a quotation are
@@ -395,13 +395,13 @@ pub fn coordinates(corpus: &Corpus) -> Coordinates {
 
     let vocabulary_richness = type_token_ratio(&text);
 
-    let chapter_length_spread = chapter_length_spread(&corpus.chapters);
+    let unit_length_spread = unit_length_spread(&corpus.units);
 
     Coordinates::Measured(WorkCoordinates {
         sentence_length_variance: variance,
         dialogue_ratio: round6(dialogue_ratio),
         vocabulary_richness: round6(vocabulary_richness),
-        chapter_length_spread: chapter_length_spread.map(round6),
+        unit_length_spread: unit_length_spread.map(round6),
         word_count,
         sentence_count,
     })
@@ -430,8 +430,8 @@ fn sentences(text: &str) -> Vec<usize> {
     // Two wrong rules bracket this one, and both were found by tests rather than
     // by reading the code:
     //
-    //   * "every char including \n is a boundary" -> a "\n\n" chapter join is two
-    //     boundaries, one of which carries no sentence, so every multi-chapter
+    //   * "every char including \n is a boundary" -> a "\n\n" unit join is two
+    //     boundaries, one of which carries no sentence, so every multi-unit
     //     work gained N-1 phantom one-character sentences and its variance
     //     measure was dragged toward zero.
     //   * "any whitespace is a boundary" -> every inter-word space became one, so
@@ -457,7 +457,7 @@ fn sentences(text: &str) -> Vec<usize> {
                 // A blank line ends the sentence in progress, once.
                 lengths.push(std::mem::take(&mut current));
             } else if newlines == 1 && current > 0 {
-                // A single newline inside a chapter (soft wrap) is not a boundary.
+                // A single newline inside a unit (soft wrap) is not a boundary.
                 // Leading whitespace is not part of the next sentence's length.
             }
             continue;
@@ -572,23 +572,23 @@ fn type_token_ratio(text: &str) -> f64 {
     (distinct.len() as f64 / total as f64).clamp(0.0, 1.0)
 }
 
-/// Coefficient of variation of chapter word counts, capped at `1.0`.
+/// Coefficient of variation of unit word counts, capped at `1.0`.
 ///
-/// `None` for a single chapter: a one-chapter work has no length *distribution*,
-/// and reporting `0.0` would say "uniformly even chapters" about a work that has
+/// `None` for a single unit: a one-unit work has no length *distribution*,
+/// and reporting `0.0` would say "uniformly even units" about a work that has
 /// exactly one — the same absent-is-not-a-zero mistake §49.3 warns about, one
 /// level down.
-fn chapter_length_spread(chapters: &[ChapterText]) -> Option<f64> {
-    if chapters.len() < 2 {
+fn unit_length_spread(units: &[UnitText]) -> Option<f64> {
+    if units.len() < 2 {
         return None;
     }
-    let n = chapters.len() as f64;
-    let sum: f64 = chapters.iter().map(|c| c.word_count as f64).sum();
+    let n = units.len() as f64;
+    let sum: f64 = units.iter().map(|c| c.word_count as f64).sum();
     let mean = sum / n;
     if mean <= 0.0 {
         return Some(0.0);
     }
-    let sq: f64 = chapters
+    let sq: f64 = units
         .iter()
         .map(|c| (c.word_count as f64 - mean).powi(2))
         .sum();

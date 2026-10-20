@@ -134,15 +134,15 @@ fn a_word_count_is_not_reported_because_the_site_publishes_characters() {
 fn the_part_list_is_complete_in_the_order_the_site_publishes_it() {
     let work = recorded_work();
 
-    assert_eq!(work.chapter_count(), 31);
-    assert_eq!(work.chapters[0].ordinal, 1);
-    assert_eq!(work.chapters[0].title, "Photo Gallery");
-    assert_eq!(work.chapters[3].title, "Chapter One");
-    assert_eq!(work.chapters[30].ordinal, 31);
+    assert_eq!(work.unit_count(), 31);
+    assert_eq!(work.units[0].ordinal, 1);
+    assert_eq!(work.units[0].title, "Photo Gallery");
+    assert_eq!(work.units[3].title, "Chapter One");
+    assert_eq!(work.units[30].ordinal, 31);
     // The author's own typo, kept because it is the title the site shows.
-    assert_eq!(work.chapters[25].title, "Chapter Twnety-Three");
+    assert_eq!(work.units[25].title, "Chapter Twnety-Three");
 
-    let ordinals: Vec<u32> = work.chapters.iter().map(|entry| entry.ordinal).collect();
+    let ordinals: Vec<u32> = work.units.iter().map(|entry| entry.ordinal).collect();
     assert_eq!(ordinals, (1..=31).collect::<Vec<u32>>());
 }
 
@@ -153,8 +153,8 @@ fn a_part_is_keyed_by_the_sites_own_id_because_that_is_what_its_reader_takes() {
     // chapter after it.
     let work = recorded_work();
 
-    assert_eq!(work.chapters[3].source_chapter_key, CHAPTER_ONE_PART);
-    assert_eq!(work.chapters[0].source_chapter_key, GALLERY_PART);
+    assert_eq!(work.units[3].source_unit_key, CHAPTER_ONE_PART);
+    assert_eq!(work.units[0].source_unit_key, GALLERY_PART);
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn a_chapter_is_read_from_the_fragment_the_text_endpoint_returns() {
     // endpoint is addressed by the chapter's id, so the response carries no
     // marker saying which chapter it is.
     assert_eq!(chapter.ordinal, 4);
-    assert_eq!(chapter.source_chapter_key, CHAPTER_ONE_PART);
+    assert_eq!(chapter.source_unit_key, CHAPTER_ONE_PART);
     assert_eq!(chapter.title, "Chapter One");
 
     assert!(
@@ -313,15 +313,15 @@ fn the_sites_own_file_forbids_the_path_the_prose_comes_from() {
 fn the_adapter_declares_what_the_source_has_and_not_what_an_instance_may_do() {
     let capabilities = Wattpad::new().capabilities();
 
-    // `chapters: true` is a statement about the *source*: Wattpad serves every
+    // `units: true` is a statement about the *source*: Wattpad serves every
     // part's prose and this adapter reads it. Whether a given instance may fetch
     // it is that instance's `imports.honour_robots`, answered per instance and
     // not compiled into an adapter — and reporting `false` here would tell a
     // compliant instance that chapters are impossible, which is a different
     // claim and a wrong one.
-    assert!(capabilities.chapters);
+    assert!(capabilities.units);
     assert!(capabilities.metadata);
-    assert!(capabilities.per_chapter_fetch);
+    assert!(capabilities.per_unit_fetch);
     assert!(capabilities.incremental);
     // Author pages exist and their markup has not been recorded.
     assert!(!capabilities.bibliography);

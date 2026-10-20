@@ -28,7 +28,7 @@
 //! did come from. This is not decoration: an adapter that stored `final_url` as a
 //! work's canonical URL would otherwise publish a `web.archive.org` address as the
 //! work's home. The requested URL is kept as `final_url` and the snapshot is
-//! recorded beside it, so a reader can be told the chapter came from an archived
+//! recorded beside it, so a reader can be told the unit came from an archived
 //! copy — which for a preserved work is exactly what they should be told.
 
 use crate::{Fetched, Provenance, SourceError, SourceResult};

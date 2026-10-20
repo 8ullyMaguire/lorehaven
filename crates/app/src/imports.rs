@@ -8,8 +8,8 @@
 //!    fetched, so a paused source costs no requests at all;
 //! 2. the credential must exist and not be expired, also checked before any
 //!    fetch, so a stale login is a message rather than a half-written item;
-//! 3. preview, so the plan can be reported before a single chapter is stored;
-//! 4. fetch and store chapter by chapter, checking for cancellation between
+//! 3. preview, so the plan can be reported before a single unit is stored;
+//! 4. fetch and store unit by unit, checking for cancellation between
 //!    units and skipping what a previous attempt already stored;
 //! 5. upsert the library item and write the report.
 //!
@@ -20,7 +20,7 @@
 //! # What is deliberately not here
 //!
 //! Nothing in this module parses HTML. The adapter does that and returns
-//! sanitised chapters, so a change to a site's markup never reaches this file,
+//! sanitised units, so a change to a site's markup never reaches this file,
 //! and the retry, resume and reporting rules never depend on a site's shape
 //! (spec §11.1).
 
@@ -28,7 +28,7 @@ use anyhow::Result;
 use darkhold_db::storage::BlobStore;
 use darkhold_db::{imports, jobs};
 use darkhold_domain::imports::{
-    plan_import, ChapterChange, ChapterIdentity, ImportPlan, ImportedWork,
+    plan_import, UnitChange, UnitIdentity, ImportPlan, ImportedWork,
 };
 use darkhold_domain::JobId;
 use darkhold_scrapers::registry::Registry;
@@ -122,7 +122,7 @@ pub fn policy_for_in(
     let mut policy = FetchPolicy::for_source(adapter.capabilities());
     policy.unblock = config.imports.unblock_for(adapter);
     // The instance's answer to the source's own `robots.txt`, applied here so
-    // every import path — preview, chapter fetch, update check — gets the same
+    // every import path — preview, unit fetch, update check — gets the same
     // one. Defaults to compliance; see `ImportsConfig::resolved_robots_posture`.
     //
     // The posture is the field the fetcher reads, so it is set here rather than
@@ -165,12 +165,12 @@ use crate::worker::HandlerError;
 /// Where the import job's id lives in the queue payload.
 pub const PAYLOAD_IMPORT_JOB_ID: &str = "import_job_id";
 
-/// The owner type recorded in `content_references` for a stored chapter.
+/// The owner type recorded in `content_references` for a stored unit.
 ///
 /// A constant because it is a foreign key in all but name: the blob collector
 /// asks `content_references` whether a checksum is still wanted, and a typo here
-/// would make every imported chapter look unreferenced and quietly deletable.
-pub const CHAPTER_OWNER_TYPE: &str = "library_item_chapter";
+/// would make every imported unit look unreferenced and quietly deletable.
+pub const UNIT_OWNER_TYPE: &str = "library_item_unit";
 
 /// The header a credential is carried in, absent a source-specific choice.
 ///
@@ -425,7 +425,7 @@ pub async fn run(
     // The planner compares the source's view against what is already held, so a
     // re-import reports what changed rather than importing blind. A missing item
     // is `None`, which is a creation — not an empty item, which would read as an
-    // update that dropped every chapter.
+    // update that dropped every unit.
     let existing_item = imports::find_library_item(
         state.db(),
         &row.account_id,
@@ -434,7 +434,7 @@ pub async fn run(
     )
     .await
     .map_err(transient)?;
-    let existing_chapters = imports::previous_chapters_for(
+    let existing_units = imports::previous_units_for(
         state.db(),
         &row.account_id,
         &row.source_key,
@@ -446,7 +446,7 @@ pub async fn run(
     let held = existing_item.as_ref().map(|item| ImportedWork {
         title: item.title.clone(),
         author_text: item.author_text.clone(),
-        chapters: existing_chapters
+        units: existing_units
             .clone()
             .unwrap_or_default()
             .iter()
@@ -459,7 +459,7 @@ pub async fn run(
         &ImportedWork {
             title: work.title.clone(),
             author_text: work.author_text.clone(),
-            chapters: work.chapters.iter().map(to_identity_ref).collect(),
+            units: work.units.iter().map(to_identity_ref).collect(),
             word_count: None,
         },
     );
@@ -486,7 +486,7 @@ pub async fn run(
         return Ok(());
     }
 
-    // The item exists before its chapters so that the blobs have an owner to be
+    // The item exists before its units so that the blobs have an owner to be
     // referenced by, and so a cancelled import leaves a readable stub rather
     // than orphaned content.
     let item_id = row
@@ -515,7 +515,7 @@ pub async fn run(
     // a temporary source failure into a permanent loss of something the reader
     // asked this instance to keep."
     //
-    // The library item was written at the line above, before the chapters, so
+    // The library item was written at the line above, before the units, so
     // that a cancelled import leaves a readable stub rather than orphaned
     // content. That is the right order for a *cancel*, and it is exactly the
     // shape the spec forbids for a *failure*: the item now has a title, a
@@ -527,11 +527,11 @@ pub async fn run(
     // decision to make.
     //
     // The other direction needs no code here and that is worth stating: an
-    // aggregating instance returns `Ok(vec![])` from `store_chapters` and is
+    // aggregating instance returns `Ok(vec![])` from `store_units` and is
     // marked `completed`, because storing no body is what it was configured to
     // do. Only a *failure* on a *caching* instance is the degradation §11.15
     // names.
-    let stored = match store_chapters(state, &source, job, &row, &item).await {
+    let stored = match store_units(state, &source, job, &row, &item).await {
         Ok(stored) => stored,
         Err(error) => {
             let message = error.message();
@@ -552,7 +552,7 @@ pub async fn run(
         }
     };
 
-    // §32.7.9: rescue media. Every image URL found in the chapters is
+    // §32.7.9: rescue media. Every image URL found in the units is
     // deduplicated and queued for archival. A URL already held by any work
     // returns its existing reference; a new URL creates a reference with a
     // placeholder hash and an availability link. The health monitor fills in
@@ -615,7 +615,7 @@ async fn apply_source_tags(
     row: &imports::ImportJob,
     item: &imports::LibraryItem,
 ) -> TaggedCount {
-    // The work row only exists once the chapters have been stored. An import
+    // The work row only exists once the units have been stored. An import
     // that produced no work has nothing to tag, and the source's labels are
     // still visible on the library item itself.
     let Some(work_id) = item.work_id.as_deref() else {
@@ -928,40 +928,40 @@ fn library_input(work: &SourceWork, row: &imports::ImportJob) -> imports::Librar
     }
 }
 
-/// The planner's view of one stored chapter.
-fn to_identity(chapter: &imports::ImportChapter) -> ChapterIdentity {
-    ChapterIdentity {
-        source_chapter_key: chapter.source_chapter_key.clone(),
-        ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
-        title: chapter.title.clone(),
+/// The planner's view of one stored unit.
+fn to_identity(unit: &imports::ImportUnit) -> UnitIdentity {
+    UnitIdentity {
+        source_unit_key: unit.source_unit_key.clone(),
+        ordinal: u32::try_from(unit.ordinal).unwrap_or(u32::MAX),
+        title: unit.title.clone(),
         word_count: None,
     }
 }
 
-/// The planner's view of one chapter a source just reported.
-fn to_identity_ref(chapter: &darkhold_scrapers::ChapterRef) -> ChapterIdentity {
-    ChapterIdentity {
-        source_chapter_key: chapter.source_chapter_key.clone(),
-        ordinal: chapter.ordinal,
-        title: chapter.title.clone(),
+/// The planner's view of one unit a source just reported.
+fn to_identity_ref(unit: &darkhold_scrapers::UnitRef) -> UnitIdentity {
+    UnitIdentity {
+        source_unit_key: unit.source_unit_key.clone(),
+        ordinal: unit.ordinal,
+        title: unit.title.clone(),
         word_count: None, // Preview doesn't count words; grading will be Held until import
     }
 }
 
-/// What one chapter's storage ended in.
+/// What one unit's storage ended in.
 #[derive(Debug, Clone)]
-struct StoredChapter {
+struct StoredUnit {
     ordinal: u32,
-    source_chapter_key: String,
+    source_unit_key: String,
     title: String,
     checksum: Option<String>,
     note: Option<String>,
     stored: bool,
-    /// Image URLs found in this chapter's source body, for media rescue (§32.7.9).
+    /// Image URLs found in this unit's source body, for media rescue (§32.7.9).
     image_urls: Vec<String>,
 }
 
-/// Everything a chapter-store needs from the source side.
+/// Everything a unit-store needs from the source side.
 ///
 /// Grouped into one struct because the alternative is a seven-argument function
 /// whose arguments are all references to things that must agree with each other
@@ -975,21 +975,21 @@ struct SourceFetch<'a> {
     work: &'a SourceWork,
 }
 
-/// Fetch and store a work's chapters, resuming rather than starting over.
+/// Fetch and store a work's units, resuming rather than starting over.
 ///
 /// The rule this function exists to hold: **a retry does not re-read what is
-/// already stored.** On the first attempt every chapter is fetched in one bulk
+/// already stored.** On the first attempt every unit is fetched in one bulk
 /// request, because one request per work is what a source would rather receive.
-/// On a retry, only the chapters that failed are fetched again, and only where
-/// the adapter can address a single chapter — which it advertises, so a source
+/// On a retry, only the units that failed are fetched again, and only where
+/// the adapter can address a single unit — which it advertises, so a source
 /// that cannot is not asked to pretend (§11.7).
-async fn store_chapters(
+async fn store_units(
     state: &AppState,
     source: &SourceFetch<'_>,
     job: JobId,
     row: &imports::ImportJob,
     item: &imports::LibraryItem,
-) -> Result<Vec<StoredChapter>, HandlerError> {
+) -> Result<Vec<StoredUnit>, HandlerError> {
     let registry = source.registry;
     let fetcher = source.fetcher;
     let work = source.work;
@@ -1035,29 +1035,29 @@ async fn store_chapters(
         return Ok(Vec::new());
     }
 
-    let previous = imports::list_import_chapters(state.db(), &row.id)
+    let previous = imports::list_import_units(state.db(), &row.id)
         .await
         .map_err(transient)?;
     let already_stored: std::collections::HashSet<String> = previous
         .iter()
-        .filter(|chapter| chapter.state == "stored")
-        .map(|chapter| chapter.source_chapter_key.clone())
+        .filter(|unit| unit.state == "stored")
+        .map(|unit| unit.source_unit_key.clone())
         .collect();
     let failed: Vec<u32> = previous
         .iter()
-        .filter(|chapter| chapter.state == "failed")
-        .filter_map(|chapter| u32::try_from(chapter.ordinal).ok())
+        .filter(|unit| unit.state == "failed")
+        .filter_map(|unit| u32::try_from(unit.ordinal).ok())
         .collect();
 
     let capabilities = adapter.capabilities();
-    // Bulk for a fresh import; per-chapter for a retry, and only when the source
-    // genuinely addresses chapters one at a time. Anything else is a bulk fetch
-    // whose already-stored chapters are skipped rather than re-read.
-    let per_chapter_retry =
-        !previous.is_empty() && !failed.is_empty() && capabilities.per_chapter_fetch;
+    // Bulk for a fresh import; per-unit for a retry, and only when the source
+    // genuinely addresses units one at a time. Anything else is a bulk fetch
+    // whose already-stored units are skipped rather than re-read.
+    let per_unit_retry =
+        !previous.is_empty() && !failed.is_empty() && capabilities.per_unit_fetch;
 
-    let fetched = if per_chapter_retry {
-        let mut chapters = Vec::new();
+    let fetched = if per_unit_retry {
+        let mut units = Vec::new();
         for ordinal in &failed {
             if jobs::is_cancelled(state.db(), job)
                 .await
@@ -1066,18 +1066,18 @@ async fn store_chapters(
                 return Err(HandlerError::Cancelled);
             }
             match adapter
-                .fetch_chapter(fetcher, work, *ordinal, credentials)
+                .fetch_unit(fetcher, work, *ordinal, credentials)
                 .await
             {
-                Ok(chapter) => chapters.push(chapter),
+                Ok(unit) => units.push(unit),
                 Err(error) => {
                     let note = classify(error, &row.source_key).message();
-                    imports::upsert_import_chapter(
+                    imports::upsert_import_unit(
                         state.db(),
                         &row.id,
                         Some(&item.id),
-                        &imports::ImportChapterInput {
-                            source_chapter_key: format!("ordinal-{ordinal}"),
+                        &imports::ImportUnitInput {
+                            source_unit_key: format!("ordinal-{ordinal}"),
                             ordinal: i64::from(*ordinal),
                             title: String::new(),
                             state: "failed".to_owned(),
@@ -1087,14 +1087,14 @@ async fn store_chapters(
                     )
                     .await
                     .map_err(transient)?;
-                    tracing::warn!(ordinal, source = %row.source_key, "a chapter could not be re-read");
+                    tracing::warn!(ordinal, source = %row.source_key, "a unit could not be re-read");
                 }
             }
         }
-        chapters
+        units
     } else {
         adapter
-            .fetch_chapters(fetcher, work, credentials)
+            .fetch_units(fetcher, work, credentials)
             .await
             .map_err(|error| classify(error, &row.source_key))?
     };
@@ -1104,7 +1104,7 @@ async fn store_chapters(
     let mut outcomes = Vec::with_capacity(fetched.len());
     let mut any_failed = false;
 
-    for (index, chapter) in fetched.iter().enumerate() {
+    for (index, unit) in fetched.iter().enumerate() {
         // Between units of work: a ten-minute import that ignores a cancel is a
         // lie about what cancelling does.
         if jobs::is_cancelled(state.db(), job)
@@ -1114,11 +1114,11 @@ async fn store_chapters(
             return Err(HandlerError::Cancelled);
         }
 
-        if already_stored.contains(&chapter.source_chapter_key) {
-            outcomes.push(StoredChapter {
-                ordinal: chapter.ordinal,
-                source_chapter_key: chapter.source_chapter_key.clone(),
-                title: chapter.title.clone(),
+        if already_stored.contains(&unit.source_unit_key) {
+            outcomes.push(StoredUnit {
+                ordinal: unit.ordinal,
+                source_unit_key: unit.source_unit_key.clone(),
+                title: unit.title.clone(),
                 checksum: None,
                 note: Some("already held from an earlier attempt".to_owned()),
                 stored: true,
@@ -1127,21 +1127,21 @@ async fn store_chapters(
             continue;
         }
 
-        let bytes = chapter.content_html.as_bytes();
+        let bytes = unit.content_html.as_bytes();
         match store.put(state.db(), bytes, "text/html").await {
             Ok((checksum, _key)) => {
                 store
-                    .reference(state.db(), &checksum, CHAPTER_OWNER_TYPE, &item.id)
+                    .reference(state.db(), &checksum, UNIT_OWNER_TYPE, &item.id)
                     .await
                     .map_err(transient)?;
-                imports::upsert_import_chapter(
+                imports::upsert_import_unit(
                     state.db(),
                     &row.id,
                     Some(&item.id),
-                    &imports::ImportChapterInput {
-                        source_chapter_key: chapter.source_chapter_key.clone(),
-                        ordinal: i64::from(chapter.ordinal),
-                        title: chapter.title.clone(),
+                    &imports::ImportUnitInput {
+                        source_unit_key: unit.source_unit_key.clone(),
+                        ordinal: i64::from(unit.ordinal),
+                        title: unit.title.clone(),
                         state: "stored".to_owned(),
                         content_blob_checksum: Some(checksum.clone()),
                         note: None,
@@ -1149,29 +1149,29 @@ async fn store_chapters(
                 )
                 .await
                 .map_err(transient)?;
-                outcomes.push(StoredChapter {
-                    ordinal: chapter.ordinal,
-                    source_chapter_key: chapter.source_chapter_key.clone(),
-                    title: chapter.title.clone(),
+                outcomes.push(StoredUnit {
+                    ordinal: unit.ordinal,
+                    source_unit_key: unit.source_unit_key.clone(),
+                    title: unit.title.clone(),
                     checksum: Some(checksum),
                     note: None,
                     stored: true,
-                    image_urls: chapter.image_urls.clone(),
+                    image_urls: unit.image_urls.clone(),
                 });
             }
             Err(error) => {
-                // One chapter that cannot be written does not throw away the
-                // chapters that already were. It is recorded and the import
+                // One unit that cannot be written does not throw away the
+                // units that already were. It is recorded and the import
                 // carries on, then fails at the end so the queue retries it.
                 let note = error.to_string();
-                imports::upsert_import_chapter(
+                imports::upsert_import_unit(
                     state.db(),
                     &row.id,
                     Some(&item.id),
-                    &imports::ImportChapterInput {
-                        source_chapter_key: chapter.source_chapter_key.clone(),
-                        ordinal: i64::from(chapter.ordinal),
-                        title: chapter.title.clone(),
+                    &imports::ImportUnitInput {
+                        source_unit_key: unit.source_unit_key.clone(),
+                        ordinal: i64::from(unit.ordinal),
+                        title: unit.title.clone(),
                         state: "failed".to_owned(),
                         content_blob_checksum: None,
                         note: Some(note.clone()),
@@ -1179,14 +1179,14 @@ async fn store_chapters(
                 )
                 .await
                 .map_err(transient)?;
-                outcomes.push(StoredChapter {
-                    ordinal: chapter.ordinal,
-                    source_chapter_key: chapter.source_chapter_key.clone(),
-                    title: chapter.title.clone(),
+                outcomes.push(StoredUnit {
+                    ordinal: unit.ordinal,
+                    source_unit_key: unit.source_unit_key.clone(),
+                    title: unit.title.clone(),
                     checksum: None,
                     note: Some(note),
                     stored: false,
-                    image_urls: chapter.image_urls.clone(),
+                    image_urls: unit.image_urls.clone(),
                 });
                 any_failed = true;
             }
@@ -1198,7 +1198,7 @@ async fn store_chapters(
             state,
             job,
             permille,
-            Some(chapter.source_chapter_key.as_str()),
+            Some(unit.source_unit_key.as_str()),
         )
         .await?;
     }
@@ -1206,7 +1206,7 @@ async fn store_chapters(
     if any_failed {
         let failed = outcomes.iter().filter(|outcome| !outcome.stored).count();
         return Err(HandlerError::Transient(format!(
-            "{failed} of {} chapter(s) could not be stored; the rest are held, and a retry will only re-read what failed",
+            "{failed} of {} unit(s) could not be stored; the rest are held, and a retry will only re-read what failed",
             outcomes.len()
         )));
     }
@@ -1237,7 +1237,7 @@ async fn finish(
 /// the taxonomy tags applied (§32.7.10).
 fn report_with_media(
     plan: &ImportPlan,
-    stored: &[StoredChapter],
+    stored: &[StoredUnit],
     dry_run: bool,
     media: &darkhold_db::media_resilience::ImportMediaSummary,
     tagged: TaggedCount,
@@ -1269,16 +1269,16 @@ fn report_with_media(
     obj.to_string()
 }
 
-/// §32.7.9: rescue every image URL from an import's chapters.
+/// §32.7.9: rescue every image URL from an import's units.
 ///
-/// For each chapter's `image_urls`, deduplicate within the import and call
+/// For each unit's `image_urls`, deduplicate within the import and call
 /// `upsert_media_reference_for_import`, which checks for an existing
 /// availability link by URL and creates a new reference if none exists. The
 /// summary counts URLs, deduplicated URLs, and new references created.
 async fn rescue_import_media(
     db: &darkhold_db::Database,
     item: &imports::LibraryItem,
-    stored: &[StoredChapter],
+    stored: &[StoredUnit],
 ) -> darkhold_db::media_resilience::ImportMediaSummary {
     use darkhold_db::media_resilience;
 
@@ -1288,10 +1288,10 @@ async fn rescue_import_media(
     let mut unparseable = 0;
     let mut seen = std::collections::HashSet::new();
 
-    for chapter in stored {
-        for url in &chapter.image_urls {
+    for unit in stored {
+        for url in &unit.image_urls {
             total_urls += 1;
-            // Deduplicate within the import: a URL that appears in two chapters
+            // Deduplicate within the import: a URL that appears in two units
             // of the same work creates one media reference, not two.
             if !seen.insert(url.clone()) {
                 continue;
@@ -1299,7 +1299,7 @@ async fn rescue_import_media(
             match media_resilience::upsert_media_reference_for_import(
                 db,
                 &item.id,
-                Some(&chapter.source_chapter_key),
+                Some(&unit.source_unit_key),
                 url,
             )
             .await
@@ -1326,11 +1326,11 @@ async fn rescue_import_media(
     }
 }
 
-/// The report, as JSON: what the plan said, and what each chapter ended up as.
+/// The report, as JSON: what the plan said, and what each unit ended up as.
 ///
 /// It is stored rather than recomputed so that "what did this import do?" has an
 /// answer after the fact, including for the imports that did not finish.
-fn report(plan: &ImportPlan, stored: &[StoredChapter], dry_run: bool) -> String {
+fn report(plan: &ImportPlan, stored: &[StoredUnit], dry_run: bool) -> String {
     let (kind, changes) = match plan {
         ImportPlan::Create => ("create", Vec::new()),
         ImportPlan::NoChange => ("no_change", Vec::new()),
@@ -1339,35 +1339,35 @@ fn report(plan: &ImportPlan, stored: &[StoredChapter], dry_run: bool) -> String 
             changes
                 .iter()
                 .map(|change| match change {
-                    ChapterChange::Added { chapter } => json!({
+                    UnitChange::Added { unit } => json!({
                         "kind": "added",
-                        "source_chapter_key": chapter.source_chapter_key,
-                        "ordinal": chapter.ordinal,
-                        "title": chapter.title,
+                        "source_unit_key": unit.source_unit_key,
+                        "ordinal": unit.ordinal,
+                        "title": unit.title,
                     }),
-                    ChapterChange::Removed { chapter } => json!({
+                    UnitChange::Removed { unit } => json!({
                         "kind": "removed",
-                        "source_chapter_key": chapter.source_chapter_key,
-                        "ordinal": chapter.ordinal,
-                        "title": chapter.title,
+                        "source_unit_key": unit.source_unit_key,
+                        "ordinal": unit.ordinal,
+                        "title": unit.title,
                     }),
-                    ChapterChange::Reordered {
-                        source_chapter_key,
+                    UnitChange::Reordered {
+                        source_unit_key,
                         from,
                         to,
                     } => json!({
                         "kind": "reordered",
-                        "source_chapter_key": source_chapter_key,
+                        "source_unit_key": source_unit_key,
                         "from": from,
                         "to": to,
                     }),
-                    ChapterChange::Retitled {
-                        source_chapter_key,
+                    UnitChange::Retitled {
+                        source_unit_key,
                         was,
                         now,
                     } => json!({
                         "kind": "retitled",
-                        "source_chapter_key": source_chapter_key,
+                        "source_unit_key": source_unit_key,
                         "was": was,
                         "now": now,
                     }),
@@ -1384,18 +1384,18 @@ fn report(plan: &ImportPlan, stored: &[StoredChapter], dry_run: bool) -> String 
         "removed": plan.removed(),
         "reordered": plan.reordered(),
         "retitled": plan.retitled(),
-        "stored": stored.iter().filter(|chapter| chapter.stored).count(),
-        "failed": stored.iter().filter(|chapter| !chapter.stored).count(),
-        "chapters": stored
+        "stored": stored.iter().filter(|unit| unit.stored).count(),
+        "failed": stored.iter().filter(|unit| !unit.stored).count(),
+        "units": stored
             .iter()
-            .map(|chapter| {
+            .map(|unit| {
                 json!({
-                    "ordinal": chapter.ordinal,
-                    "source_chapter_key": chapter.source_chapter_key,
-                    "title": chapter.title,
-                    "stored": chapter.stored,
-                    "checksum": chapter.checksum,
-                    "note": chapter.note,
+                    "ordinal": unit.ordinal,
+                    "source_unit_key": unit.source_unit_key,
+                    "title": unit.title,
+                    "stored": unit.stored,
+                    "checksum": unit.checksum,
+                    "note": unit.note,
                 })
             })
             .collect::<Vec<Value>>(),

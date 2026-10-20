@@ -329,7 +329,7 @@ pub struct CatalogueEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ChapterRef, Credentials, Fetcher, SourceCapabilities, SourceChapter, SourceWork};
+    use crate::{UnitRef, Credentials, Fetcher, SourceCapabilities, SourceUnit, SourceWork};
     use async_trait::async_trait;
 
     /// A stand-in adapter that claims one host and does nothing else.
@@ -375,9 +375,9 @@ mod tests {
                 status: crate::WorkStatus::Unknown,
                 published_at: None,
                 updated_at: None,
-                chapters: vec![ChapterRef {
+                units: vec![UnitRef {
                     ordinal: 1,
-                    source_chapter_key: "1".into(),
+                    source_unit_key: "1".into(),
                     title: "One".into(),
                 }],
                 rating_text: None,
@@ -385,12 +385,12 @@ mod tests {
                 tags: Vec::new(),
             })
         }
-        async fn fetch_chapters(
+        async fn fetch_units(
             &self,
             _fetch: &dyn Fetcher,
             _work: &SourceWork,
             _creds: Option<&Credentials>,
-        ) -> SourceResult<Vec<SourceChapter>> {
+        ) -> SourceResult<Vec<SourceUnit>> {
             Ok(Vec::new())
         }
     }

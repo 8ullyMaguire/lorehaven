@@ -807,7 +807,7 @@ impl TestDb {
 
     /// A scalar query matching a row by a UUID id, cast per backend.
     ///
-    /// `chapters.id` is TEXT on SQLite and UUID on PostgreSQL, so the
+    /// `units.id` is TEXT on SQLite and UUID on PostgreSQL, so the
     /// SQLite-shaped `WHERE id = ?` the rest of the suite writes is a type error
     /// on PG (`operator does not exist: uuid = text`). Callers pass the SQLite
     /// form and this rewrites the comparison, so a test asserting a stored value

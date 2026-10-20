@@ -173,7 +173,7 @@ async fn get_thread(
     match link {
         Some(l) => Ok(Json(json!({
             "topic_id": l.topic_id,
-            "chapter_id": l.chapter_id,
+            "unit_id": l.unit_id,
         }))),
         None => Err(ApiError(darkhold_domain::AppError::NotFound {
             resource: "thread",

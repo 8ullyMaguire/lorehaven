@@ -14,13 +14,20 @@ fn declared() -> CreditVesting {
 }
 
 #[test]
-fn a_new_instance_forbids_generated_content() {
-    // §51.1: `forbid` is the default, and that is the load-bearing default.
-    // `allow` is the only value that changes what the corpus IS.
+fn a_new_instance_allows_generated_content() {
+    // **§6.9: the default is `allow`** (D-4/N-4). The archive indexes and
+    // recommends AI-generated works, labelled as a declared attribute -- and the
+    // reason is about THIS archive and not about safety in the abstract: the
+    // owner's corpus has 8 of 54 works carrying `ai-generated text`, and **he
+    // writes them**. An archive whose default refuses the work its own author
+    // writes is an archive that refuses its author.
+    //
+    // `forbid` is still one value away, and an operator who wants nothing
+    // generated sets it.
     assert_eq!(
         GeneratedContentPosture::default(),
-        GeneratedContentPosture::Forbid,
-        "an instance that says nothing gets the safe posture, not the permissive one"
+        GeneratedContentPosture::Allow,
+        "an instance that says nothing accepts, and labels"
     );
 }
 

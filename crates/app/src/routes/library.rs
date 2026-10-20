@@ -423,7 +423,7 @@ async fn remove_from_shelf(
 struct BookmarkBody {
     subject_type: String,
     subject_id: String,
-    chapter_id: Option<String>,
+    unit_id: Option<String>,
     position_permille: Option<i64>,
     note: String,
     is_public: bool,
@@ -434,7 +434,7 @@ fn bookmark_json(row: &library::Bookmark) -> serde_json::Value {
         "id": row.id,
         "subject_type": row.subject_type,
         "subject_id": row.subject_id,
-        "chapter_id": row.chapter_id,
+        "unit_id": row.unit_id,
         "position_permille": row.position_permille,
         "note": row.note,
         "is_public": row.is_public,
@@ -489,7 +489,7 @@ async fn create_bookmark(
     if let Some(permille) = body.position_permille {
         if !(0..=1000).contains(&permille) {
             return Err(ApiError(AppError::Validation {
-                message: "a bookmark position is a thousandth of a chapter, so 0 to 1000"
+                message: "a bookmark position is a thousandth of a unit, so 0 to 1000"
                     .to_owned(),
                 field_errors: Default::default(),
             }));
@@ -501,7 +501,7 @@ async fn create_bookmark(
         &library::NewBookmark {
             subject_type: &body.subject_type,
             subject_id: &body.subject_id,
-            chapter_id: body.chapter_id.as_deref(),
+            unit_id: body.unit_id.as_deref(),
             position_permille: body.position_permille,
             note: &body.note,
             is_public: body.is_public,
@@ -676,7 +676,7 @@ fn item_json(
         "summary": row.summary,
         "language": row.language,
         "word_count": row.word_count,
-        "chapter_count": row.chapter_count,
+        "unit_count": row.unit_count,
         "source_display_name": source_display_name,
         "status": row.status,
         "source_updated_at": row.source_updated_at,

@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! https://archiveofourown.org/works/{work_id}
-//! https://archiveofourown.org/works/{work_id}/chapters/{chapter_id}
+//! https://archiveofourown.org/works/{work_id}/units/{chapter_id}
 //! https://archiveofourown.org/works/{work_id}?view_full_work=true
 //! ```
 //!
@@ -17,7 +17,7 @@
 //!
 //! # Capabilities
 //!
-//! Metadata, chapters, per-chapter fetch and bibliography are all available. The
+//! Metadata, units, per-chapter fetch and bibliography are all available. The
 //! chapter index on a work page carries each chapter's own id, so a single
 //! chapter can be re-read without touching the others, and an author's works are
 //! listed on their profile page.
@@ -39,8 +39,8 @@ use async_trait::async_trait;
 
 use crate::sanitize::sanitize_fragment;
 use crate::{
-    attr_of, collapse_whitespace, html_of, strip_tags, text_of, texts_of, ChapterRef, Credentials,
-    Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey,
+    attr_of, collapse_whitespace, html_of, strip_tags, text_of, texts_of, UnitRef, Credentials,
+    Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceError, SourceKey,
     SourceResult, SourceWork, Wall, WorkStatus,
 };
 
@@ -102,7 +102,7 @@ impl ArchiveSoftware {
         Some(id.to_owned())
     }
 
-    /// The chapter id in a `/works/{work}/chapters/{chapter}` path.
+    /// The chapter id in a `/works/{work}/units/{chapter}` path.
     fn chapter_id(url: &Url) -> Option<String> {
         let mut segments = url.path_segments()?;
         if segments.next()? != "works" || Self::work_id(url).is_none() {
@@ -195,8 +195,8 @@ impl ArchiveSoftware {
         // notes and progress are mapped onto are the source's, not a positional
         // guess. It is absent on a single-chapter work's page, which is why the
         // count above is the fallback.
-        let mut chapters = parse_chapter_index(&document);
-        if chapters.is_empty() {
+        let mut units = parse_chapter_index(&document);
+        if units.is_empty() {
             if is_adult_gate(&document) {
                 return Err(SourceError::AuthRequired(
                     "this work is behind the adult-content confirmation".to_owned(),
@@ -204,9 +204,9 @@ impl ArchiveSoftware {
             }
             let total = chapter_total.or(chapter_count).unwrap_or(0);
             for ordinal in 1..=total {
-                chapters.push(ChapterRef {
+                units.push(UnitRef {
                     ordinal,
-                    source_chapter_key: ordinal.to_string(),
+                    source_unit_key: ordinal.to_string(),
                     title: format!("Chapter {ordinal}"),
                 });
             }
@@ -246,7 +246,7 @@ impl ArchiveSoftware {
             status,
             published_at,
             updated_at,
-            chapters,
+            units,
             rating_text,
             warning_texts,
             tags,
@@ -254,7 +254,7 @@ impl ArchiveSoftware {
     }
 
     /// Parse the chapter bodies out of a whole-work page.
-    fn parse_chapters(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceChapter>> {
+    fn parse_chapters(&self, html: &str, work: &SourceWork) -> SourceResult<Vec<SourceUnit>> {
         let document = Html::parse_document(html);
         if is_not_found(&document) {
             return Err(SourceError::NotFound);
@@ -276,7 +276,7 @@ impl ArchiveSoftware {
         let body_selector =
             Selector::parse("div.userstuff.module[role=article]").expect("static selector");
 
-        let mut chapters = Vec::new();
+        let mut units = Vec::new();
         for element in document.select(&chapter_selector) {
             // The ordinal comes from the id the site generated, not from the
             // position in the document, so an unexpected extra element cannot
@@ -286,12 +286,12 @@ impl ArchiveSoftware {
                 .attr("id")
                 .and_then(|id| id.strip_prefix("chapter-"))
                 .and_then(|n| n.parse::<u32>().ok())
-                .unwrap_or((chapters.len() + 1) as u32);
+                .unwrap_or((units.len() + 1) as u32);
 
             // The chapter's own link gives its id, which is the stable key. A
             // chapter with no link keeps the ordinal, which is stable across a
             // re-import of an unchanged work.
-            let source_chapter_key = element
+            let source_unit_key = element
                 .select(&title_selector)
                 .next()
                 .and_then(|title| {
@@ -311,10 +311,10 @@ impl ArchiveSoftware {
                 })
                 .and_then(|link| Self::chapter_id(&link))
                 .unwrap_or_else(|| {
-                    work.chapters
+                    work.units
                         .iter()
                         .find(|candidate| candidate.ordinal == ordinal)
-                        .map_or_else(|| ordinal.to_string(), |c| c.source_chapter_key.clone())
+                        .map_or_else(|| ordinal.to_string(), |c| c.source_unit_key.clone())
                 });
 
             let raw_title = element
@@ -353,22 +353,22 @@ impl ArchiveSoftware {
                 )));
             }
 
-            chapters.push(SourceChapter {
+            units.push(SourceUnit {
                 ordinal,
-                source_chapter_key,
+                source_unit_key,
                 title,
                 content_html,
                 image_urls,
             });
         }
 
-        if chapters.is_empty() {
+        if units.is_empty() {
             return Err(SourceError::Parse(format!(
                 "no chapters found on the page for work {}; the source's markup has changed",
                 work.source_work_key
             )));
         }
-        Ok(chapters)
+        Ok(units)
     }
 }
 
@@ -385,8 +385,8 @@ impl SourceAdapter for ArchiveSoftware {
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
-            chapters: true,
-            per_chapter_fetch: true,
+            units: true,
+            per_unit_fetch: true,
             bibliography: true,
             // The stats block carries a published date but not a revision
             // marker, so "has this changed?" still needs the work page. Reading
@@ -431,12 +431,12 @@ impl SourceAdapter for ArchiveSoftware {
         self.parse_work(&page.body, &parsed)
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         let mut target = format!(
             "{}?view_full_work=true",
             self.work_url(&work.source_work_key)
@@ -448,18 +448,18 @@ impl SourceAdapter for ArchiveSoftware {
         self.parse_chapters(&page.body, work)
     }
 
-    async fn fetch_chapter(
+    async fn fetch_unit(
         &self,
         fetch: &dyn Fetcher,
         work: &SourceWork,
         ordinal: u32,
         creds: Option<&Credentials>,
-    ) -> SourceResult<SourceChapter> {
+    ) -> SourceResult<SourceUnit> {
         // The chapter id comes from the work's own index, so a retry re-reads
         // exactly one chapter and the source needs no extra request to work it
         // out.
         let chapter = work
-            .chapters
+            .units
             .iter()
             .find(|candidate| candidate.ordinal == ordinal)
             .ok_or_else(|| {
@@ -469,7 +469,7 @@ impl SourceAdapter for ArchiveSoftware {
                 ))
             })?;
         if !chapter
-            .source_chapter_key
+            .source_unit_key
             .chars()
             .all(|c| c.is_ascii_digit())
         {
@@ -480,21 +480,21 @@ impl SourceAdapter for ArchiveSoftware {
         }
         let mut target = format!(
             "https://{}/works/{}/chapters/{}",
-            self.hosts[0], work.source_work_key, chapter.source_chapter_key
+            self.hosts[0], work.source_work_key, chapter.source_unit_key
         );
         if creds.is_some_and(|creds| creds.adult_allowed) {
             target.push_str("?view_adult=true");
         }
         let page = fetch.get(&target).await?;
-        let mut chapters = self.parse_chapters(&page.body, work)?;
+        let mut units = self.parse_chapters(&page.body, work)?;
         // A chapter page holds one `div.chapter`; its position on the page is
         // not its position in the work, so the ordinal is restored from the
         // request rather than trusted from the parse.
-        chapters
+        units
             .pop()
             .map(|mut found| {
                 found.ordinal = ordinal;
-                found.source_chapter_key = chapter.source_chapter_key.clone();
+                found.source_unit_key = chapter.source_unit_key.clone();
                 if found.title.is_empty() {
                     found.title = chapter.title.clone();
                 }
@@ -547,11 +547,11 @@ impl SourceAdapter for ArchiveSoftware {
         self.parse_work(html, url)
     }
 
-    fn chapters_from_html(
+    fn units_from_html(
         &self,
         html: &str,
         work: &SourceWork,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         self.parse_chapters(html, work)
     }
 }
@@ -638,7 +638,7 @@ fn is_adult_gate(document: &Html) -> bool {
         .unwrap_or(false)
 }
 
-/// `dd.chapters` reads `3/3` or `10/30`, or just `12` for a single-chapter work.
+/// `dd.units` reads `3/3` or `10/30`, or just `12` for a single-chapter work.
 ///
 /// Returns the number posted and, when the source states one, the number
 /// planned. The distinction matters: a work that says `10/30` is ongoing even if
@@ -663,7 +663,7 @@ fn parse_count(raw: &str) -> Option<u32> {
 }
 
 /// The chapter index's options, in order.
-fn parse_chapter_index(document: &Html) -> Vec<ChapterRef> {
+fn parse_chapter_index(document: &Html) -> Vec<UnitRef> {
     let Ok(selector) = Selector::parse("select#selected_id option") else {
         return Vec::new();
     };
@@ -678,9 +678,9 @@ fn parse_chapter_index(document: &Html) -> Vec<ChapterRef> {
             let ordinal = (index + 1) as u32;
             let label = collapse_whitespace(&option.text().collect::<String>());
             let title = clean_chapter_title(&label, ordinal);
-            Some(ChapterRef {
+            Some(UnitRef {
                 ordinal,
-                source_chapter_key: value.to_owned(),
+                source_unit_key: value.to_owned(),
                 title,
             })
         })

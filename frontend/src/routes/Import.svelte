@@ -12,10 +12,10 @@
    * Three deliberate choices:
    *
    *  * **The plan is shown as actions, not as a diff of counts.** "Adds 12
-   *    chapters" is a number; the reader confirming an import wants to know
+   *    units" is a number; the reader confirming an import wants to know
    *    what will change.
    *  * **A dry run is offered rather than implied.** It records the plan and
-   *    stores no chapter, which is the honest way to answer "what would this
+   *    stores no unit, which is the honest way to answer "what would this
    *    do" for a work somebody is unsure about.
    *  * **Capability absence is stated.** A source this build cannot read is not
    *    offered silently; the catalogue says which sources exist and what each
@@ -26,7 +26,7 @@
     fetchImportSources,
     fetchImports,
     previewImport,
-    retryFailedChapters,
+    retryFailedUnits,
     startImport,
     type ImportJobView,
     type ImportSource,
@@ -155,7 +155,7 @@
     busy = row.id;
     error = null;
     try {
-      await retryFailedChapters(row.id);
+      await retryFailedUnits(row.id);
       await load({ quiet: true });
     } catch (failure) {
       error = failure;
@@ -168,7 +168,7 @@
    * Queue the same address again.
    *
    * This is the update check: a preview of a work already held answers
-   * `update` or `no_change` with the chapters that moved, so asking again is
+   * `update` or `no_change` with the units that moved, so asking again is
    * how the reader learns a source has published more.
    */
   function checkForUpdates(row: ImportJobView) {
@@ -265,7 +265,7 @@
       label="Address of the work"
       bind:value={url}
       placeholder="https://www.royalroad.com/fiction/21220/…"
-      hint="The page of the work itself, not a chapter of it."
+      hint="The page of the work itself, not a unit of it."
       required
     />
     <div class="actions">
@@ -295,7 +295,7 @@
           on {sourceLabel(preview.source_key)}
         </p>
         <ul class="facts">
-          <li>{preview.chapter_count} {preview.chapter_count === 1 ? 'chapter' : 'chapters'}</li>
+          <li>{preview.unit_count} {preview.unit_count === 1 ? 'unit' : 'units'}</li>
           {#if preview.word_count !== null}
             <li>{preview.word_count.toLocaleString()} words</li>
           {/if}
@@ -329,15 +329,15 @@
 
       <p class="plan" data-plan={preview.plan.plan}>{describe(preview.plan)}</p>
 
-      {#if preview.chapters.length > 0}
-        <details class="chapters">
-          <summary>{preview.chapter_count} chapters, as the source lists them</summary>
+      {#if preview.units.length > 0}
+        <details class="units">
+          <summary>{preview.unit_count} units, as the source lists them</summary>
           <ol>
-            {#each preview.chapters.slice(0, 200) as chapter (chapter.ordinal)}
-              <li>{chapter.title || `Chapter ${chapter.ordinal}`}</li>
+            {#each preview.units.slice(0, 200) as unit (unit.ordinal)}
+              <li>{unit.title || `Unit ${unit.ordinal}`}</li>
             {/each}
           </ol>
-          {#if preview.chapters.length > 200}
+          {#if preview.units.length > 200}
             <p class="note">Showing the first 200. All of them would be imported.</p>
           {/if}
         </details>
@@ -347,11 +347,11 @@
         <Select label="Destination" bind:value={destination} options={destinations} />
         <label class="dry-run">
           <input type="checkbox" bind:checked={dryRun} />
-          Dry run — record what would happen and store no chapters
+          Dry run — record what would happen and store no units
         </label>
         <div class="actions">
           <Button onclick={confirm} loading={starting} disabled={destination !== 'library'}>
-            {dryRun ? 'Run without storing' : `Import ${preview.chapter_count} chapters`}
+            {dryRun ? 'Run without storing' : `Import ${preview.unit_count} units`}
           </Button>
           <Button
             variant="quiet"
@@ -432,9 +432,9 @@
                   size="sm"
                   onclick={() => retry(row)}
                   disabled={busy === row.id}
-                  aria-label={`Retry the failed chapters of ${row.source_url}`}
+                  aria-label={`Retry the failed units of ${row.source_url}`}
                 >
-                  {busy === row.id ? 'Queueing…' : 'Retry failed chapters'}
+                  {busy === row.id ? 'Queueing…' : 'Retry failed units'}
                 </Button>
               {/if}
               {#if row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled'}
@@ -458,7 +458,7 @@
     <h2 id="sources-heading">Sources</h2>
     <p class="note">
       What this instance can read, and what each source is able to do. A source that cannot list
-      chapters says so here rather than returning an empty work.
+      units says so here rather than returning an empty work.
     </p>
 
     {#if loading}
@@ -470,7 +470,7 @@
             <span class="source-name">{source.display_name}</span>
             <span class="meta">
               {source.adapter_version} · {source.health}
-              {source.capabilities.per_chapter_fetch ? ' · per-chapter fetch' : ''}
+              {source.capabilities.per_unit_fetch ? ' · per-unit fetch' : ''}
               {source.capabilities.authentication && source.capabilities.authentication !== 'none'
                 ? ` · needs ${source.capabilities.authentication}`
                 : ''}
@@ -571,11 +571,11 @@
     margin: var(--space-4) 0;
   }
 
-  .chapters {
+  .units {
     margin: var(--space-4) 0;
   }
 
-  .chapters ol {
+  .units ol {
     columns: 2;
     max-width: 60rem;
   }

@@ -1,5 +1,5 @@
 /**
- * Autosave for the chapter editor (spec §8.3).
+ * Autosave for the unit editor (spec §8.3).
  *
  * ```text
  * debounce → local recovery save → versioned server update → visible state
@@ -74,7 +74,7 @@ export interface RecoveredDraft {
 
 const DEFAULT_DEBOUNCE_MS = 1200;
 
-export class ChapterAutosave {
+export class UnitAutosave {
   private readonly options: AutosaveOptions;
   private readonly storage: Storage | null;
   private readonly now: () => number;
@@ -232,7 +232,7 @@ export class ChapterAutosave {
       if (failure instanceof ApiError && failure.code === 'REVISION_CONFLICT') {
         this.setState(
           'conflict',
-          'This chapter changed somewhere else. Your text is kept — reload the other version or save yours over it.',
+          'This unit changed somewhere else. Your text is kept — reload the other version or save yours over it.',
         );
       } else if (
         failure instanceof ApiError &&

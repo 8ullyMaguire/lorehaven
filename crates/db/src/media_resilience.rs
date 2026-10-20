@@ -52,7 +52,7 @@ pub struct AvailabilityLinkRow {
 pub struct WorkMediaReference {
     pub id: String,
     pub work_id: String,
-    pub chapter_id: Option<String>,
+    pub unit_id: Option<String>,
     pub media_reference_id: String,
     pub context: String,
     pub display_url: String,
@@ -66,7 +66,7 @@ pub struct WorkMediaReference {
 pub struct WorkMediaReferenceView {
     pub id: String,
     pub work_id: String,
-    pub chapter_id: Option<String>,
+    pub unit_id: Option<String>,
     pub context: String,
     pub display_url: String,
     pub author_note: Option<String>,
@@ -437,7 +437,7 @@ pub async fn insert_work_media_reference(
     db: &Database,
     id: &str,
     work_id: &str,
-    chapter_id: Option<&str>,
+    unit_id: Option<&str>,
     media_reference_id: &str,
     context: MediaContextKind,
     display_url: &str,
@@ -446,12 +446,12 @@ pub async fn insert_work_media_reference(
     let sql = sql_owned(
         db,
         "INSERT INTO work_media_references
-            (id, work_id, chapter_id, media_reference_id, context, display_url, author_note)
+            (id, work_id, unit_id, media_reference_id, context, display_url, author_note)
          VALUES (?, ?, ?, ?, ?, ?, ?)"
             .to_string(),
         // Four UUID columns.
         "INSERT INTO work_media_references
-            (id, work_id, chapter_id, media_reference_id, context, display_url, author_note)
+            (id, work_id, unit_id, media_reference_id, context, display_url, author_note)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7)"
             .to_string(),
     );
@@ -460,7 +460,7 @@ pub async fn insert_work_media_reference(
             sqlx::query(&sql)
                 .bind(id)
                 .bind(work_id)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .bind(media_reference_id)
                 .bind(context.as_str())
                 .bind(display_url)
@@ -472,7 +472,7 @@ pub async fn insert_work_media_reference(
             sqlx::query(&sql)
                 .bind(id)
                 .bind(work_id)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .bind(media_reference_id)
                 .bind(context.as_str())
                 .bind(display_url)
@@ -490,14 +490,14 @@ pub async fn find_work_media_references(
 ) -> Result<Vec<WorkMediaReference>> {
     let sql = sql_owned(
         db,
-        "SELECT id, work_id, chapter_id, media_reference_id, context, display_url,
+        "SELECT id, work_id, unit_id, media_reference_id, context, display_url,
                 author_note, inserted_at, deleted_at
          FROM work_media_references
          WHERE work_id = ? AND deleted_at IS NULL"
             .to_string(),
         // `WorkMediaReference` is all String, so the three UUIDs and the two
         // TIMESTAMPTZs are cast here as well as in the SQLite arm above.
-        "SELECT id::text, work_id::text, chapter_id::text, media_reference_id::text,
+        "SELECT id::text, work_id::text, unit_id::text, media_reference_id::text,
                 context, display_url, author_note,
                 inserted_at::text, deleted_at::text
          FROM work_media_references
@@ -527,7 +527,7 @@ pub async fn find_work_media_references(
 /// The result of rescuing media for one import.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportMediaSummary {
-    /// Number of image URLs found across all chapters.
+    /// Number of image URLs found across all units.
     pub total_urls: usize,
     /// Number of those URLs already held as media references.
     pub already_held: usize,
@@ -546,7 +546,7 @@ pub struct ImportMediaSummary {
 pub async fn upsert_media_reference_for_import(
     db: &Database,
     work_id: &str,
-    chapter_id: Option<&str>,
+    unit_id: Option<&str>,
     url: &str,
 ) -> Result<(bool, String)> {
     // Check for an existing availability link with this exact URL. The join
@@ -607,7 +607,7 @@ pub async fn upsert_media_reference_for_import(
         db,
         &Uuid::new_v4().to_string(),
         work_id,
-        chapter_id,
+        unit_id,
         &reference_id,
         MediaContextKind::InlineEmbed,
         url,
@@ -1056,7 +1056,7 @@ pub async fn list_work_media_references(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let rows = sqlx::query(
-                "SELECT id, work_id, chapter_id, context, display_url, author_note, inserted_at
+                "SELECT id, work_id, unit_id, context, display_url, author_note, inserted_at
                  FROM work_media_references
                  WHERE work_id = ? AND deleted_at IS NULL
                  ORDER BY inserted_at",
@@ -1067,7 +1067,7 @@ pub async fn list_work_media_references(
             for row in rows {
                 let id: String = row.get("id");
                 let work_id: String = row.get("work_id");
-                let chapter_id: Option<String> = row.get("chapter_id");
+                let unit_id: Option<String> = row.get("unit_id");
                 let context: String = row.get("context");
                 let display_url: String = row.get("display_url");
                 let author_note: Option<String> = row.get("author_note");
@@ -1078,7 +1078,7 @@ pub async fn list_work_media_references(
                 out.push(build_media_ref_view(
                     id,
                     work_id,
-                    chapter_id,
+                    unit_id,
                     context,
                     display_url,
                     author_note,
@@ -1093,7 +1093,7 @@ pub async fn list_work_media_references(
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
                 // Read into Strings: three UUIDs and a TIMESTAMPTZ.
-                "SELECT id::text, work_id::text, chapter_id::text, context,
+                "SELECT id::text, work_id::text, unit_id::text, context,
                         display_url, author_note, inserted_at::text
                  FROM work_media_references
                  WHERE work_id = $1::uuid AND deleted_at IS NULL
@@ -1105,7 +1105,7 @@ pub async fn list_work_media_references(
             for row in rows {
                 let id: String = row.get("id");
                 let work_id: String = row.get("work_id");
-                let chapter_id: Option<String> = row.get("chapter_id");
+                let unit_id: Option<String> = row.get("unit_id");
                 let context: String = row.get("context");
                 let display_url: String = row.get("display_url");
                 let author_note: Option<String> = row.get("author_note");
@@ -1116,7 +1116,7 @@ pub async fn list_work_media_references(
                 out.push(build_media_ref_view(
                     id,
                     work_id,
-                    chapter_id,
+                    unit_id,
                     context,
                     display_url,
                     author_note,
@@ -1137,7 +1137,7 @@ pub async fn list_work_media_references(
 fn build_media_ref_view(
     id: String,
     work_id: String,
-    chapter_id: Option<String>,
+    unit_id: Option<String>,
     context: String,
     display_url: String,
     author_note: Option<String>,
@@ -1149,7 +1149,7 @@ fn build_media_ref_view(
     WorkMediaReferenceView {
         id,
         work_id,
-        chapter_id,
+        unit_id,
         context,
         display_url,
         author_note,
@@ -1579,7 +1579,7 @@ pub async fn get_author_preferences(
 pub struct TargetedBounty {
     pub id: String,
     pub work_id: String,
-    pub chapter_id: Option<String>,
+    pub unit_id: Option<String>,
     pub media_reference_id: Option<String>,
     pub account_id: String,
     pub reward: i64,
@@ -1597,7 +1597,7 @@ pub async fn post_targeted_bounty(
     db: &Database,
     id: &str,
     work_id: &str,
-    chapter_id: Option<&str>,
+    unit_id: Option<&str>,
     media_reference_id: Option<&str>,
     account_id: &str,
     reward: i64,
@@ -1611,13 +1611,13 @@ pub async fn post_targeted_bounty(
                 // The five ids are TEXT on this table; the two timestamps are
                 // TIMESTAMPTZ and `now` arrives as an RFC 3339 string.
                 "INSERT INTO targeted_bounties
-                    (id, work_id, chapter_id, media_reference_id, account_id,
+                    (id, work_id, unit_id, media_reference_id, account_id,
                      reward, status, description, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
             )
             .bind(id)
             .bind(work_id)
-            .bind(chapter_id)
+            .bind(unit_id)
             .bind(media_reference_id)
             .bind(account_id)
             .bind(reward)
@@ -1631,13 +1631,13 @@ pub async fn post_targeted_bounty(
             let pool = db.postgres_pool().expect("postgres");
             sqlx::query(
                 "INSERT INTO targeted_bounties
-                    (id, work_id, chapter_id, media_reference_id, account_id,
+                    (id, work_id, unit_id, media_reference_id, account_id,
                      reward, status, description, created_at, updated_at)
                  VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8::timestamptz, $8::timestamptz)",
             )
             .bind(id)
             .bind(work_id)
-            .bind(chapter_id)
+            .bind(unit_id)
             .bind(media_reference_id)
             .bind(account_id)
             .bind(reward)
@@ -1701,7 +1701,7 @@ pub async fn list_targeted_bounties_for_work(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let rows = sqlx::query(
-                "SELECT id, work_id, chapter_id, media_reference_id, account_id,
+                "SELECT id, work_id, unit_id, media_reference_id, account_id,
                         reward, status, description, claimed_by, created_at
                  FROM targeted_bounties WHERE work_id = ? ORDER BY created_at DESC",
             )
@@ -1713,7 +1713,7 @@ pub async fn list_targeted_bounties_for_work(
                 .map(|r| TargetedBounty {
                     id: r.get::<String, _>("id"),
                     work_id: r.get::<String, _>("work_id"),
-                    chapter_id: r.get::<Option<String>, _>("chapter_id"),
+                    unit_id: r.get::<Option<String>, _>("unit_id"),
                     media_reference_id: r.get::<Option<String>, _>("media_reference_id"),
                     account_id: r.get::<String, _>("account_id"),
                     reward: r.get::<i64, _>("reward"),
@@ -1729,7 +1729,7 @@ pub async fn list_targeted_bounties_for_work(
             let rows = sqlx::query(
                 // Read into String/i64: `reward` is INTEGER, so widen it, and
                 // `created_at` is TIMESTAMPTZ, so render it as text.
-                "SELECT id, work_id, chapter_id, media_reference_id, account_id,
+                "SELECT id, work_id, unit_id, media_reference_id, account_id,
                         reward::bigint, status, description, claimed_by,
                         created_at::text
                  FROM targeted_bounties WHERE work_id = $1 ORDER BY created_at DESC",
@@ -1742,7 +1742,7 @@ pub async fn list_targeted_bounties_for_work(
                 .map(|r| TargetedBounty {
                     id: r.get::<String, _>("id"),
                     work_id: r.get::<String, _>("work_id"),
-                    chapter_id: r.get::<Option<String>, _>("chapter_id"),
+                    unit_id: r.get::<Option<String>, _>("unit_id"),
                     media_reference_id: r.get::<Option<String>, _>("media_reference_id"),
                     account_id: r.get::<String, _>("account_id"),
                     reward: r.get::<i64, _>("reward"),

@@ -96,7 +96,7 @@
   }
 
   const authorView = $derived(work !== null && isAuthorWork(work) ? (work as AuthorWork) : null);
-  const firstChapterId = $derived(work && work.chapters.length > 0 ? work.chapters[0].id : null);
+  const firstUnitId = $derived(work && work.units.length > 0 ? work.units[0].id : null);
 
   $effect(() => {
     void load();
@@ -360,21 +360,21 @@
   {/if}
 
   {#if progress && progress.resolution.kind !== 'no_position'}
-    <ResumePrompt workId={workId} resolution={progress.resolution} firstChapterId={firstChapterId} />
+    <ResumePrompt workId={workId} resolution={progress.resolution} firstUnitId={firstUnitId} />
   {/if}
 
-  <h2>Chapters</h2>
-  {#if work.chapters.length === 0}
-    <p class="note">This work has no chapters.</p>
+  <h2>Units</h2>
+  {#if work.units.length === 0}
+    <p class="note">This work has no units.</p>
   {:else}
-    <ol class="chapters">
-      {#each work.chapters as chapter (chapter.id)}
-        {@const chapterHref = `${workHref}/chapters/${chapter.id}`}
+    <ol class="units">
+      {#each work.units as unit (unit.id)}
+        {@const unitHref = `${workHref}/units/${unit.id}`}
         <li>
-          <a href={chapterHref} onclick={(event) => handleLinkClick(event, chapterHref)}>
-            {chapter.title.trim() === '' ? 'Untitled chapter' : chapter.title}
+          <a href={unitHref} onclick={(event) => handleLinkClick(event, unitHref)}>
+            {unit.title.trim() === '' ? 'Untitled unit' : unit.title}
           </a>
-          <span class="note">{chapter.word_count} words</span>
+          <span class="note">{unit.word_count} words</span>
         </li>
       {/each}
     </ol>
@@ -501,7 +501,7 @@
     font-size: var(--text-sm);
   }
 
-  .chapters {
+  .units {
     padding-left: var(--space-5);
     display: flex;
     flex-direction: column;

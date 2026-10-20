@@ -929,7 +929,7 @@ async fn contribution_older_than_the_window_is_not_counted() {
 
 #[tokio::test]
 async fn a_bookmark_on_something_other_than_a_work_does_not_count() {
-    // The fixed query filters `subject_type = 'work'`; without it a chapter
+    // The fixed query filters `subject_type = 'work'`; without it a unit
     // bookmark would read as a work contribution.
     let h = Db::new("sel-subject").await;
     let account = h.account().await;

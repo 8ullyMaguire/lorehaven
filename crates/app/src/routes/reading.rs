@@ -85,7 +85,7 @@ struct ProgressRequest {
     subject_type: String,
     subject_id: String,
     #[serde(default)]
-    chapter_id: Option<String>,
+    unit_id: Option<String>,
     #[serde(default)]
     content_revision: Option<String>,
     #[serde(default)]
@@ -335,7 +335,7 @@ async fn save_progress(
             pseud: Some(pseud_id),
             subject_type: &request.subject_type,
             subject_id: &request.subject_id,
-            chapter_id: request.chapter_id.as_deref(),
+            unit_id: request.unit_id.as_deref(),
             revision,
             anchor: request.paragraph_anchor.as_deref(),
             fraction: request.position_permille.unwrap_or(0),

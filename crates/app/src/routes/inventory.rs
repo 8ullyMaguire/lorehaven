@@ -448,28 +448,28 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "works.rs",
-        handler: "add_chapter",
+        handler: "add_unit",
         method: "POST",
         path: "/works/{id}/chapters",
         audience: Audience::Authenticated,
     },
     RouteEntry {
         file: "works.rs",
-        handler: "reorder_chapters",
+        handler: "reorder_units",
         method: "POST",
-        path: "/works/{id}/reorder-chapters",
+        path: "/works/{id}/reorder-units",
         audience: Audience::Authenticated,
     },
     RouteEntry {
         file: "works.rs",
-        handler: "update_chapter",
+        handler: "update_unit",
         method: "PATCH",
         path: "/chapters/{id}",
         audience: Audience::Authenticated,
     },
     RouteEntry {
         file: "works.rs",
-        handler: "delete_chapter",
+        handler: "delete_unit",
         method: "DELETE",
         path: "/chapters/{id}",
         audience: Audience::Authenticated,
@@ -497,9 +497,9 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "works.rs",
-        handler: "read_chapter",
+        handler: "read_unit",
         method: "GET",
-        path: "/works/{id}/chapters/{chapter}",
+        path: "/works/{id}/chapters/{unit}",
         audience: Audience::Public,
     },
     RouteEntry {
@@ -1059,9 +1059,9 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "imports.rs",
-        handler: "retry_failed_chapters",
+        handler: "retry_failed_units",
         method: "POST",
-        path: "/imports/{id}/retry-failed-chapters",
+        path: "/imports/{id}/retry-failed-units",
         audience: Audience::Authenticated,
     },
     RouteEntry {

@@ -521,8 +521,8 @@ pub async fn get_arena_pool(
                  FROM works w
                  LEFT JOIN (
                      SELECT c.work_id, CAST(SUM(cr.word_count) AS BIGINT) as word_count
-                     FROM chapters c
-                     JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                     FROM units c
+                     JOIN revisions cr ON cr.id = c.current_revision_id
                      GROUP BY c.work_id
                  ) wc ON w.id = wc.work_id
                  WHERE w.lifecycle = 'published'
@@ -576,8 +576,8 @@ pub async fn get_arena_pool(
                  FROM works w
                  LEFT JOIN (
                      SELECT c.work_id, SUM(cr.word_count) as word_count
-                     FROM chapters c
-                     JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                     FROM units c
+                     JOIN revisions cr ON cr.id = c.current_revision_id
                      GROUP BY c.work_id
                  ) wc ON w.id = wc.work_id
                  WHERE w.lifecycle = 'published'

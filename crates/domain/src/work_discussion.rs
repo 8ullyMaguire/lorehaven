@@ -20,7 +20,7 @@ pub enum WorkDiscussionMode {
     /// Typed-vote reaction bar on the work page; text discussion lives in
     /// the linked forum thread. The Darkhold default.
     ThreadOnly,
-    /// Inline work/chapter comments, no forum link (legacy surface).
+    /// Inline work/unit comments, no forum link (legacy surface).
     #[default]
     CommentsOnly,
     /// Both surfaces; splits conversation and is admin-warned.

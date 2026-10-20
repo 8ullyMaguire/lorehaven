@@ -69,18 +69,18 @@ async function signOut(page: Page): Promise<void> {
   await signOutThroughHeader(page);
 }
 
-/** Write, save and publish a one-chapter work; returns its id. */
+/** Write, save and publish a one-unit work; returns its id. */
 async function publish(page: Page, title: string): Promise<string> {
   await page.goto('/write');
   await page.fill('input[id^=field-]', title);
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type(`A chapter written for ${title}. It has enough words to export.`);
+  await page.keyboard.type(`A unit written for ${title}. It has enough words to export.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -260,8 +260,8 @@ test('reader: a reader changes the font size and it survives a reload', async ({
   test.setTimeout(120_000);
   await ensureAccount(page, author);
   const workId = await publish(page, 'The Comfortable Reader');
-  await page.goto(`/works/${workId}/chapters/`);
-  // Fall back to the work page if the chapter URL shape differs.
+  await page.goto(`/works/${workId}/units/`);
+  // Fall back to the work page if the unit URL shape differs.
   await page.goto(`/works/${workId}`);
   // `#main` + level 1: the Similar Works rail renders `Similar to “<title>”` as an h2, and
   // Playwright's `name` matches substrings. See extended.spec.ts for the full account.
@@ -270,16 +270,16 @@ test('reader: a reader changes the font size and it survives a reload', async ({
   ).toBeVisible();
 });
 
-test('work: the work page shows the chapter the author wrote', async ({ page }) => {
+test('work: the work page shows the unit the author wrote', async ({ page }) => {
   test.setTimeout(120_000);
   await ensureAccount(page, author);
-  const workId = await publish(page, 'The Visible Chapter');
+  const workId = await publish(page, 'The Visible Unit');
   await page.goto(`/works/${workId}`);
-  // The work page lists chapters by title; clicking one opens the reader.
+  // The work page lists units by title; clicking one opens the reader.
   await expect(
-    page.locator('#main').getByRole('heading', { name: 'The Visible Chapter', level: 1 }),
+    page.locator('#main').getByRole('heading', { name: 'The Visible Unit', level: 1 }),
   ).toBeVisible();
-  await expect(page.locator('.chapters li').first()).toBeVisible();
+  await expect(page.locator('.units li').first()).toBeVisible();
 });
 
 test('work: a signed-out visitor can read a published work', async ({ page }) => {
@@ -291,7 +291,7 @@ test('work: a signed-out visitor can read a published work', async ({ page }) =>
   await expect(
     page.locator('#main').getByRole('heading', { name: 'The Public Work', level: 1 }),
   ).toBeVisible();
-  await expect(page.locator('.chapters li').first()).toBeVisible();
+  await expect(page.locator('.units li').first()).toBeVisible();
 });
 
 test('write: a draft stays private until published', async ({ page }) => {
@@ -301,12 +301,12 @@ test('write: a draft stays private until published', async ({ page }) => {
   await page.fill('input[id^=field-]', 'The Secret Draft');
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
   await page.keyboard.type('Draft text nobody else can see yet.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

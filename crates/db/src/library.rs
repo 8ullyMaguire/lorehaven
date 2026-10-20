@@ -34,7 +34,7 @@ use darkhold_domain::library::{
 
 use crate::identity::now_rfc3339;
 use crate::imports::{
-    decode_library_item, LibraryItem, LibraryItemRow, LIBRARY_CHAPTER_COUNT, LIBRARY_COLUMNS,
+    decode_library_item, LibraryItem, LibraryItemRow, LIBRARY_UNIT_COUNT, LIBRARY_COLUMNS,
     LIBRARY_COLUMNS_PG,
 };
 use crate::{rewrite_placeholders, sql_owned, Backend, Database};
@@ -471,9 +471,9 @@ pub struct Bookmark {
     pub subject_type: String,
     /// The bookmarked subject.
     pub subject_id: String,
-    /// The chapter, when the bookmark points into one.
-    pub chapter_id: Option<String>,
-    /// How far into the chapter, in permille.
+    /// The unit, when the bookmark points into one.
+    pub unit_id: Option<String>,
+    /// How far into the unit, in permille.
     pub position_permille: Option<i64>,
     /// The reader's own note.
     pub note: String,
@@ -493,7 +493,7 @@ struct BookmarkRow {
     account_id: String,
     subject_type: String,
     subject_id: String,
-    chapter_id: Option<String>,
+    unit_id: Option<String>,
     position_permille: Option<i64>,
     note: String,
     is_public: i64,
@@ -502,11 +502,11 @@ struct BookmarkRow {
     version: i64,
 }
 
-const BOOKMARK_COLUMNS: &str = "id, account_id, subject_type, subject_id, chapter_id, \
+const BOOKMARK_COLUMNS: &str = "id, account_id, subject_type, subject_id, unit_id, \
      position_permille, note, is_public, created_at, updated_at, version";
 
 const BOOKMARK_COLUMNS_PG: &str = "id::text AS id, account_id::text AS account_id, subject_type, \
-     subject_id::text AS subject_id, chapter_id::text AS chapter_id, position_permille, note, \
+     subject_id::text AS subject_id, unit_id::text AS unit_id, position_permille, note, \
      is_public::int::bigint AS is_public, created_at, updated_at, version";
 
 fn decode_bookmark(row: BookmarkRow) -> Bookmark {
@@ -515,7 +515,7 @@ fn decode_bookmark(row: BookmarkRow) -> Bookmark {
         account_id: row.account_id,
         subject_type: row.subject_type,
         subject_id: row.subject_id,
-        chapter_id: row.chapter_id,
+        unit_id: row.unit_id,
         position_permille: row.position_permille,
         note: row.note,
         is_public: row.is_public != 0,
@@ -528,7 +528,7 @@ fn decode_bookmark(row: BookmarkRow) -> Bookmark {
 /// A bookmark about to be created.
 ///
 /// A struct rather than eight positional arguments, because five of them are
-/// strings and a caller who swaps `subject_id` and `chapter_id` would compile
+/// strings and a caller who swaps `subject_id` and `unit_id` would compile
 /// and then file the bookmark against the wrong row.
 #[derive(Debug, Clone, Default)]
 pub struct NewBookmark<'a> {
@@ -536,9 +536,9 @@ pub struct NewBookmark<'a> {
     pub subject_type: &'a str,
     /// The subject.
     pub subject_id: &'a str,
-    /// The chapter, when the bookmark points into one.
-    pub chapter_id: Option<&'a str>,
-    /// How far into the chapter, in permille.
+    /// The unit, when the bookmark points into one.
+    pub unit_id: Option<&'a str>,
+    /// How far into the unit, in permille.
     pub position_permille: Option<i64>,
     /// The reader's own note.
     pub note: &'a str,
@@ -563,7 +563,7 @@ pub async fn create_bookmark(
     let NewBookmark {
         subject_type,
         subject_id,
-        chapter_id,
+        unit_id,
         position_permille,
         note,
         is_public,
@@ -572,10 +572,10 @@ pub async fn create_bookmark(
     let id = uuid::Uuid::new_v4().to_string();
     let is_public_int: i64 = i64::from(is_public);
     let sql = db.sql(
-        "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, chapter_id, \
+        "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, unit_id, \
          position_permille, note, is_public, created_at, updated_at, version) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-        "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, chapter_id, \
+        "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, unit_id, \
          position_permille, note, is_public, created_at, updated_at, version) \
          VALUES (?::uuid, ?::uuid, ?, ?::uuid, ?::uuid, ?, ?, ?::int::boolean, ?, ?, 1)",
     );
@@ -584,7 +584,7 @@ pub async fn create_bookmark(
         .bind(account_id)
         .bind(subject_type)
         .bind(subject_id)
-        .bind(chapter_id)
+        .bind(unit_id)
         .bind(position_permille)
         .bind(note)
         .bind(is_public_int)
@@ -597,7 +597,7 @@ pub async fn create_bookmark(
         account_id: account_id.to_string(),
         subject_type: subject_type.to_string(),
         subject_id: subject_id.to_string(),
-        chapter_id: chapter_id.map(str::to_string),
+        unit_id: unit_id.map(str::to_string),
         position_permille,
         note: note.to_string(),
         is_public,
@@ -1782,12 +1782,12 @@ pub async fn query_library(
     let page_sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} {where_sqlite} \
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_UNIT_COUNT} {where_sqlite} \
              ORDER BY {} LIMIT ? OFFSET ?",
             order_by(query.sort)
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} {where_postgres} \
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_UNIT_COUNT} {where_postgres} \
              ORDER BY {} LIMIT ? OFFSET ?",
             order_by(query.sort)
         ),
@@ -1861,12 +1861,12 @@ pub async fn all_library_items(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_UNIT_COUNT} FROM library_items \
              WHERE library_items.account_id = ? \
              ORDER BY library_items.created_at ASC, library_items.id ASC LIMIT ?"
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_UNIT_COUNT} FROM library_items \
              WHERE library_items.account_id::text = ? \
              ORDER BY library_items.created_at ASC, library_items.id ASC LIMIT ?"
         ),
@@ -2388,7 +2388,7 @@ pub struct RemovalOutcome {
 /// for it (spec §14's acceptance list, "Removing an item distinguishes deleting a
 /// reference from deleting a private copy"). The item goes, and the references it
 /// held go with it, always — an item that no longer exists cannot own a stored
-/// chapter, and a reference left pointing at a deleted row is one no sweep will
+/// unit, and a reference left pointing at a deleted row is one no sweep will
 /// ever match.
 ///
 /// What `delete_copy` decides is **when the bytes follow**:
@@ -2463,7 +2463,7 @@ pub async fn remove_library_items(
 
     // The item's references go with it, always.
     //
-    // An item that no longer exists cannot own a stored chapter, and a reference
+    // An item that no longer exists cannot own a stored unit, and a reference
     // left pointing at a deleted row is one no sweep will ever match — it holds
     // the blob alive for ever while nothing can reach it. So the references are
     // dropped either way, and `delete_copy` decides *when* the bytes follow:

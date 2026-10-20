@@ -450,8 +450,8 @@ mod tests {
         // ALTER TABLE <name> ADD CONSTRAINT ... FOREIGN KEY (cols) REFERENCES t
         //
         // A circular reference cannot be declared inline, because the target
-        // does not exist yet. `chapters.current_revision_id` is the one case:
-        // `chapters` and `chapter_revisions` point at each other, so the
+        // does not exist yet. `units.current_revision_id` is the one case:
+        // `units` and `revisions` point at each other, so the
         // PostgreSQL file creates both and adds the constraint afterwards,
         // while SQLite resolves targets lazily and keeps it inline. Reading
         // only the inline form would report that documented difference as a

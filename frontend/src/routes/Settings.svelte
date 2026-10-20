@@ -104,7 +104,7 @@
 
   const COMMON_EVENTS = [
     'work_published',
-    'chapter_published',
+    'unit_published',
     'comment_received',
     'appreciation_received',
     'mention',

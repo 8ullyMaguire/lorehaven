@@ -16,8 +16,8 @@
 //! §49.8's wording is about bytes rather than about approximate numbers.
 
 use darkhold_domain::coordinates::{
-    coordinates, ChapterText, Coordinates, Corpus, Unmeasurable, WorkCoordinates,
-    DIM_CHAPTER_LENGTH_SPREAD, DIM_DIALOGUE_RATIO, DIM_SENTENCE_LENGTH_VARIANCE,
+    coordinates, UnitText, Coordinates, Corpus, Unmeasurable, WorkCoordinates,
+    DIM_UNIT_LENGTH_SPREAD, DIM_DIALOGUE_RATIO, DIM_SENTENCE_LENGTH_VARIANCE,
     DIM_VOCABULARY_RICHNESS, MIN_MEASURABLE_WORDS,
 };
 
@@ -42,35 +42,35 @@ fn sentence(words: usize) -> String {
         + "."
 }
 
-/// A chapter of `sentences` sentences, each `words` long, with `words` words in
+/// A unit of `sentences` sentences, each `words` long, with `words` words in
 /// total — so the stored `word_count` and the real text agree, which is what a
 /// caller at ingest would hand over.
-fn chapter(sentences: usize, words: usize) -> ChapterText {
+fn unit(sentences: usize, words: usize) -> UnitText {
     let text = (0..sentences)
         .map(|_| sentence(words))
         .collect::<Vec<_>>()
         .join(" ");
-    ChapterText {
+    UnitText {
         word_count: sentences * words,
         plain_text: text,
     }
 }
 
-/// A measurable multi-chapter work. The chapter mix varies a little so the text
-/// is not one string repeated — a corpus of identical chapters has degenerate
+/// A measurable multi-unit work. The unit mix varies a little so the text
+/// is not one string repeated — a corpus of identical units has degenerate
 /// measures and would let a bug pass.
-fn work_of(chapters: usize, words_each: usize, dialogue: usize) -> Corpus {
+fn work_of(units: usize, words_each: usize, dialogue: usize) -> Corpus {
     Corpus {
-        chapters: (0..chapters)
-            .map(|c| ChapterText {
+        units: (0..units)
+            .map(|c| UnitText {
                 word_count: words_each,
                 // `format!("marker{c}")` inside the args of another `format!` is
                 // just `c`: the inner call exists only to turn an integer into text,
                 // and the outer one already does that for every argument it is given.
-                // The marker is not cosmetic, though -- it is what keeps two chapters
+                // The marker is not cosmetic, though -- it is what keeps two units
                 // from being byte-identical, which is the degenerate corpus this
                 // fixture exists to avoid.
-                plain_text: format!("{} marker{c}", chapter(2, words_each / 4).plain_text),
+                plain_text: format!("{} marker{c}", unit(2, words_each / 4).plain_text),
             })
             .collect(),
         dialogue_words: dialogue,
@@ -98,7 +98,7 @@ fn the_same_text_gives_the_same_coordinates_every_time() {
     // an accidental dependence on `HashMap` seeding: two processes have different
     // hash seeds, so equal inputs in two builds must still agree.
     let twin = Corpus {
-        chapters: corpus.chapters.clone(),
+        units: corpus.units.clone(),
         dialogue_words: corpus.dialogue_words,
     };
     assert_eq!(
@@ -120,11 +120,11 @@ fn prose_style_separates_works_that_tags_cannot() {
     // different coordinates." Identical tags are the premise, so only the prose
     // varies here.
     let flat = Corpus {
-        chapters: vec![chapter(200, 20)],
+        units: vec![unit(200, 20)],
         dialogue_words: 0,
     };
     let varied = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 1900,
             plain_text: (0..40)
                 .map(|i| sentence(if i % 2 == 0 { 5 } else { 90 }))
@@ -158,7 +158,7 @@ fn a_work_under_the_minimum_length_has_no_coordinates() {
     // §49.8: "A work under the minimum measurable length has no coordinates and
     // does not rank against measured works."
     let short = Corpus {
-        chapters: vec![chapter(5, 20)],
+        units: vec![unit(5, 20)],
         dialogue_words: 0,
     };
     assert!(
@@ -177,7 +177,7 @@ fn a_work_under_the_minimum_length_has_no_coordinates() {
     // A work of exactly the threshold IS measurable, so the boundary is where it
     // says it is rather than one word inside it.
     let at_threshold = Corpus {
-        chapters: vec![chapter(MIN_MEASURABLE_WORDS / 20, 20)],
+        units: vec![unit(MIN_MEASURABLE_WORDS / 20, 20)],
         dialogue_words: 0,
     };
     assert_eq!(at_threshold.word_count(), MIN_MEASURABLE_WORDS);
@@ -194,7 +194,7 @@ fn an_absent_coordinate_is_not_a_zero() {
     // must travel with the absence.
     let empty = Corpus::default();
     let short = Corpus {
-        chapters: vec![chapter(3, 20)],
+        units: vec![unit(3, 20)],
         dialogue_words: 0,
     };
 
@@ -256,14 +256,14 @@ fn each_measure_separates_what_it_claims_to() {
 
     // Vocabulary richness: one word repeated, against all words distinct.
     let repetitive = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 500,
             plain_text: (0..500).map(|_| "same").collect::<Vec<_>>().join(" "),
         }],
         dialogue_words: 0,
     };
     let all_distinct = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 500,
             plain_text: (0..500)
                 .map(|i| format!("word{i}"))
@@ -286,7 +286,7 @@ fn each_measure_separates_what_it_claims_to() {
     );
     // Case-folding, because "The" and "the" are one word to a reader.
     let cased = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 500,
             plain_text: (0..500)
                 .map(|i| if i % 2 == 0 { "The" } else { "the" })
@@ -304,49 +304,49 @@ fn each_measure_separates_what_it_claims_to() {
         "case must not inflate the type count"
     );
 
-    // Chapter-length spread: even chapters against uneven ones, and a
-    // single-chapter work has no distribution at all.
+    // Unit-length spread: even units against uneven ones, and a
+    // single-unit work has no distribution at all.
     let even = Corpus {
-        chapters: vec![
-            chapter(40, 20),
-            chapter(40, 20),
-            chapter(40, 20),
-            chapter(40, 20),
+        units: vec![
+            unit(40, 20),
+            unit(40, 20),
+            unit(40, 20),
+            unit(40, 20),
         ],
         dialogue_words: 0,
     };
     let uneven = Corpus {
-        chapters: vec![
-            chapter(40, 20),
-            chapter(40, 20),
-            chapter(4, 20),
-            chapter(5, 20),
+        units: vec![
+            unit(40, 20),
+            unit(40, 20),
+            unit(4, 20),
+            unit(5, 20),
         ],
         dialogue_words: 0,
     };
     let e = coords_of(&even);
     let u = coords_of(&uneven);
     assert_eq!(
-        e.chapter_length_spread,
+        e.unit_length_spread,
         Some(0.0),
-        "equal chapters have no spread"
+        "equal units have no spread"
     );
     assert!(
-        u.chapter_length_spread.unwrap() > 0.0,
-        "uneven chapters must have spread"
+        u.unit_length_spread.unwrap() > 0.0,
+        "uneven units must have spread"
     );
 
-    // A single-chapter work: no distribution, so None — not 0.0, which would say
-    // "evenly sized chapters" about a work that has exactly one. The same
+    // A single-unit work: no distribution, so None — not 0.0, which would say
+    // "evenly sized units" about a work that has exactly one. The same
     // absent-is-not-a-zero mistake, one level down.
     let single = Corpus {
-        chapters: vec![chapter(60, 20)],
+        units: vec![unit(60, 20)],
         dialogue_words: 0,
     };
     assert_eq!(
-        coords_of(&single).chapter_length_spread,
+        coords_of(&single).unit_length_spread,
         None,
-        "one chapter has no distribution to measure; absent is not zero"
+        "one unit has no distribution to measure; absent is not zero"
     );
 }
 
@@ -361,7 +361,7 @@ fn coordinates_are_rankable_dimensions() {
     assert!(keys.contains(&DIM_SENTENCE_LENGTH_VARIANCE), "{keys:?}");
     assert!(keys.contains(&DIM_DIALOGUE_RATIO), "{keys:?}");
     assert!(keys.contains(&DIM_VOCABULARY_RICHNESS), "{keys:?}");
-    assert!(keys.contains(&DIM_CHAPTER_LENGTH_SPREAD), "{keys:?}");
+    assert!(keys.contains(&DIM_UNIT_LENGTH_SPREAD), "{keys:?}");
 
     // Every coordinate is a position on the same 0.0..=1.0 scale a reader's
     // weights live on, so they can be compared without rescaling.
@@ -372,16 +372,16 @@ fn coordinates_are_rankable_dimensions() {
         );
     }
 
-    // A single-chapter work contributes three dimensions, not four — the missing
+    // A single-unit work contributes three dimensions, not four — the missing
     // one is genuinely missing rather than reported as zero.
     let single_corpus = Corpus {
-        chapters: vec![chapter(60, 20)],
+        units: vec![unit(60, 20)],
         dialogue_words: 0,
     };
     let three = coords_of(&single_corpus).as_dimensions();
     assert_eq!(three.len(), 3, "{three:?}");
     assert!(
-        !three.iter().any(|(k, _)| k == DIM_CHAPTER_LENGTH_SPREAD),
+        !three.iter().any(|(k, _)| k == DIM_UNIT_LENGTH_SPREAD),
         "an unmeasurable dimension must not appear as a weight target"
     );
 }
@@ -416,7 +416,7 @@ fn sentence_variance_stays_inside_its_range_without_clamping() {
     // fixture looking big. `clamp` is the thing under test: these fixtures are
     // chosen so a clamped implementation reports a visibly wrong number.
     let two_scale = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 2000,
             // Half very short, half long: a real spread with a real ceiling.
             plain_text: (0..60)
@@ -427,7 +427,7 @@ fn sentence_variance_stays_inside_its_range_without_clamping() {
         dialogue_words: 0,
     };
     let mild = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 2000,
             plain_text: (0..100)
                 .map(|i| sentence(if i % 2 == 0 { 15 } else { 25 }))
@@ -437,7 +437,7 @@ fn sentence_variance_stays_inside_its_range_without_clamping() {
         dialogue_words: 0,
     };
     let flat = Corpus {
-        chapters: vec![ChapterText {
+        units: vec![UnitText {
             word_count: 4000,
             plain_text: (0..200).map(|_| sentence(20)).collect::<Vec<_>>().join(" "),
         }],
@@ -478,38 +478,38 @@ fn sentence_variance_stays_inside_its_range_without_clamping() {
 }
 
 #[test]
-fn a_chapter_boundary_is_never_inside_a_sentence() {
-    // `Corpus::text` joins chapters with a blank line specifically so the last
-    // sentence of one chapter and the first of the next are not counted as one
+fn a_unit_boundary_is_never_inside_a_sentence() {
+    // `Corpus::text` joins units with a blank line specifically so the last
+    // sentence of one unit and the first of the next are not counted as one
     // sentence. Joining with a single newline leaves the text technically
     // different but the sentence count the same, because the sentinel counts both
     // boundaries -- so the mutation harness's newline swap survived, and the real
     // defect it hides is different and worse.
     //
-    // Here: a chapter whose text does NOT end in terminal punctuation. The next
-    // chapter starts mid-thought. With a blank line the segment ends at the
+    // Here: a unit whose text does NOT end in terminal punctuation. The next
+    // unit starts mid-thought. With a blank line the segment ends at the
     // break, so the trailing fragment is its own (short) sentence; with a single
     // newline the two halves merge into one long sentence and the fragment
     // disappears into its neighbour. The sentence COUNT is therefore the
     // observable that distinguishes them.
-    let unterminated = ChapterText {
+    let unterminated = UnitText {
         word_count: 1200,
-        // No full stop: the sentence continues into the next chapter.
+        // No full stop: the sentence continues into the next unit.
         plain_text: (0..20)
             .map(|i| format!("w{i}"))
             .collect::<Vec<_>>()
             .join(" "),
     };
-    let following = chapter(60, 20);
+    let following = unit(60, 20);
     let corpus = Corpus {
-        chapters: vec![unterminated, following],
+        units: vec![unterminated, following],
         dialogue_words: 0,
     };
 
     let text = corpus.text();
     assert!(
         text.contains("\n\n"),
-        "chapters must be joined with a blank line, not a single newline: {:?}",
+        "units must be joined with a blank line, not a single newline: {:?}",
         &text[..text.len().min(60)]
     );
 
@@ -518,28 +518,28 @@ fn a_chapter_boundary_is_never_inside_a_sentence() {
     // the fragment and the first real sentence would be one, giving 61.
     assert_eq!(
         measured.sentence_count, 61,
-        "a chapter boundary must end a sentence; got {} sentences",
+        "a unit boundary must end a sentence; got {} sentences",
         measured.sentence_count
     );
     assert_eq!(
         measured.sentence_count,
-        // The second chapter's own count, plus the first chapter's fragment.
+        // The second unit's own count, plus the first unit's fragment.
         60 + 1,
         "the fragment before the break counts as its own sentence"
     );
 }
 
 #[test]
-fn a_soft_wrap_inside_a_chapter_is_not_a_sentence_break() {
+fn a_soft_wrap_inside_a_unit_is_not_a_sentence_break() {
     // §49.3's splitter must treat a paragraph break as a boundary and an interior
-    // newline as nothing at all. `chapter_revisions.plain_text` is stored prose,
-    // and stored prose is soft-wrapped -- a chapter routinely contains newlines
+    // newline as nothing at all. `revisions.plain_text` is stored prose,
+    // and stored prose is soft-wrapped -- a unit routinely contains newlines
     // that are not paragraph marks. Counting them as breaks would split every
-    // wrapped line into its own "sentence" and, on a narrow-wrapped chapter, make
+    // wrapped line into its own "sentence" and, on a narrow-wrapped unit, make
     // the measure report high variance for perfectly flat prose.
     //
     // Found by the mutation harness: relaxing the rule to "any newline is a break"
-    // left all nine tests green, because every fixture joined chapters with "\n\n"
+    // left all nine tests green, because every fixture joined units with "\n\n"
     // and none contained an interior newline. Measured on the two candidate rules:
     //
     //     text                        blank-line rule   any-newline rule
@@ -548,7 +548,7 @@ fn a_soft_wrap_inside_a_chapter_is_not_a_sentence_break() {
     //     "ab\ncd ef."                [8]               [2, 6]     DIFFERENT
     //
     // So the mutant is not equivalent; the fixtures were simply incomplete.
-    let wrapped = ChapterText {
+    let wrapped = UnitText {
         word_count: 1200,
         // One long sentence, wrapped at 40 characters, as a store would save it.
         plain_text: {
@@ -572,7 +572,7 @@ fn a_soft_wrap_inside_a_chapter_is_not_a_sentence_break() {
     };
 
     let corpus = Corpus {
-        chapters: vec![wrapped],
+        units: vec![wrapped],
         dialogue_words: 0,
     };
     let measured = coords_of(&corpus);
@@ -589,12 +589,12 @@ fn a_soft_wrap_inside_a_chapter_is_not_a_sentence_break() {
 
     // And the control: hard-wrapped at the same width, the same number of
     // sentences results. Wrapping must not change a coordinate.
-    let unwrapped = ChapterText {
+    let unwrapped = UnitText {
         word_count: 1200,
         plain_text: sentence(600),
     };
     let flat_text = coords_of(&Corpus {
-        chapters: vec![unwrapped],
+        units: vec![unwrapped],
         dialogue_words: 0,
     });
     assert_eq!(

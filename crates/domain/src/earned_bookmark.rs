@@ -15,7 +15,7 @@
 //!
 //! What the definition cost is the part that mattered. §53.5 already defines "hit" as
 //! *finished or rated ≥4*. Borrowing that here would have put the cheap signal inside
-//! the expensive one — a four-star rating on chapter one costs exactly the one click
+//! the expensive one — a four-star rating on unit one costs exactly the one click
 //! this ratio is measured against — so `payouts.rs`'s broader definition and this one
 //! are deliberately different, and [`HitBasis`] names which is in force.
 

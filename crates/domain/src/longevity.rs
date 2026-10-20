@@ -48,7 +48,7 @@ pub fn apply_half_life(
 /// Basis points added to the reader-author warmth score.
 pub fn warmth_delta(action: WarmthAction) -> i64 {
     match action {
-        WarmthAction::ReadChapter => 100,
+        WarmthAction::ReadUnit => 100,
         WarmthAction::FinishWork => 500,
         WarmthAction::React => 200,
         WarmthAction::Comment => 400,
@@ -58,7 +58,7 @@ pub fn warmth_delta(action: WarmthAction) -> i64 {
 /// Actions that accumulate warmth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarmthAction {
-    ReadChapter,
+    ReadUnit,
     FinishWork,
     React,
     Comment,
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn warmth_deltas() {
-        assert_eq!(warmth_delta(WarmthAction::ReadChapter), 100);
+        assert_eq!(warmth_delta(WarmthAction::ReadUnit), 100);
         assert_eq!(warmth_delta(WarmthAction::FinishWork), 500);
         assert_eq!(warmth_delta(WarmthAction::React), 200);
         assert_eq!(warmth_delta(WarmthAction::Comment), 400);

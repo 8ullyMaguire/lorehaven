@@ -32,7 +32,7 @@ use std::time::Duration;
 /// What kind of read this is (spec §11.5, `FetchClass`).
 ///
 /// Set at the call site by the adapter that declares it, **never inferred from
-/// a URL**. A chapter-shaped URL fetched as `Metadata` is still a metadata
+/// a URL**. A unit-shaped URL fetched as `Metadata` is still a metadata
 /// fetch and is still bounded as one, because inference from shape is precisely
 /// how a "just the metadata" door becomes a body door: the adapter's guess and
 /// the fetcher's ceiling then disagree, and the ceiling is the one that has to
@@ -43,10 +43,10 @@ use std::time::Duration;
 /// linear scale would get one of those two cases wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FetchClass {
-    /// Title, author, tags, chapter list. Bounded at a fraction of the content
+    /// Title, author, tags, unit list. Bounded at a fraction of the content
     /// ceiling and parsed into a type with no field a body could arrive in.
     Metadata,
-    /// Prose. The default for anything an adapter calls a chapter.
+    /// Prose. The default for anything an adapter calls a unit.
     Content,
     /// Image, audio, video bytes (§30.2's hosting policy decides what happens
     /// to them afterwards).
@@ -662,16 +662,16 @@ mod tests {
 
     #[test]
     fn a_wildcard_matches_any_run() {
-        let body = "User-agent: *\nDisallow: /search\nDisallow: /*.pdf$\nDisallow: /n*/chapter\n";
+        let body = "User-agent: *\nDisallow: /search\nDisallow: /*.pdf$\nDisallow: /n*/unit\n";
         let rules = rules_of(body);
 
         assert!(!rules.allows("/search"));
         assert!(!rules.allows("/search/deep"));
         assert!(!rules.allows("/docs/a.pdf"));
         assert!(rules.allows("/docs/a.pdf.html"));
-        assert!(!rules.allows("/n2267be/chapter"));
-        assert!(!rules.allows("/n9525ii/chapter"));
-        assert!(rules.allows("/other/chapter"));
+        assert!(!rules.allows("/n2267be/unit"));
+        assert!(!rules.allows("/n9525ii/unit"));
+        assert!(rules.allows("/other/unit"));
     }
 
     #[test]

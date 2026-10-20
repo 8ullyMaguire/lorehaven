@@ -60,7 +60,7 @@ pub struct ProgressInput<'a> {
     pub pseud: Option<PseudId>,
     pub subject_type: &'a str,
     pub subject_id: &'a str,
-    pub chapter_id: Option<&'a str>,
+    pub unit_id: Option<&'a str>,
     /// The revision the reader was looking at.
     pub revision: Option<RevisionId>,
     pub anchor: Option<&'a str>,
@@ -80,7 +80,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
         pseud,
         subject_type,
         subject_id,
-        chapter_id,
+        unit_id,
         revision,
         anchor,
         fraction,
@@ -106,7 +106,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
      */
     let postgres_sql = if device.is_some() {
         "INSERT INTO reading_progress
-             (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+             (id, account_id, pseud_id, subject_type, subject_id, unit_id,
               content_revision, paragraph_anchor, position_permille, device_id,
               created_at, updated_at, version)
          VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
@@ -114,7 +114,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
          ON CONFLICT (account_id, pseud_id, subject_type, subject_id, device_id)
              WHERE device_id IS NOT NULL
          DO UPDATE SET
-              chapter_id = excluded.chapter_id,
+              unit_id = excluded.unit_id,
               content_revision = excluded.content_revision,
               paragraph_anchor = excluded.paragraph_anchor,
               position_permille = excluded.position_permille,
@@ -122,7 +122,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
               version = reading_progress.version + 1"
     } else {
         "INSERT INTO reading_progress
-             (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+             (id, account_id, pseud_id, subject_type, subject_id, unit_id,
               content_revision, paragraph_anchor, position_permille, device_id,
               created_at, updated_at, version)
          VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
@@ -130,7 +130,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
          ON CONFLICT (account_id, pseud_id, subject_type, subject_id)
              WHERE device_id IS NULL
          DO UPDATE SET
-              chapter_id = excluded.chapter_id,
+              unit_id = excluded.unit_id,
               content_revision = excluded.content_revision,
               paragraph_anchor = excluded.paragraph_anchor,
               position_permille = excluded.position_permille,
@@ -140,12 +140,12 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
 
     let sql = db.sql(
         "INSERT INTO reading_progress
-             (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+             (id, account_id, pseud_id, subject_type, subject_id, unit_id,
               content_revision, paragraph_anchor, position_permille, device_id,
               created_at, updated_at, version)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
          ON CONFLICT DO UPDATE SET
-              chapter_id = excluded.chapter_id,
+              unit_id = excluded.unit_id,
               content_revision = excluded.content_revision,
               paragraph_anchor = excluded.paragraph_anchor,
               position_permille = excluded.position_permille,
@@ -166,7 +166,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
                 .bind(pseud.map(|p| p.to_string()))
                 .bind(subject_type)
                 .bind(subject_id)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .bind(revision_text.as_deref())
                 .bind(anchor)
                 .bind(fraction_i64)
@@ -187,7 +187,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
                 .bind(pseud.map(|p| p.to_string()))
                 .bind(subject_type)
                 .bind(subject_id)
-                .bind(chapter_id)
+                .bind(unit_id)
                 .bind(revision_text.as_deref())
                 .bind(anchor)
                 .bind(fraction_i64)

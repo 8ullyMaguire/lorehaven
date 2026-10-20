@@ -77,18 +77,18 @@ async function ensureAccount(page: Page, person: Who): Promise<void> {
   await expectSignedIn(page);
 }
 
-/** Write, save and publish a one-chapter work; returns its id. */
+/** Write, save and publish a one-unit work; returns its id. */
 async function publish(page: Page, title: string): Promise<string> {
   await page.goto('/write');
   await page.fill('input[id^=field-]', title);
   await page.click('button:text-is("Start a draft")');
   await expect(page).toHaveURL(/\/write\//);
-  await page.click('button:text-is("Add chapter")');
+  await page.click('button:text-is("Add unit")');
   const editor = page.locator('.tiptap.ProseMirror');
   await editor.click();
-  await page.keyboard.type(`A chapter written for ${title}. It has enough words to export.`);
+  await page.keyboard.type(`A unit written for ${title}. It has enough words to export.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -153,7 +153,7 @@ async function bookmark(
     data: {
       subject_type: 'work',
       subject_id: input.subjectId,
-      chapter_id: null,
+      unit_id: null,
       position_permille: null,
       note: input.note ?? '',
       is_public: input.isPublic,
@@ -339,9 +339,9 @@ test('new in your fandoms: absent for a reader whose only bookmarks are private'
  * the server serialises `word_count`, and a rename on either side leaves every unit test
  * green. Only a journey that reads the rendered page can see the join.
  *
- * `publish` writes a chapter through the editor, so the count comes from a real
- * `chapter_revisions` row rather than a fixture insert — which means this also proves the
- * aggregate reaches the CURRENT revision of a chapter the reader just wrote.
+ * `publish` writes a unit through the editor, so the count comes from a real
+ * `unit_revisions` row rather than a fixture insert — which means this also proves the
+ * aggregate reaches the CURRENT revision of a unit the reader just wrote.
  */
 test('most bookmarked: the card shows words and estimated reading time', async ({ page }) => {
   await ensureAccount(page, author);

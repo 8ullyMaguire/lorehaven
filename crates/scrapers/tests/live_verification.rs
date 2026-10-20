@@ -115,7 +115,7 @@ async fn archive_of_our_own_still_reads() {
         "ao3: {:?} by {:?}, {} chapters, {:?} words, {:?}",
         work.title,
         work.author_text,
-        work.chapter_count(),
+        work.unit_count(),
         work.word_count,
         work.status
     );
@@ -124,11 +124,11 @@ async fn archive_of_our_own_still_reads() {
     // Not an exact number: a work gains chapters whenever its author posts, and
     // a test that fails for that is a test that gets deleted. What must hold is
     // that the chapter list was found and carries real identities.
-    assert!(work.chapter_count() >= 1, "no chapters listed");
+    assert!(work.unit_count() >= 1, "no chapters listed");
     assert!(
-        work.chapters
+        work.units
             .iter()
-            .all(|chapter| !chapter.source_chapter_key.is_empty()),
+            .all(|chapter| !chapter.source_unit_key.is_empty()),
         "a chapter has no source key, so the list was not really parsed"
     );
     assert!(
@@ -149,7 +149,7 @@ async fn royal_road_still_reads() {
         "royalroad: {:?} by {:?}, {} chapters, {:?} words, {:?}",
         work.title,
         work.author_text,
-        work.chapter_count(),
+        work.unit_count(),
         work.word_count,
         work.status
     );
@@ -160,7 +160,7 @@ async fn royal_road_still_reads() {
         "the author URL is on the page; a blank one means the selector moved"
     );
     assert!(
-        work.chapter_count() > 100,
+        work.unit_count() > 100,
         "a long work lost its chapter list"
     );
     assert!(work.word_count.unwrap_or(0) > 0, "no word count");
@@ -185,7 +185,7 @@ async fn syosetu_still_reads() {
         "syosetu: {:?} by {:?}, {} episodes, {:?}",
         work.title,
         work.author_text,
-        work.chapter_count(),
+        work.unit_count(),
         work.word_count
     );
     assert!(!work.title.trim().is_empty(), "no title");
@@ -193,9 +193,9 @@ async fn syosetu_still_reads() {
     // The whole reason this adapter reads the info page and every list page:
     // the work page alone lists 100 and says nothing about the rest.
     assert!(
-        work.chapter_count() > 100,
+        work.unit_count() > 100,
         "only {} episodes listed: the paginated walk stopped early",
-        work.chapter_count()
+        work.unit_count()
     );
 }
 
@@ -216,11 +216,11 @@ async fn a_chapter_body_still_comes_back_with_text() {
     // a retry uses. Reading the whole work would take two minutes at the
     // source's own pace to prove nothing extra.
     assert!(
-        adapter.capabilities().per_chapter_fetch,
+        adapter.capabilities().per_unit_fetch,
         "the adapter advertises per-chapter fetch, so this path must exist"
     );
     let chapter = adapter
-        .fetch_chapter(&fetch, &work, 1, None)
+        .fetch_unit(&fetch, &work, 1, None)
         .await
         .expect("chapter 1 reads on its own");
     println!(
@@ -231,7 +231,7 @@ async fn a_chapter_body_still_comes_back_with_text() {
     );
     assert_eq!(chapter.ordinal, 1, "the ordinal is not the one asked for");
     assert!(
-        !chapter.source_chapter_key.is_empty(),
+        !chapter.source_unit_key.is_empty(),
         "the chapter has no source key"
     );
     assert!(
@@ -244,7 +244,7 @@ async fn a_chapter_body_still_comes_back_with_text() {
         "the body is not html, so nothing was sanitised"
     );
     // And a chapter the work does not have is refused rather than invented.
-    let missing = adapter.fetch_chapter(&fetch, &work, 5000, None).await;
+    let missing = adapter.fetch_unit(&fetch, &work, 5000, None).await;
     assert!(
         missing.is_err(),
         "a chapter past the end of the work was reported as read"
@@ -267,7 +267,7 @@ async fn the_efiction_family_still_reads() {
         "giantessworld: {:?} by {:?}, {} chapters, {:?} words, {:?}, {:?}",
         work.title,
         work.author_text,
-        work.chapter_count(),
+        work.unit_count(),
         work.word_count,
         work.status,
         work.rating_text
@@ -275,17 +275,17 @@ async fn the_efiction_family_still_reads() {
     assert!(!work.title.trim().is_empty(), "no title");
     assert!(!work.author_text.trim().is_empty(), "no author");
     assert!(
-        work.chapter_count() >= 1,
+        work.unit_count() >= 1,
         "no chapters listed, so the chapter walk found nothing"
     );
     assert!(
-        work.chapters
+        work.units
             .iter()
-            .all(|chapter| !chapter.source_chapter_key.is_empty()),
+            .all(|chapter| !chapter.source_unit_key.is_empty()),
         "a chapter has no source key"
     );
     assert!(
-        work.chapters
+        work.units
             .windows(2)
             .all(|pair| pair[0].ordinal < pair[1].ordinal),
         "the chapter list is not in order"
@@ -298,14 +298,14 @@ async fn the_efiction_family_still_reads() {
     // fallback key is indistinguishable from a real one until an author inserts a
     // chapter, which is exactly when a reader's place in the work is lost.
     assert!(
-        work.chapters.iter().all(|chapter| chapter
-            .source_chapter_key
+        work.units.iter().all(|chapter| chapter
+            .source_unit_key
             .chars()
             .all(|c| c.is_ascii_digit())),
         "a chapter key is not a chapid: {:?}",
-        work.chapters
+        work.units
             .iter()
-            .map(|chapter| chapter.source_chapter_key.as_str())
+            .map(|chapter| chapter.source_unit_key.as_str())
             .collect::<Vec<_>>()
     );
 }
@@ -355,11 +355,11 @@ async fn an_efiction_chapter_body_still_comes_back_with_text() {
         .expect("the work reads");
 
     assert!(
-        adapter.capabilities().per_chapter_fetch,
+        adapter.capabilities().per_unit_fetch,
         "the adapter advertises per-chapter fetch, so this path must exist"
     );
     let chapter = adapter
-        .fetch_chapter(&fetch, &work, 1, None)
+        .fetch_unit(&fetch, &work, 1, None)
         .await
         .expect("chapter 1 reads on its own");
     println!(
@@ -370,7 +370,7 @@ async fn an_efiction_chapter_body_still_comes_back_with_text() {
     );
     assert_eq!(chapter.ordinal, 1, "the ordinal is not the one asked for");
     assert!(
-        !chapter.source_chapter_key.is_empty(),
+        !chapter.source_unit_key.is_empty(),
         "the chapter has no source key"
     );
     assert!(
@@ -386,7 +386,7 @@ async fn an_efiction_chapter_body_still_comes_back_with_text() {
     // A chapter the work does not have is refused rather than invented.
     assert!(
         adapter
-            .fetch_chapter(&fetch, &work, 5000, None)
+            .fetch_unit(&fetch, &work, 5000, None)
             .await
             .is_err(),
         "a chapter past the end of the work was reported as read"
@@ -678,22 +678,22 @@ async fn an_operators_robots_answer_decides_whether_wattpads_prose_is_readable()
 
     assert_eq!(work.title, "The Older Swan | Paul Lahote");
     assert!(
-        work.chapter_count() > 1,
-        "a live work should have chapters: {}",
-        work.chapter_count()
+        work.unit_count() > 1,
+        "a live work should have units: {}",
+        work.unit_count()
     );
     println!(
         "preview under the default policy: {:?} by {:?}, {} parts",
         work.title,
         work.author_text,
-        work.chapter_count()
+        work.unit_count()
     );
 
     // 2. The prose, under the default policy. Refused, and refused for the
     //    right reason: a `Parse` here would mean the fetcher had fetched the
     //    page and not understood it, which is a different and worse bug.
     let refused = adapter
-        .fetch_chapter(&compliant, &work, CHAPTER, None)
+        .fetch_unit(&compliant, &work, CHAPTER, None)
         .await
         .expect_err("the site's own rules forbid the prose path");
     match &refused {
@@ -717,7 +717,7 @@ async fn an_operators_robots_answer_decides_whether_wattpads_prose_is_readable()
         },
     );
     let chapter = adapter
-        .fetch_chapter(&overriding, &work, CHAPTER, None)
+        .fetch_unit(&overriding, &work, CHAPTER, None)
         .await
         .expect("the override should read the prose");
 
@@ -799,21 +799,21 @@ async fn ficbook_is_read_plainly_and_its_parts_come_back_whole() {
         .expect("ficbook answers a plain request");
     assert_eq!(work.title, "Проклятая река");
     assert_eq!(work.word_count, Some(77_507));
-    assert_eq!(work.chapters.len(), 24);
+    assert_eq!(work.units.len(), 24);
     assert!(!work.tags.is_empty());
     println!(
         "preview: {:?} by {:?}, {} parts, {:?} words, {:?}",
         work.title,
         work.author_text,
-        work.chapter_count(),
+        work.unit_count(),
         work.word_count,
         work.status
     );
 
-    // 2. One part, fetched on its own — the `per_chapter_fetch` path, so a
+    // 2. One part, fetched on its own — the `per_unit_fetch` path, so a
     //    retry re-reads one part and touches nothing else.
     let chapter = adapter
-        .fetch_chapter(&fetch, &work, 1, None)
+        .fetch_unit(&fetch, &work, 1, None)
         .await
         .expect("the first part is readable");
     assert_eq!(chapter.ordinal, 1);
@@ -930,11 +930,11 @@ async fn scribblehubs_api_answers_plainly_and_its_prose_needs_the_solver() {
         .preview(&through_solver, &Url::parse(STORY).unwrap(), None)
         .await
         .expect("a Scribble Hub work previews");
-    assert_eq!(work.chapters.len(), 113);
+    assert_eq!(work.units.len(), 113);
     assert_eq!(work.word_count, Some(241_715));
 
     let chapter = adapter
-        .fetch_chapter(&through_solver, &work, 1, None)
+        .fetch_unit(&through_solver, &work, 1, None)
         .await
         .expect("the first chapter is readable through the solver");
     assert_eq!(chapter.ordinal, 1);
@@ -945,7 +945,7 @@ async fn scribblehubs_api_answers_plainly_and_its_prose_needs_the_solver() {
     );
     println!(
         "through the solver: {}/{} chapters listed, chapter 1 is {} bytes",
-        work.chapters.len(),
+        work.units.len(),
         story.chapter_count,
         chapter.content_html.len()
     );
@@ -1009,21 +1009,21 @@ async fn every_xenforo_host_is_readable_with_a_plain_request() {
 
         // The chapter list added up to the count the header states — the adapter
         // refuses otherwise, so reaching here is that check passing.
-        assert_eq!(work.chapters.len(), expected_chapters, "{key}");
+        assert_eq!(work.units.len(), expected_chapters, "{key}");
         assert!(!work.title.is_empty(), "{key}");
         assert!(!work.author_text.is_empty(), "{key}");
         println!(
             "{key}: {:?} by {:?}, {} chapters, {:?}",
             work.title,
             work.author_text,
-            work.chapters.len(),
+            work.units.len(),
             work.status
         );
 
         // One chapter, through the same plain fetcher. The prose is read out of
         // the article for that post, not the first post on the page.
         let chapter = adapter
-            .fetch_chapter(&fetch, &work, 1, None)
+            .fetch_unit(&fetch, &work, 1, None)
             .await
             .unwrap_or_else(|error| panic!("{key} chapter 1: {error}"));
         assert!(

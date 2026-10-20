@@ -168,41 +168,41 @@ fn the_chapter_list_is_complete_and_is_not_doubled() {
     // identical. A parser that collected every `#chap_select option` would
     // report twice the work's length and import every chapter twice.
     let work = two_chapter_work();
-    assert_eq!(work.chapter_count(), 2);
+    assert_eq!(work.unit_count(), 2);
 
     let work = fictionpress_work();
-    assert_eq!(work.chapter_count(), 17);
+    assert_eq!(work.unit_count(), 17);
 
     // 122 chapters, and the site's own count beside them agrees: 244 options in
     // the recording, two renders of the same 122.
     let work = long_work();
-    assert_eq!(work.chapter_count(), 122);
+    assert_eq!(work.unit_count(), 122);
 }
 
 #[test]
 fn a_chapter_is_keyed_by_its_ordinal_because_that_is_what_the_source_has() {
     let work = long_work();
 
-    assert_eq!(work.chapters[0].ordinal, 1);
-    assert_eq!(work.chapters[0].source_chapter_key, "1");
-    assert_eq!(work.chapters[0].title, "A Day of Very Low Probability");
-    assert_eq!(work.chapters[121].ordinal, 122);
-    assert_eq!(work.chapters[121].source_chapter_key, "122");
+    assert_eq!(work.units[0].ordinal, 1);
+    assert_eq!(work.units[0].source_unit_key, "1");
+    assert_eq!(work.units[0].title, "A Day of Very Low Probability");
+    assert_eq!(work.units[121].ordinal, 122);
+    assert_eq!(work.units[121].source_unit_key, "122");
     assert_eq!(
-        work.chapters[121].title,
+        work.units[121].title,
         "Something to Protect: Hermione Granger"
     );
 
     // Every ordinal is present exactly once, in order.
-    let ordinals: Vec<u32> = work.chapters.iter().map(|entry| entry.ordinal).collect();
+    let ordinals: Vec<u32> = work.units.iter().map(|entry| entry.ordinal).collect();
     assert_eq!(ordinals, (1..=122).collect::<Vec<u32>>());
 }
 
 #[test]
 fn an_untitled_chapter_keeps_the_name_the_site_generated_for_it() {
     let work = fictionpress_work();
-    assert_eq!(work.chapters[0].title, "Chapter 1");
-    assert_eq!(work.chapters[16].title, "Chapter 17");
+    assert_eq!(work.units[0].title, "Chapter 1");
+    assert_eq!(work.units[16].title, "Chapter 17");
 
     // And where the author did name them, the site prefixes the work's own
     // title to each. The prefix is part of the title the site shows, so it is
@@ -215,8 +215,8 @@ fn an_untitled_chapter_keeps_the_name_the_site_generated_for_it() {
         .expect("the recorded work page must parse");
     assert_eq!(work.source_work_key, "2171761");
     assert_eq!(work.title, "Vampiric Desires");
-    assert_eq!(work.chapters[0].title, "Vampiric Desires Chapter 1");
-    assert_eq!(work.chapters[3].title, "Vampiric Desires Chapter 4");
+    assert_eq!(work.units[0].title, "Vampiric Desires Chapter 1");
+    assert_eq!(work.units[3].title, "Vampiric Desires Chapter 4");
     // This recording carries no `Follows:` field at all, and no characters.
     assert_eq!(work.word_count, Some(2_171));
     assert_eq!(work.tags, vec!["Supernatural", "Fantasy"]);
@@ -228,7 +228,7 @@ fn an_untitled_chapter_keeps_the_name_the_site_generated_for_it() {
 fn a_chapter_page_states_its_own_position_and_the_body_is_the_prose() {
     let work = two_chapter_work();
     let chapters = FanFiction::fanfiction_net()
-        .chapters_from_html(&fixture("ffnet-chapter-2.html"), &work)
+        .units_from_html(&fixture("ffnet-chapter-2.html"), &work)
         .expect("the recorded chapter page must parse");
 
     assert_eq!(chapters.len(), 1, "a chapter document holds one chapter");
@@ -238,7 +238,7 @@ fn a_chapter_page_states_its_own_position_and_the_body_is_the_prose() {
     // marks `selected` does, and it is why this page reads as chapter 2 rather
     // than as chapter 1 — the same page shape as the work page it came from.
     assert_eq!(chapter.ordinal, 2);
-    assert_eq!(chapter.source_chapter_key, "2");
+    assert_eq!(chapter.source_unit_key, "2");
     assert_eq!(chapter.title, "Chapter 2");
 
     assert!(
@@ -263,7 +263,7 @@ fn the_work_page_is_read_as_chapter_one_by_the_same_rule() {
     // `/s/{id}/` is chapter 1's page, and its own `selected` option says so.
     let work = two_chapter_work();
     let chapters = FanFiction::fanfiction_net()
-        .chapters_from_html(&fixture("ffnet-work.html"), &work)
+        .units_from_html(&fixture("ffnet-work.html"), &work)
         .expect("the recorded work page must parse as a chapter");
 
     assert_eq!(chapters[0].ordinal, 1);
@@ -388,9 +388,9 @@ fn a_single_chapter_can_be_retried_without_the_rest_of_the_work() {
     // Every chapter has its own address and the address follows from the
     // ordinal, so the retry criterion is genuinely available on this source.
     let capabilities = FanFiction::fanfiction_net().capabilities();
-    assert!(capabilities.per_chapter_fetch);
+    assert!(capabilities.per_unit_fetch);
     assert!(capabilities.metadata);
-    assert!(capabilities.chapters);
+    assert!(capabilities.units);
     // Author pages exist but their markup has not been recorded, so this claims
     // nothing about them.
     assert!(!capabilities.bibliography);

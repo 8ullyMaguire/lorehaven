@@ -83,8 +83,8 @@ describe('ReadingSchedule — add-section payload matches the server', () => {
       expect(vi.mocked(addScheduleSection)).toHaveBeenCalledWith('topic-9', {
         position: 1,
         title: 'Book One',
-        chapter_start: 1,
-        chapter_end: 1,
+        unit_start: 1,
+        unit_end: 1,
         unlocks_at: '',
       }),
     );
@@ -95,8 +95,8 @@ describe('ReadingSchedule — add-section payload matches the server', () => {
       {
         position: 1,
         title: 'Book One',
-        chapter_start: 1,
-        chapter_end: 5,
+        unit_start: 1,
+        unit_end: 5,
         unlocks_at: '2026-01-01T00:00:00Z',
         created_at: '2026-01-01T00:00:00Z',
       },

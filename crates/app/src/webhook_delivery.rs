@@ -152,7 +152,7 @@ fn derive_event_type(topic: &str) -> Option<String> {
     match topic {
         "publish.notify" => Some("work.published".to_owned()),
         "withdraw.notify" => Some("work.withdrawn".to_owned()),
-        "chapter.revised" => Some("chapter.revised".to_owned()),
+        "unit.revised" => Some("unit.revised".to_owned()),
         _ => Some(topic.to_owned()),
     }
 }

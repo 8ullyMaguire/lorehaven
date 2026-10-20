@@ -1153,11 +1153,11 @@ pub async fn list_events(db: &Database, limit: i64) -> Result<Vec<Event>> {
     Ok(rows.into_iter().map(Event::from).collect())
 }
 
-/// Total word count for a work (the sum of current chapter revisions).
+/// Total word count for a work (the sum of current unit revisions).
 pub async fn work_word_count(db: &Database, work_id: &str) -> Result<i64> {
     let sql = db.sql(
-        "SELECT COALESCE(CAST(SUM(r.word_count) AS BIGINT), 0) FROM chapters c JOIN chapter_revisions r ON r.id = c.current_revision_id WHERE c.work_id = ? AND c.deleted_at IS NULL",
-        "SELECT COALESCE(SUM(r.word_count), 0)::bigint FROM chapters c JOIN chapter_revisions r ON r.id = c.current_revision_id WHERE c.work_id = $1::uuid AND c.deleted_at IS NULL",
+        "SELECT COALESCE(CAST(SUM(r.word_count) AS BIGINT), 0) FROM units c JOIN revisions r ON r.id = c.current_revision_id WHERE c.work_id = ? AND c.deleted_at IS NULL",
+        "SELECT COALESCE(SUM(r.word_count), 0)::bigint FROM units c JOIN revisions r ON r.id = c.current_revision_id WHERE c.work_id = $1::uuid AND c.deleted_at IS NULL",
     );
     let n: i64 = match db.backend() {
         Backend::Sqlite => {

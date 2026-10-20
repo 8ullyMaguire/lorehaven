@@ -6,7 +6,7 @@
 //! - TL3 curator can mark a work has_own_cta=true.
 //! - Quorum: when enough curators mark, the work is exempt from CTAs.
 //! - Retraction: a retraction drops the quorum and CTA reappears.
-//! - Modes: per_chapter/per_work/off (config-driven).
+//! - Modes: per_unit/per_work/off (config-driven).
 //! - Sanitize: the CTA HTML is sanitized.
 
 use std::path::{Path, PathBuf};
@@ -46,7 +46,7 @@ fn config_for(dir: &Path) -> Config {
         burst: 1000,
         per_minute: 6000,
     };
-    // Enable CTAs with default placement per_chapter.
+    // Enable CTAs with default placement per_unit.
     config.exports.cta_html = "<p>Support us!</p>".to_owned();
     config.exports.cta_quorum = 2;
     config

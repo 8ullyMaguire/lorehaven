@@ -402,7 +402,7 @@ impl BodyGuard {
 /// solver service — slow, and it spends somebody else's capacity to read a page we
 /// already had. A false negative is worse: the importer parses the challenge page
 /// as though it were the work, finds none of an adapter's selectors, and records a
-/// work with no chapters. That is the failure mode this crate exists to avoid, so
+/// work with no units. That is the failure mode this crate exists to avoid, so
 /// the test is written to be *specific* rather than eager, and every signal in it
 /// was read off a real challenge response on 2026-09-11:
 ///
@@ -415,7 +415,7 @@ impl BodyGuard {
 /// # The signal that is deliberately absent
 ///
 /// `challenge-platform` — the URL of Cloudflare's challenge script — appears in the
-/// **`<script>` tag of ordinary served pages**. A real `fanfiction.net` chapter page
+/// **`<script>` tag of ordinary served pages**. A real `fanfiction.net` unit page
 /// contains it, as does every `royalroad.com` page. Matching on it would mark the
 /// successful reads as failures, which is exactly the mistake an earlier draft of
 /// the plan made and a live probe caught. The signals below are the ones that only
@@ -503,9 +503,9 @@ mod tests {
     fn a_real_page_that_merely_loads_the_challenge_script_is_not_a_wall() {
         // The bug this test exists for: `challenge-platform` is the URL of
         // Cloudflare's script and appears in the <script> tag of ordinary served
-        // pages — including every fanfiction.net chapter and every royalroad.com
+        // pages — including every fanfiction.net unit and every royalroad.com
         // page. Matching on it marks successful reads as failures.
-        let real_page = "<html><head><title>Jillian Holtzmann: Ace Attorney Chapter 1</title>\
+        let real_page = "<html><head><title>Jillian Holtzmann: Ace Attorney Unit 1</title>\
              <script src=\"/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js\"></script>\
              </head><body><div id=\"storytext\">prose</div></body></html>";
         assert!(!is_bot_challenge(

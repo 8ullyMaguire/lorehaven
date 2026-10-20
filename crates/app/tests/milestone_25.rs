@@ -258,7 +258,7 @@ async fn register(client: &mut Client, email: &str, handle: &str) {
     );
 }
 
-/// A published work whose chapter has a body, plus the blob checksum of that
+/// A published work whose unit has a body, plus the blob checksum of that
 /// body — the parent a derivative is built from.
 async fn published_work_with_a_blob(client: &mut Client, title: &str) -> (String, String) {
     let (status, body) = client
@@ -271,21 +271,21 @@ async fn published_work_with_a_blob(client: &mut Client, title: &str) -> (String
     let (status, body) = client
         .post(
             &format!("/api/v1/works/{work_id}/chapters"),
-            json!({ "title": "Chapter 1" }),
+            json!({ "title": "Unit 1" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "create chapter: {body}");
-    let chapter_id = body["id"].as_str().unwrap().to_owned();
-    let chapter_version = body["version"].as_i64().unwrap();
+    assert_eq!(status, StatusCode::CREATED, "create unit: {body}");
+    let unit_id = body["id"].as_str().unwrap().to_owned();
+    let unit_version = body["version"].as_i64().unwrap();
 
     let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Content." }] }] });
     let (status, _) = client
         .patch(
-            &format!("/api/v1/chapters/{chapter_id}"),
-            json!({ "expected_version": chapter_version, "document": doc }),
+            &format!("/api/v1/chapters/{unit_id}"),
+            json!({ "expected_version": unit_version, "document": doc }),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "save chapter");
+    assert_eq!(status, StatusCode::OK, "save unit");
 
     let (status, _) = client
         .post(
@@ -295,7 +295,7 @@ async fn published_work_with_a_blob(client: &mut Client, title: &str) -> (String
         .await;
     assert_eq!(status, StatusCode::OK, "publish work");
 
-    (work_id, chapter_id)
+    (work_id, unit_id)
 }
 
 /// Store a blob the way the pipeline's parents arrive: through the blob store,
@@ -362,7 +362,7 @@ async fn a_derivative_is_queued_and_then_built() {
     let mut author = Client::new(app.clone());
     register(&mut author, "author@example.com", "author").await;
     let (work_id, _) = published_work_with_a_blob(&mut author, "Rendition Work").await;
-    let checksum = store_blob(&tdb, &dir, b"<p>chapter</p>", "text/html").await;
+    let checksum = store_blob(&tdb, &dir, b"<p>unit</p>", "text/html").await;
 
     let (status, body) = author
         .post(

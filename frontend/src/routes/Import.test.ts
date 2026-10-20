@@ -32,10 +32,10 @@ const PREVIEW = {
   language: 'en',
   word_count: 806306,
   status: 'complete',
-  chapter_count: 109,
-  chapters: [
-    { ordinal: 1, source_chapter_key: '301778', title: 'Good Morning' },
-    { ordinal: 2, source_chapter_key: '301779', title: 'The Tests' },
+  unit_count: 109,
+  units: [
+    { ordinal: 1, source_unit_key: '301778', title: 'Good Morning' },
+    { ordinal: 2, source_unit_key: '301779', title: 'The Tests' },
   ],
   plan: { plan: 'create', added: 109, removed: 0, reordered: 0, retitled: 0, changes: [] },
   is_new: true,
@@ -77,7 +77,7 @@ beforeEach(() => {
       disabled_reason: null,
       health: 'ok',
       last_checked_at: null,
-      capabilities: { known: true, metadata: true, chapters: true, per_chapter_fetch: true },
+      capabilities: { known: true, metadata: true, units: true, per_unit_fetch: true },
       robots: {
         honour_disallow: true,
         honour_crawl_delay: true,
@@ -165,7 +165,7 @@ describe('the import page', () => {
     await fireEvent.submit(document.querySelector('form') as HTMLFormElement);
 
     await waitFor(() => expect(document.body.textContent).toContain('Mother of Learning'));
-    expect(document.body.textContent).toContain('109 chapters');
+    expect(document.body.textContent).toContain('109 units');
     expect(document.body.textContent).toContain('imported as a new work');
 
     // The load-bearing assertion: a preview fetched nothing into the library.
@@ -185,7 +185,7 @@ describe('the import page', () => {
 
     await waitFor(() => expect(document.body.textContent).toContain('Mother of Learning'));
     [...document.querySelectorAll('button')]
-      .find((button) => (button.textContent ?? '').includes('Import 109 chapters'))
+      .find((button) => (button.textContent ?? '').includes('Import 109 units'))
       ?.click();
 
     await waitFor(() =>
@@ -209,7 +209,7 @@ describe('the import page', () => {
     expect(document.body.textContent).toContain('refuses automated requests');
   });
 
-  it('offers a dry run that stores no chapters', async () => {
+  it('offers a dry run that stores no units', async () => {
     render(Import);
     await waitFor(() => expect(document.body.textContent).toContain('Sources'));
 

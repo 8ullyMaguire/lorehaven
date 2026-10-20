@@ -17,7 +17,7 @@
 //!
 //! 2. **Counts are of distinct readers, not events.** `work_view_log` has one row
 //!    per (work, viewer, viewed_at) with no unique constraint on the reader, so a
-//!    reader who opens a chapter four times contributes four rows. The §20.3
+//!    reader who opens a unit four times contributes four rows. The §20.3
 //!    formula divides by *starters*, so counting events would inflate both sides
 //!    unevenly and the ratio would drift with reading habits rather than with
 //!    quality. `work_view_log.viewer_hash` is what makes a distinct reader

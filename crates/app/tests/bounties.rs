@@ -189,7 +189,7 @@ async fn crowdfunded_bounty_contribution_activates() {
             "/api/v1/bounties",
             json!({
                 "job_kind": "beta_read",
-                "terms": "Feedback on chapter 1-3",
+                "terms": "Feedback on unit 1-3",
                 "amount": 100,
                 "bounty_type": "crowdfunded",
             }),

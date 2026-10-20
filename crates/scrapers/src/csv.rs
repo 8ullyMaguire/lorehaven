@@ -1,7 +1,7 @@
 //! CSV import: parse library export files from readers' existing platforms.
 //!
 //! These are *imports of reading metadata* (ratings, shelves, dates) — not
-//! chapter bodies. The reader already has the book; this gives it a new home
+//! unit bodies. The reader already has the book; this gives it a new home
 //! in their Darkhold library without ever touching the original source.
 
 pub mod goodreads;

@@ -144,6 +144,10 @@ impl Client {
         self.request("POST", uri, Some(body)).await
     }
 
+    async fn patch(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
+        self.request("PATCH", uri, Some(body)).await
+    }
+
     async fn register(&mut self, email: &str, handle: &str) -> (String, String) {
         let (status, body) = self
             .post(
@@ -267,6 +271,21 @@ async fn no_public_representation_of_an_account_carries_its_id() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work_id = body["id"].as_str().expect("work id").to_owned();
+
+    // **The discussion mode is `comments_only`** -- the legacy shape, supported
+    // indefinitely (spec §13.2). A *new* work is `thread_only` by default and
+    // its text discussion lives in the linked forum thread, so a test that
+    // comments on a work has to say which shape it wants.
+    let (status, body) = client
+        .patch(
+            &format!("/api/v1/works/{work_id}"),
+            json!({
+                "expected_version": body["version"].as_i64().unwrap_or(1),
+                "discussion_mode": "comments_only",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set the discussion mode: {body}");
 
     // --- a comment by the pseud ---------------------------------------------
     let (status, body) = client

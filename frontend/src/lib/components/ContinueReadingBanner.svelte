@@ -155,8 +155,8 @@
     <a class="title" data-testid="continue-reading-title" href={`/works/${entry.workId}`}
       >{entry.title}</a
     >
-    {#if entry.chapterTitle}
-      <p class="chapter" data-testid="continue-reading-chapter">{entry.chapterTitle}</p>
+    {#if entry.unitTitle}
+      <p class="unit" data-testid="continue-reading-unit">{entry.unitTitle}</p>
     {/if}
     <div
       class="bar"
@@ -191,7 +191,7 @@
   .title {
     font-weight: 600;
   }
-  .chapter {
+  .unit {
     margin: 0.15rem 0 0.4rem;
     font-size: 0.9rem;
     opacity: 0.8;

@@ -14,7 +14,7 @@ import * as api from '../lib/api';
 
 const meta = (over: Partial<Record<string, unknown>> = {}) => ({
   name: 'own.reading.basic',
-  definition: 'Words and chapters the viewer completed over the window.',
+  definition: 'Words and units the viewer completed over the window.',
   freshness: 'near-real-time (minutes)',
   approximation: 'Session length and pace are estimates.',
   minimum_trust_level: 0,
@@ -63,7 +63,7 @@ describe('AnalyticsDashboard', () => {
     render(AnalyticsDashboard);
     await waitFor(() =>
       expect(
-        screen.getByText('Words and chapters the viewer completed over the window.'),
+        screen.getByText('Words and units the viewer completed over the window.'),
       ).toBeTruthy(),
     );
   });
@@ -210,7 +210,7 @@ describe('AnalyticsDashboard', () => {
       status: 'ok',
       reading: {
         finished_works: 7,
-        chapters_read: 132,
+        units_read: 132,
         words_read: 480000,
         reading_seconds: 9000,
       },
@@ -232,7 +232,7 @@ describe('AnalyticsDashboard', () => {
       status: 'ok',
       reading: {
         finished_works: 1,
-        chapters_read: 4,
+        units_read: 4,
         words_read: 9000,
         reading_seconds: 9000,
       },
@@ -251,7 +251,7 @@ describe('AnalyticsDashboard', () => {
       status: 'ok',
       reading: {
         finished_works: 1,
-        chapters_read: 4,
+        units_read: 4,
         words_read: 480000,
         reading_seconds: 600,
       },
@@ -272,7 +272,7 @@ describe('AnalyticsDashboard', () => {
       status: 'ok',
       reading: {
         finished_works: 0,
-        chapters_read: 0,
+        units_read: 0,
         words_read: 0,
         reading_seconds: 0,
       },
@@ -299,7 +299,7 @@ describe('AnalyticsDashboard', () => {
         status: 'ok',
         reading: {
           finished_works: 3,
-          chapters_read: 9,
+          units_read: 9,
           words_read: 1000,
           reading_seconds: 300,
         },
@@ -319,7 +319,7 @@ describe('AnalyticsDashboard', () => {
     // render nothing), and is not what this test is about.
     await waitFor(() => expect(screen.getByText('Session length and pace are estimates.')).toBeTruthy());
     expect(screen.queryByText('Works finished')).toBeNull();
-    expect(screen.queryByText('Chapters read')).toBeNull();
+    expect(screen.queryByText('Units read')).toBeNull();
     expect(screen.queryByText('Time reading')).toBeNull();
   });
   // -- signed out ------------------------------------------------------------

@@ -127,10 +127,10 @@ impl Harness {
         id
     }
 
-    async fn chapter(&self, work_id: &str, title: &str) -> String {
+    async fn unit(&self, work_id: &str, title: &str) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         self.exec(
-            "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at)
+            "INSERT INTO units (id, work_id, order_key, title, created_at, updated_at)
              VALUES (?1, ?2, 10, ?3, ?4, ?4)",
             &[&id, work_id, title, T0],
         )
@@ -287,10 +287,10 @@ async fn the_response_carries_both_the_raw_position_and_the_rounded_percent() {
     let acct = h.account().await;
     let p = h.pseud(&acct).await;
     let w = h.work(&p, "A Serial In Progress", "in_progress").await;
-    let c = h.chapter(&w, "Chapter 4").await;
+    let c = h.unit(&w, "Unit 4").await;
     h.exec(
         "INSERT INTO reading_progress
-           (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+           (id, account_id, pseud_id, subject_type, subject_id, unit_id,
             position_permille, device_id, created_at, updated_at)
          VALUES (?1, ?2, ?3, 'work', ?4, ?5, 835, 'laptop', ?6, ?6)",
         &[&uuid::Uuid::new_v4().to_string(), &acct, &p, &w, &c, T0],
@@ -306,7 +306,7 @@ async fn the_response_carries_both_the_raw_position_and_the_rounded_percent() {
     assert_eq!(got.title, "A Serial In Progress");
     assert_eq!(got.position_permille, 835, "the raw column, unrounded");
     assert_eq!(got.percent(), 83, "whole percent for the bar");
-    assert_eq!(got.chapter_id.as_deref(), Some(c.as_str()));
-    assert_eq!(got.chapter_title.as_deref(), Some("Chapter 4"));
+    assert_eq!(got.unit_id.as_deref(), Some(c.as_str()));
+    assert_eq!(got.unit_title.as_deref(), Some("Unit 4"));
     assert_eq!(got.updated_at, T0);
 }

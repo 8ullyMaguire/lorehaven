@@ -43,7 +43,7 @@ use darkhold_db::imports::CredentialEvent;
 use darkhold_db::{imports, Backend, Database, DatabaseConfig};
 use darkhold_scrapers::registry::Registry;
 use darkhold_scrapers::{
-    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceKey,
+    AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceUnit, SourceKey,
     SourceResult, SourceWork,
 };
 use serde_json::json;
@@ -119,9 +119,9 @@ impl SourceAdapter for GatedSource {
             status: darkhold_scrapers::WorkStatus::Unknown,
             published_at: None,
             updated_at: None,
-            chapters: vec![darkhold_scrapers::ChapterRef {
+            units: vec![darkhold_scrapers::UnitRef {
                 ordinal: 1,
-                source_chapter_key: "1".to_owned(),
+                source_unit_key: "1".to_owned(),
                 title: "One".to_owned(),
             }],
             rating_text: None,
@@ -130,12 +130,12 @@ impl SourceAdapter for GatedSource {
         })
     }
 
-    async fn fetch_chapters(
+    async fn fetch_units(
         &self,
         _fetch: &dyn Fetcher,
         _work: &SourceWork,
         _creds: Option<&Credentials>,
-    ) -> SourceResult<Vec<SourceChapter>> {
+    ) -> SourceResult<Vec<SourceUnit>> {
         Ok(Vec::new())
     }
 }

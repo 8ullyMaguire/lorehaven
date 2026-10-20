@@ -8,32 +8,32 @@ pub async fn upsert_reader_progress(
     db: &Database,
     account: &str,
     work_id: &str,
-    last_chapter: i64,
+    last_unit: i64,
 ) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(
-                "INSERT INTO reader_work_progress (account, work_id, last_chapter, updated_at)
+                "INSERT INTO reader_work_progress (account, work_id, last_unit, updated_at)
                  VALUES (?, ?, ?, ?)
-                 ON CONFLICT(account, work_id) DO UPDATE SET last_chapter = excluded.last_chapter, updated_at = excluded.updated_at"
+                 ON CONFLICT(account, work_id) DO UPDATE SET last_unit = excluded.last_unit, updated_at = excluded.updated_at"
             )
             .bind(account)
             .bind(work_id)
-            .bind(last_chapter)
+            .bind(last_unit)
             .bind(&now)
             .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO reader_work_progress (account, work_id, last_chapter, updated_at)
+                "INSERT INTO reader_work_progress (account, work_id, last_unit, updated_at)
                  VALUES ($1::uuid, $2::uuid, $3, $4)
-                 ON CONFLICT(account, work_id) DO UPDATE SET last_chapter = excluded.last_chapter, updated_at = excluded.updated_at"
+                 ON CONFLICT(account, work_id) DO UPDATE SET last_unit = excluded.last_unit, updated_at = excluded.updated_at"
             )
             .bind(account)
             .bind(work_id)
-            .bind(last_chapter)
+            .bind(last_unit)
             .bind(&now)
             .execute(db.postgres_pool().expect("postgres"))
             .await?;
@@ -49,8 +49,8 @@ pub async fn get_reader_progress(
     work_id: &str,
 ) -> Result<Option<i64>> {
     let sql = db.sql(
-        "SELECT last_chapter FROM reader_work_progress WHERE account = ? AND work_id = ?",
-        "SELECT CAST(last_chapter AS BIGINT) FROM reader_work_progress WHERE account = $1::uuid AND work_id = $2::uuid",
+        "SELECT last_unit FROM reader_work_progress WHERE account = ? AND work_id = ?",
+        "SELECT CAST(last_unit AS BIGINT) FROM reader_work_progress WHERE account = $1::uuid AND work_id = $2::uuid",
     );
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -75,19 +75,19 @@ pub async fn get_reader_progress(
 pub async fn set_topic_spoiler_scope(
     db: &Database,
     topic_id: &str,
-    chapter: Option<i64>,
+    unit: Option<i64>,
 ) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE forum_topics SET spoiler_scope_chapter = ? WHERE id = ?")
-                .bind(chapter)
+            sqlx::query("UPDATE forum_topics SET spoiler_scope_unit = ? WHERE id = ?")
+                .bind(unit)
                 .bind(topic_id)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE forum_topics SET spoiler_scope_chapter = $1 WHERE id = $2")
-                .bind(chapter)
+            sqlx::query("UPDATE forum_topics SET spoiler_scope_unit = $1 WHERE id = $2")
+                .bind(unit)
                 .bind(topic_id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;

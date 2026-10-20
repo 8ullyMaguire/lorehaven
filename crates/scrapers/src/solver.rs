@@ -33,7 +33,7 @@
 //!
 //! # Sessions
 //!
-//! A chapter import is many requests to one host, and a managed challenge solved
+//! A unit import is many requests to one host, and a managed challenge solved
 //! per request would hammer both the source and the solver. The service supports
 //! sessions — a cookie jar held across requests — so the challenge is solved once
 //! and the rest of the import rides the cookies the solve earned. The session is
@@ -139,7 +139,7 @@ impl SolverClient {
     /// # Errors
     /// [`SourceError::Unsupported`] if the endpoint is not an absolute http(s)
     /// URL — a misconfiguration the operator should see at startup, not at the
-    /// first challenged chapter.
+    /// first challenged unit.
     pub fn new(config: SolverConfig, allowed_hosts: Vec<String>) -> SourceResult<Self> {
         let parsed = url::Url::parse(&config.endpoint)
             .map_err(|e| SourceError::Unsupported(format!("solver endpoint is not a URL: {e}")))?;
@@ -220,7 +220,7 @@ impl SolverClient {
             Attempted::Failed(error) => return Err(error),
             // A session can expire between requests, or the service can be
             // restarted mid-import. Both are fixed by opening a new one rather
-            // than by failing the chapter — and this is decided from the
+            // than by failing the unit — and this is decided from the
             // service's own sentence, not from a message we composed, because a
             // `SourceError` no longer carries that sentence.
             Attempted::SessionGone => {
@@ -289,7 +289,7 @@ impl SolverClient {
             last_modified: None,
             // A solved page is the source's own page, read through a browser the
             // service owns. It is not an archived copy, and saying it was would
-            // tell a reader their chapter came from a snapshot.
+            // tell a reader their unit came from a snapshot.
             provenance: crate::Provenance::Source,
             // Not a gated fetch: the archive and the solver both answer a
             // request the fetcher already permitted, and the fixture path has no
@@ -390,7 +390,7 @@ impl SolverClient {
 
     /// One `request.get`, naming a session when there is one.
     ///
-    /// A session is used when one exists because it is what makes a multi-chapter
+    /// A session is used when one exists because it is what makes a multi-unit
     /// import one solve instead of many. The first call is session-less only if
     /// creating one failed, which is not fatal: a stateless solve still reads the
     /// page.
@@ -674,12 +674,12 @@ mod tests {
         )
         .expect("client");
 
-        // Three pages, the way a three-chapter import would ask.
-        for chapter in 1..=3 {
+        // Three pages, the way a three-unit import would ask.
+        for unit in 1..=3 {
             let page = client
-                .get(&format!("https://www.fimfiction.net/story/1/{chapter}/"))
+                .get(&format!("https://www.fimfiction.net/story/1/{unit}/"))
                 .await
-                .unwrap_or_else(|e| panic!("chapter {chapter} should still be served: {e:?}"));
+                .unwrap_or_else(|e| panic!("unit {unit} should still be served: {e:?}"));
             assert!(page.body.contains("served statelessly"));
         }
         let bodies = handle.await.expect("stub finished");
@@ -741,7 +741,7 @@ mod tests {
             seen[1]
         );
         // Without this the whole point of sessions — one solve for a whole work —
-        // is lost, and every chapter pays for a browser again.
+        // is lost, and every unit pays for a browser again.
         assert!(
             seen[2].contains("\"session\":\"abc123\""),
             "second request: {}",
@@ -755,9 +755,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_expired_session_is_replaced_rather_than_failing_the_chapter() {
+    async fn an_expired_session_is_replaced_rather_than_failing_the_unit() {
         // Two pages: the first proves the session API exists, the second finds it
-        // has expired and opens another rather than failing the chapter.
+        // has expired and opens another rather than failing the unit.
         let (endpoint, seen) = stub(vec![
             // Page one, stateless.
             ok_solution("<p>one</p>"),
@@ -778,7 +778,7 @@ mod tests {
         let fetched = client
             .get("https://www.fimfiction.net/story/2/")
             .await
-            .expect("the chapter should be recovered, not failed");
+            .expect("the unit should be recovered, not failed");
         assert!(fetched.body.contains("recovered"));
         let seen = seen.await.expect("stub finished");
         assert_eq!(seen.len(), 5, "one create, page, gone, re-create, page");
@@ -968,7 +968,7 @@ mod tests {
     #[test]
     fn a_non_http_endpoint_is_rejected_at_construction() {
         // A misconfiguration the operator should see at startup rather than at
-        // the first challenged chapter.
+        // the first challenged unit.
         for broken in ["ftp://solver", "not a url", "file:///etc/passwd", ""] {
             let error = SolverClient::new(SolverConfig::new(broken), vec![])
                 .err()

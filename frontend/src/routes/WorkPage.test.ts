@@ -96,7 +96,7 @@ const WORK = {
   published_at: '2026-09-01T00:00:00Z',
   show_public_ratings: true,
   authors: [{ handle: 'devwriter', display_name: 'Dev Writer' }],
-  chapters: [{ id: 'chapter-1', title: 'One — Low Tide', word_count: 74, ordinal: 1 }],
+  units: [{ id: 'unit-1', title: 'One — Low Tide', word_count: 74, ordinal: 1 }],
 };
 
 function review(overrides: Record<string, unknown>) {

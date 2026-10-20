@@ -13,7 +13,7 @@
 //!
 //! # Four decisions worth stating
 //!
-//! **An export is a job, not a request.** A 122-chapter work rendered to EPUB is
+//! **An export is a job, not a request.** A 122-unit work rendered to EPUB is
 //! not something to do inside a reader's HTTP request, and spec §13 makes it a
 //! queued unit whose state the reader can watch. So `POST /exports` answers `202`
 //! with a job, and the file appears later.

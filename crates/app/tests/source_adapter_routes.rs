@@ -30,7 +30,7 @@ name: Example Fictions
 base_url: https://example-fictions.test
 rate_limit_per_second: 1.0
 work_pattern: /works/{id}
-chapter_pattern: /works/{id}/chapters/{num}
+unit_pattern: /works/{id}/units/{num}
 selectors:
   title: "h1.title"
   author: "span.byline"
@@ -57,7 +57,7 @@ name: Instance Metadata
 base_url: http://169.254.169.254
 rate_limit_per_second: 1.0
 work_pattern: /latest/meta-data/{id}
-chapter_pattern: /latest/meta-data/{id}/{num}
+unit_pattern: /latest/meta-data/{id}/{num}
 selectors:
   title: "h1"
   author: "span"
@@ -79,7 +79,7 @@ name: Broken Selectors
 base_url: https://broken-selectors.test
 rate_limit_per_second: 1.0
 work_pattern: /works/{id}
-chapter_pattern: /works/{id}/chapters/{num}
+unit_pattern: /works/{id}/units/{num}
 selectors:
   title: "h1[[[title"
   author: "span.byline"

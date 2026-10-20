@@ -166,7 +166,7 @@ impl Harness {
     /// Written by hand because the door that would create it validates its
     /// subject *synchronously* — a work that does not exist is a 422 before any
     /// row is written — so getting a row that way means seeding a work with
-    /// chapters, turning a test about ownership into a test about import.
+    /// units, turning a test about ownership into a test about import.
     ///
     /// The privacy notice is acknowledged, because an export that requires
     /// delivery is refused while it is null and the `GET` under test would then
@@ -618,7 +618,7 @@ async fn a_valid_export_is_accepted_from_a_library_read_token() {
     // a 202 would be. The subject check runs *after* the scope check, so a
     // 422 here is proof the token cleared authentication and authorization and
     // was refused later for an unrelated reason (this database has no works to
-    // export). A 202 would need a real work with chapters seeded, which is a
+    // export). A 202 would need a real work with units seeded, which is a
     // fixture this file has no other reason to build — and a 403 could not
     // distinguish "refused for the wrong scope" from "refused because the
     // conversion is not installed here".
@@ -644,7 +644,7 @@ async fn an_export_token_cannot_read_another_accounts_export() {
     // The export row is inserted directly rather than requested through the
     // door. `POST /exports` validates its subject *synchronously* — a work that
     // does not exist is a 422 before any row is written — so getting a row by
-    // that route means seeding a work with chapters, which is a fixture this
+    // that route means seeding a work with units, which is a fixture this
     // test has no other reason to build and which would make a test about
     // ownership into a test about import.
     //

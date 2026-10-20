@@ -9,7 +9,7 @@ import { TYPOGRAPHY_STORAGE_KEY } from '../lib/reading';
  * The reading surface's two invisible jobs, both of which were found by
  * driving the site in a browser rather than by reading the code:
  *
- *  * **Arriving in a chapter is a reading.** The reader reported a position
+ *  * **Arriving in a unit is a reading.** The reader reported a position
  *    only on scroll, and nothing at all recorded that a work had been opened,
  *    so `/library/history` was empty for every real reader.
  *  * **The reader's appearance is applied on load.** The stored copy went on
@@ -18,9 +18,9 @@ import { TYPOGRAPHY_STORAGE_KEY } from '../lib/reading';
  *    device — and only the *local* half was ever applied.
  */
 
-const CHAPTER = {
-  chapter: {
-    id: 'chapter-1',
+const UNIT = {
+  unit: {
+    id: 'unit-1',
     title: 'One',
     order_key: 1,
     word_count: 4,
@@ -38,8 +38,8 @@ const CHAPTER = {
   revision_number: 1,
   revision_id: 'rev-1',
   editable: false,
-  previous_chapter_id: null,
-  next_chapter_id: 'chapter-2',
+  previous_unit_id: null,
+  next_unit_id: 'unit-2',
   work: {
     id: 'work-1',
     title: 'The Long Road',
@@ -48,15 +48,15 @@ const CHAPTER = {
   },
 };
 
-/** The chapter whole-work mode appends. */
+/** The unit whole-work mode appends. */
 const SECOND = {
-  ...CHAPTER,
-  chapter: { ...CHAPTER.chapter, id: 'chapter-2', title: 'Two' },
+  ...UNIT,
+  unit: { ...UNIT.unit, id: 'unit-2', title: 'Two' },
   sanitized_html: '<p>And on it goes.</p>',
   plain_text: 'And on it goes.',
   revision_id: 'rev-2',
-  previous_chapter_id: 'chapter-1',
-  next_chapter_id: null,
+  previous_unit_id: 'unit-1',
+  next_unit_id: null,
 };
 
 /**
@@ -105,7 +105,7 @@ interface Recorded {
 }
 
 let calls: Recorded[] = [];
-let secondChapterFails = false;
+let secondUnitFails = false;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -116,7 +116,7 @@ function json(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   calls = [];
-  secondChapterFails = false;
+  secondUnitFails = false;
   ImmediateObserver.watching = 0;
   vi.stubGlobal('IntersectionObserver', ImmediateObserver);
   // jsdom has no layout and says so loudly; the reader restores a position.
@@ -148,12 +148,12 @@ beforeEach(() => {
     calls.push({ method, path: new URL(url, 'http://localhost').pathname, body });
 
     if (url.includes('/settings/typography')) return json(TYPOGRAPHY);
-    if (url.includes('/chapters/chapter-2')) {
-      return secondChapterFails
+    if (url.includes('/units/unit-2')) {
+      return secondUnitFails
         ? json({ error: { code: 'INTERNAL', message: 'no' } }, 500)
         : json(SECOND);
     }
-    if (url.includes('/chapters/')) return json(CHAPTER);
+    if (url.includes('/units/')) return json(UNIT);
     if (url.includes('/reading/progress')) return new Response(null, { status: 204 });
     return json({ error: { code: 'NOT_FOUND', message: 'no' } }, 404);
   });
@@ -168,13 +168,13 @@ afterEach(() => {
 });
 
 describe('the reading surface', () => {
-  it('shows the chapter the server sent', async () => {
-    render(Reader, { workId: 'work-1', chapterId: 'chapter-1' });
+  it('shows the unit the server sent', async () => {
+    render(Reader, { workId: 'work-1', unitId: 'unit-1' });
     await waitFor(() => expect(document.body.textContent).toContain('Text to read.'));
   });
 
   it("applies the reader's stored appearance, which is what the type controls promise", async () => {
-    render(Reader, { workId: 'work-1', chapterId: 'chapter-1' });
+    render(Reader, { workId: 'work-1', unitId: 'unit-1' });
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue('--reader-font-scale')).toBe('1.3'),
     );
@@ -184,7 +184,7 @@ describe('the reading surface', () => {
   });
 
   it('records the reading when the reader arrives, without waiting for a scroll', async () => {
-    render(Reader, { workId: 'work-1', chapterId: 'chapter-1' });
+    render(Reader, { workId: 'work-1', unitId: 'unit-1' });
     await waitFor(
       () => expect(calls.some((call) => call.method === 'PUT' && call.path.endsWith('/reading/progress'))).toBe(true),
       { timeout: 4000 },
@@ -196,18 +196,18 @@ describe('the reading surface', () => {
     expect(progress?.body).toMatchObject({
       subject_type: 'work',
       subject_id: 'work-1',
-      chapter_id: 'chapter-1',
+      unit_id: 'unit-1',
       content_revision: 'rev-1',
     });
     // The local copy goes on first, so a lost request still leaves a position.
     expect(localStorage.getItem('darkhold.reading-position')).toContain('work-1');
   });
 
-  it('reads on without stopping, appending the next chapter at the end', async () => {
-    render(Reader, { workId: 'work-1', chapterId: 'chapter-1' });
+  it('reads on without stopping, appending the next unit at the end', async () => {
+    render(Reader, { workId: 'work-1', unitId: 'unit-1' });
     await waitFor(() => expect(document.body.textContent).toContain('Text to read.'));
 
-    // Off by default: the reader is in one chapter and nothing else is fetched.
+    // Off by default: the reader is in one unit and nothing else is fetched.
     expect(document.body.textContent).not.toContain('And on it goes.');
     expect(ImmediateObserver.watching).toBe(0);
 
@@ -217,15 +217,15 @@ describe('the reading surface', () => {
     );
 
     await waitFor(() => expect(document.body.textContent).toContain('And on it goes.'));
-    // The first chapter is still on the page: appending adds, it does not
+    // The first unit is still on the page: appending adds, it does not
     // replace, which is what makes it reading on rather than navigating.
     expect(document.body.textContent).toContain('Text to read.');
     expect(localStorage.getItem('darkhold.reader.whole-work')).toBe('true');
   });
 
-  it('says so and offers the way on when a chapter cannot be appended', async () => {
-    secondChapterFails = true;
-    render(Reader, { workId: 'work-1', chapterId: 'chapter-1' });
+  it('says so and offers the way on when a unit cannot be appended', async () => {
+    secondUnitFails = true;
+    render(Reader, { workId: 'work-1', unitId: 'unit-1' });
     await waitFor(() => expect(document.body.textContent).toContain('Text to read.'));
 
     await fireEvent.click(
@@ -234,15 +234,15 @@ describe('the reading surface', () => {
     );
 
     // A failed fetch is a dead end unless it says so and offers the way on: the
-    // same append, tried again, and the chapter's own page.
+    // same append, tried again, and the unit's own page.
     await waitFor(() =>
-      expect(document.body.textContent).toContain('Try the next chapter again'),
+      expect(document.body.textContent).toContain('Try the next unit again'),
     );
     expect(document.body.textContent).toContain('Open it on its own page');
   });
 
   it('drops what it appended when the reader turns the mode off', async () => {
-    render(Reader, { workId: 'work-1', chapterId: 'chapter-1' });
+    render(Reader, { workId: 'work-1', unitId: 'unit-1' });
     await waitFor(() => expect(document.body.textContent).toContain('Text to read.'));
 
     await fireEvent.click(
@@ -253,10 +253,10 @@ describe('the reading surface', () => {
 
     await fireEvent.click(
       [...document.querySelectorAll('button')].find((button) =>
-        (button.textContent ?? '').includes('One chapter at a time'))!,
+        (button.textContent ?? '').includes('One unit at a time'))!,
     );
 
-    // The page is the chapter the address names again, so the address and the
+    // The page is the unit the address names again, so the address and the
     // page agree about what is on screen.
     await waitFor(() => expect(document.body.textContent).not.toContain('And on it goes.'));
     expect(document.body.textContent).toContain('Text to read.');

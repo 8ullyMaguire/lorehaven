@@ -65,17 +65,58 @@ READ = re.compile(
 CFG_TEST = re.compile(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]")
 
 
+#: `ALTER TABLE <old> RENAME TO <new>` -- a table that changed its name.
+#:
+#: A rename is a change of vocabulary and not of content, and the probe has to
+#: follow it: the code reads the table under its NEW name, and a probe that
+#: only knew the old one would report the table as having no reader and no
+#: writer -- which is a finding about the probe and not about the instance.
+RENAME_TABLE = re.compile(
+    r"ALTER\s+TABLE\s+[\"'`\[]?(\w+)[\"'`\]]?\s+RENAME\s+TO\s+[\"'`\[]?(\w+)",
+    re.IGNORECASE,
+)
+
+#: `DROP TABLE <name>` -- a table that stopped existing.
+#:
+#: The rebuild pattern is `RENAME TO x_broken` + `CREATE TABLE x` + `DROP TABLE
+#: x_broken`, so the intermediate name is a name no code ever holds. Following
+#: the renames without the drops would report those ghosts as tables with
+#: neither a reader nor a writer.
+DROP_TABLE = re.compile(
+    r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[\"'`\[]?(\w+)",
+    re.IGNORECASE,
+)
+
+
 def schema_tables(migrations: pathlib.Path) -> dict[str, set[str]]:
-    """Every table the migrations create, and the dialect it was created in."""
+    """Every table the migrations create, and the dialect it was created in.
+
+    **A renamed table is reported under its new name.** The probe asks whether
+    the instance reads and writes a table, and the instance's code names it
+    the way the rename left it.
+    """
+    # The migrations are read IN ORDER, because the schema is a sequence: a
+    # table is created, maybe renamed, maybe dropped. Reading only the
+    # `CREATE TABLE` statements would report the ghosts of a rebuild as tables,
+    # and reading the renames without the order would report a table under the
+    # name it had before it was renamed away.
     tables: dict[str, set[str]] = defaultdict(set)
     for dialect in ("sqlite", "postgres"):
         directory = migrations / dialect
         if not directory.is_dir():
             continue
+        live: set[str] = set()
         for path in sorted(directory.glob("*.sql")):
             text = path.read_text(encoding="utf-8", errors="replace")
             for name in CREATE_TABLE.findall(text):
-                tables[name.lower()].add(dialect)
+                live.add(name.lower())
+            for old, new in RENAME_TABLE.findall(text):
+                live.discard(old.lower())
+                live.add(new.lower())
+            for name in DROP_TABLE.findall(text):
+                live.discard(name.lower())
+        for name in live:
+            tables[name].add(dialect)
     return tables
 
 

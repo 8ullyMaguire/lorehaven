@@ -128,13 +128,13 @@ async fn exec(db: &Database, tmpl: &str, args: &[&str]) {
     }
 }
 
-/// One published, complete, public work with a chapter of 4000 words, so it is
+/// One published, complete, public work with a unit of 4000 words, so it is
 /// eligible for every engine AND has a duration estimate. Returns the work id.
 async fn seed_one(db: &Database) -> String {
     let work = uuid::Uuid::new_v4().to_string();
     let account = uuid::Uuid::new_v4().to_string();
     let pseud = uuid::Uuid::new_v4().to_string();
-    let chapter = uuid::Uuid::new_v4().to_string();
+    let unit = uuid::Uuid::new_v4().to_string();
     let revision = uuid::Uuid::new_v4().to_string();
     let node = uuid::Uuid::new_v4().to_string();
 
@@ -159,27 +159,27 @@ async fn seed_one(db: &Database) -> String {
         &[&work, &pseud, T0],
     )
     .await;
-    // Chapter first with a NULL current_revision_id, then the revision, then the
-    // link — `chapters.current_revision_id` REFERENCES `chapter_revisions(id)`, and
+    // Unit first with a NULL current_revision_id, then the revision, then the
+    // link — `units.current_revision_id` REFERENCES `revisions(id)`, and
     // only PostgreSQL enforces that on insert.
     exec(
         db,
-        "INSERT INTO chapters (id, work_id, order_key, title, current_revision_id, created_at, updated_at)
+        "INSERT INTO units (id, work_id, order_key, title, current_revision_id, created_at, updated_at)
          VALUES (?1#u, ?2#u, ?3#i, 'One', NULL, ?4#t, ?4#t)",
-        &[&chapter, &work, "10", T0],
+        &[&unit, &work, "10", T0],
     )
     .await;
     exec(
         db,
-        "INSERT INTO chapter_revisions (id, chapter_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at)
+        "INSERT INTO revisions (id, unit_id, revision_number, document_json, sanitized_html, plain_text, word_count, created_by_pseud_id, created_at)
          VALUES (?1#u, ?2#u, 1, '{}', '<p>x</p>', 'x', ?3#i, ?4#u, ?5#t)",
-        &[&revision, &chapter, "4000", &pseud, T0],
+        &[&revision, &unit, "4000", &pseud, T0],
     )
     .await;
     exec(
         db,
-        "UPDATE chapters SET current_revision_id = ?2#u WHERE id = ?1#u",
-        &[&chapter, &revision],
+        "UPDATE units SET current_revision_id = ?2#u WHERE id = ?1#u",
+        &[&unit, &revision],
     )
     .await;
     exec(
@@ -212,7 +212,7 @@ async fn duration_estimates_binds_ids_as_uuids_not_text() {
     assert_eq!(
         estimates.len(),
         1,
-        "the seeded work has a chapter, so it has an estimate: {estimates:?}"
+        "the seeded work has a unit, so it has an estimate: {estimates:?}"
     );
     let minutes = estimates.get(&work).copied().expect("an estimate");
     assert!(

@@ -2,18 +2,18 @@
   /**
    * Reply form with spoiler zone awareness (spec §35.4).
    *
-   * When a topic has spoiler_scope_chapter set, warns the poster about
+   * When a topic has spoiler_scope_unit set, warns the poster about
    * potential spoilers. Also supports content warnings attachment.
    */
   import { createReply } from '../api';
 
   let {
     topicId,
-    spoilerScopeChapter,
+    spoilerScopeUnit,
     onCreated,
   }: {
     topicId: string;
-    spoilerScopeChapter?: number | null;
+    spoilerScopeUnit?: number | null;
     onCreated?: () => void;
   } = $props();
 
@@ -54,10 +54,10 @@
 <form onsubmit={reply} class="reply-form">
   <h2>Reply</h2>
 
-  {#if spoilerScopeChapter}
+  {#if spoilerScopeUnit}
     <p class="spoiler-warning">
-      ⚠ This topic is scoped to chapter {spoilerScopeChapter}. Posts that
-      reference content beyond that chapter should use a spoiler tag.
+      ⚠ This topic is scoped to unit {spoilerScopeUnit}. Posts that
+      reference content beyond that unit should use a spoiler tag.
     </p>
   {/if}
 

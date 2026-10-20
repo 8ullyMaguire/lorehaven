@@ -11,7 +11,7 @@
   import ErrorSummary from './ErrorSummary.svelte';
 
   interface Props {
-    /** The subject a note belongs to: the work, not the chapter. */
+    /** The subject a note belongs to: the work, not the unit. */
     subjectType: 'work' | 'library_item';
     subjectId: string;
     signedIn: boolean;

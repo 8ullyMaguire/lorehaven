@@ -97,7 +97,7 @@ pub enum Purpose {
     /// finishing, a reader saying why, an import bringing a work in.
     Signal,
     /// Work, labour, or attention that makes the corpus better: an author
-    /// publishing, a translator producing a chapter, a curator answering a
+    /// publishing, a translator producing a unit, a curator answering a
     /// drought.
     Supply,
     /// Both at once — the common case, and worth distinguishing because it is

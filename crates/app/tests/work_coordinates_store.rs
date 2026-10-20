@@ -15,25 +15,25 @@
 //! |---|---|
 //! | coordinates persist and read back unchanged | `a_measured_work_reads_back_identically` |
 //! | absent is not a zero, at every level | `an_unmeasurable_work_is_absent_not_zero` |
-//! | a single-chapter work is measured with no spread | `a_single_chapter_work_is_measured_with_no_spread` |
+//! | a single-unit work is measured with no spread | `a_single_unit_work_is_measured_with_no_spread` |
 //! | re-measuring replaces rather than duplicating | `a_recomputation_replaces_the_previous_row` |
 //! | many works, one query, unmeasurable omitted | `a_batch_read_returns_only_measured_works` |
 //! | the reason survives the round trip | `the_unmeasurable_reason_survives_the_round_trip` |
-//! | coordinates read from real chapter text | `coordinates_can_be_measured_from_stored_chapters` |
+//! | coordinates read from real unit text | `coordinates_can_be_measured_from_stored_units` |
 //! | a stale row can be withdrawn | `a_cleared_work_is_absent_rather_than_stale` |
 //! | the two engines agree | `both_engines_report_the_same_coordinates` |
 
 use darkhold_db::work_coordinates as wc;
 use darkhold_domain::coordinates::{
-    ChapterText, Coordinates, Corpus, Unmeasurable, WorkCoordinates, MIN_MEASURABLE_WORDS,
+    UnitText, Coordinates, Corpus, Unmeasurable, WorkCoordinates, MIN_MEASURABLE_WORDS,
 };
 use test_support::{id, scratch_dir, TestDb};
 
-/// A measurable corpus: `chapters` chapters of `words` words each.
-fn corpus_of(chapters: usize, words: usize, dialogue: usize) -> Corpus {
+/// A measurable corpus: `units` units of `words` words each.
+fn corpus_of(units: usize, words: usize, dialogue: usize) -> Corpus {
     Corpus {
-        chapters: (0..chapters)
-            .map(|_| ChapterText {
+        units: (0..units)
+            .map(|_| UnitText {
                 word_count: words,
                 plain_text: (0..(words / 20))
                     .map(|_| {
@@ -56,8 +56,8 @@ fn corpus_of(chapters: usize, words: usize, dialogue: usize) -> Corpus {
 /// Deliberately *not* hand-written numbers: the point is that the store is a
 /// faithful round trip, and a hardcoded expectation would test the fixture instead
 /// of the persistence.
-fn expected_measured(chapters: usize, words: usize, dialogue: usize) -> WorkCoordinates {
-    let outcome = darkhold_domain::coordinates::coordinates(&corpus_of(chapters, words, dialogue));
+fn expected_measured(units: usize, words: usize, dialogue: usize) -> WorkCoordinates {
+    let outcome = darkhold_domain::coordinates::coordinates(&corpus_of(units, words, dialogue));
     match outcome {
         Coordinates::Measured(c) => c,
         other => panic!("fixture must be measurable, got {other:?}"),
@@ -91,8 +91,8 @@ async fn a_measured_work_reads_back_identically() {
     assert_eq!(read.dialogue_ratio, expected.dialogue_ratio);
     assert_eq!(read.vocabulary_richness, expected.vocabulary_richness);
     assert_eq!(
-        read.chapter_length_spread, expected.chapter_length_spread,
-        "the chapter spread must survive as an Option, not collapse to a value"
+        read.unit_length_spread, expected.unit_length_spread,
+        "the unit spread must survive as an Option, not collapse to a value"
     );
     // The counts too: they are the evidence that the row describes *this* text.
     assert_eq!(read.word_count, expected.word_count);
@@ -134,19 +134,19 @@ async fn an_unmeasurable_work_is_absent_not_zero() {
 }
 
 #[tokio::test]
-async fn a_single_chapter_work_is_measured_with_no_spread() {
-    let db = scratch("coord_single_chapter").await;
+async fn a_single_unit_work_is_measured_with_no_spread() {
+    let db = scratch("coord_single_unit").await;
 
-    let work = id("coord-single-chapter");
+    let work = id("coord-single-unit");
     fixture_work(&db, &work).await;
 
-    // One chapter, so there is no chapter-length *distribution* — but the work IS
+    // One unit, so there is no unit-length *distribution* — but the work IS
     // measurable and its other three coordinates are real.
     let corpus = corpus_of(1, 1200, 300);
     let expected = expected_measured(1, 1200, 300);
     assert_eq!(
-        expected.chapter_length_spread, None,
-        "one chapter has no distribution; the fixture must actually be single-chapter"
+        expected.unit_length_spread, None,
+        "one unit has no distribution; the fixture must actually be single-unit"
     );
 
     wc::measure_and_store(db.db(), &work, &corpus, 2, "2026-10-01T12:00:00Z")
@@ -156,12 +156,12 @@ async fn a_single_chapter_work_is_measured_with_no_spread() {
     let read = wc::measured_coordinates(db.db(), &work)
         .await
         .expect("read")
-        .expect("a single-chapter work is still measured");
+        .expect("a single-unit work is still measured");
 
     assert_eq!(
-        read.chapter_length_spread, None,
+        read.unit_length_spread, None,
         "the absent spread must survive storage as None, not become 0.0 -- which \\
-         would assert 'evenly sized chapters' about a work that has exactly one"
+         would assert 'evenly sized units' about a work that has exactly one"
     );
     // And the three that do apply are present and correct.
     assert_eq!(read.dialogue_ratio, expected.dialogue_ratio);
@@ -332,28 +332,28 @@ async fn the_unmeasurable_reason_survives_the_round_trip() {
 }
 
 #[tokio::test]
-async fn coordinates_can_be_measured_from_stored_chapters() {
-    let db = scratch("coord_from_chapters").await;
+async fn coordinates_can_be_measured_from_stored_units() {
+    let db = scratch("coord_from_units").await;
 
-    let work = id("coord-from-chapters");
+    let work = id("coord-from-units");
     let author = fixture_work(&db, &work).await;
-    fixture_chapters(&db, &work, &author, 3, 800).await;
+    fixture_units(&db, &work, &author, 3, 800).await;
 
     // Pull the prose out of the database the way a backfill would, and measure it.
     let (corpus, _) = wc::corpus_for_work(db.db(), &work, 240)
         .await
-        .expect("read chapters")
-        .expect("the fixture wrote three chapters");
+        .expect("read units")
+        .expect("the fixture wrote three units");
 
     assert_eq!(
-        corpus.chapters.len(),
+        corpus.units.len(),
         3,
-        "every chapter must come back, in reading order"
+        "every unit must come back, in reading order"
     );
-    let total: usize = corpus.chapters.iter().map(|c| c.word_count).sum();
+    let total: usize = corpus.units.iter().map(|c| c.word_count).sum();
     assert_eq!(
         total, 2400,
-        "stored per-chapter word counts must be what the corpus reports, so the \
+        "stored per-unit word counts must be what the corpus reports, so the \
          coordinates agree with the number the platform already shows"
     );
 
@@ -376,17 +376,17 @@ async fn coordinates_can_be_measured_from_stored_chapters() {
         "real prose must produce sentences, not zero"
     );
     assert_eq!(
-        read.chapter_length_spread,
+        read.unit_length_spread,
         Some(0.0),
-        "three equal-length chapters have no spread"
+        "three equal-length units have no spread"
     );
 
     db.cleanup().await;
 }
 
 #[tokio::test]
-async fn a_work_measures_itself_from_its_own_stored_chapters() {
-    // The gap this pins: `corpus_for_work` read a work's chapters and
+async fn a_work_measures_itself_from_its_own_stored_units() {
+    // The gap this pins: `corpus_for_work` read a work's units and
     // `measure_and_store` wrote the result, and NOTHING called either. The store
     // and its tests were complete and correct, so the suite was green while every
     // work's coordinates were permanently absent -- and §49.3 forbids treating an
@@ -396,12 +396,12 @@ async fn a_work_measures_itself_from_its_own_stored_chapters() {
 
     let work = id("coord-measure-self");
     let author = fixture_work(&db, &work).await;
-    fixture_chapters(&db, &work, &author, 3, 800).await;
+    fixture_units(&db, &work, &author, 3, 800).await;
 
     let stored = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
         .await
         .expect("measure the work from its own text")
-        .expect("a work with three written chapters has text to measure");
+        .expect("a work with three written units has text to measure");
 
     assert!(
         stored.coordinates.is_measured(),
@@ -421,7 +421,7 @@ async fn a_work_measures_itself_from_its_own_stored_chapters() {
 }
 
 #[tokio::test]
-async fn a_work_with_no_chapters_gets_no_coordinates_at_all() {
+async fn a_work_with_no_units_gets_no_coordinates_at_all() {
     // §49.3: "A work too short to measure has no coordinates, and an absent
     // coordinate is not a zero." A work with no text is the same case arriving
     // from the database side, and writing zeroes for it would rank against it.
@@ -429,7 +429,7 @@ async fn a_work_with_no_chapters_gets_no_coordinates_at_all() {
 
     let work = id("coord-measure-empty");
     fixture_work(&db, &work).await;
-    // No chapters written.
+    // No units written.
 
     let outcome = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
         .await
@@ -437,7 +437,7 @@ async fn a_work_with_no_chapters_gets_no_coordinates_at_all() {
 
     assert!(
         outcome.is_none(),
-        "a work with no chapters must produce no coordinates, got {outcome:?}"
+        "a work with no units must produce no coordinates, got {outcome:?}"
     );
     assert!(
         wc::measured_coordinates(db.db(), &work)
@@ -459,7 +459,7 @@ async fn a_work_measures_the_same_way_twice() {
 
     let work = id("coord-measure-stable");
     let author = fixture_work(&db, &work).await;
-    fixture_chapters(&db, &work, &author, 3, 800).await;
+    fixture_units(&db, &work, &author, 3, 800).await;
 
     let first = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
         .await
@@ -541,10 +541,10 @@ async fn both_engines_report_the_same_coordinates() {
     let work = id("coord-both-engines");
     fixture_work(&db, &work).await;
 
-    // A corpus with real structure: varied prose, some dialogue, uneven chapters.
+    // A corpus with real structure: varied prose, some dialogue, uneven units.
     let corpus = Corpus {
-        chapters: vec![
-            ChapterText {
+        units: vec![
+            UnitText {
                 word_count: 900,
                 plain_text: (0..45)
                     .map(|i| {
@@ -558,7 +558,7 @@ async fn both_engines_report_the_same_coordinates() {
                     .collect::<Vec<_>>()
                     .join(" "),
             },
-            ChapterText {
+            UnitText {
                 word_count: 400,
                 plain_text: (0..20)
                     .map(|i| {
@@ -609,8 +609,8 @@ async fn both_engines_report_the_same_coordinates() {
         "[{which}] vocabulary_richness"
     );
     assert_eq!(
-        read.chapter_length_spread, expected.chapter_length_spread,
-        "[{which}] chapter_length_spread"
+        read.unit_length_spread, expected.unit_length_spread,
+        "[{which}] unit_length_spread"
     );
     assert_eq!(read.word_count, expected.word_count, "[{which}] word_count");
     assert_eq!(
@@ -650,7 +650,7 @@ async fn exec_bound_mixed(db: &TestDb, sqlite_sql: &str, postgres_sql: &str, bin
     // time. That is the whole point of the helper. An earlier version took
     // `&[String]` plus `&[i64]` and applied all the strings before the integers,
     // which is wrong whenever the integer is not the last parameter --
-    // `chapters.order_key` is `$4`, in the middle. PostgreSQL binds by `$n`, so
+    // `units.order_key` is `$4`, in the middle. PostgreSQL binds by `$n`, so
     // that version sent a `String` to `$4` and produced
     //
     //     column "order_key" is of type bigint but expression is of type text
@@ -688,7 +688,7 @@ async fn exec_bound_mixed(db: &TestDb, sqlite_sql: &str, postgres_sql: &str, bin
 
 /// One bound parameter, in the position the statement expects it.
 ///
-/// `Int` exists because `chapters.order_key` is BIGINT on PostgreSQL and INTEGER
+/// `Int` exists because `units.order_key` is BIGINT on PostgreSQL and INTEGER
 /// on SQLite: binding a string is a type error on one engine and accepted on the
 /// other, and the error names the column rather than the fixture.
 #[derive(Debug, Clone)]
@@ -785,18 +785,18 @@ async fn fixture_work(db: &TestDb, work_id: &str) -> String {
     )
     .await;
 
-    // The pseud is returned because `chapter_revisions.created_by_pseud_id` is
-    // NOT NULL and references it, so a chapter fixture cannot be written without
+    // The pseud is returned because `revisions.created_by_pseud_id` is
+    // NOT NULL and references it, so a unit fixture cannot be written without
     // knowing it. Returning it beats looking it up again from a deterministic hash.
     pseud
 }
 
-/// `chapters` + `chapter_revisions` rows carrying real prose.
+/// `units` + `revisions` rows carrying real prose.
 ///
 /// The prose is generated rather than pasted so the word count is arithmetic, and
 /// `plain_text` is stored to match it — the coordinates depend on that agreement,
 /// and a mismatch here would look like a coordinates bug rather than a fixture bug.
-async fn fixture_chapters(
+async fn fixture_units(
     db: &TestDb,
     work_id: &str,
     author_pseud: &str,
@@ -805,7 +805,7 @@ async fn fixture_chapters(
 ) {
     let now = "2026-10-01T12:00:00Z".to_string();
     for i in 0..count {
-        let chapter_id = id(&format!("coord-chapter-{work_id}-{i}"));
+        let unit_id = id(&format!("coord-unit-{work_id}-{i}"));
         let revision_id = id(&format!("coord-revision-{work_id}-{i}"));
         let plain_text: String = (0..(words_each / 20))
             .map(|_| {
@@ -820,14 +820,14 @@ async fn fixture_chapters(
 
         exec_bound_mixed(
             db,
-            "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
+            "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
              VALUES (?, ?, ?, ?, ?, ?)",
-            "INSERT INTO chapters (id, work_id, title, order_key, created_at, updated_at) \
+            "INSERT INTO units (id, work_id, title, order_key, created_at, updated_at) \
              VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
             &[
-                Bind::Text(chapter_id.clone()),
+                Bind::Text(unit_id.clone()),
                 Bind::Text(work_id.to_string()),
-                Bind::Text(format!("Chapter {i}")),
+                Bind::Text(format!("Unit {i}")),
                 // order_key is the fourth parameter and an integer on both engines.
                 Bind::Int(i as i64),
                 Bind::Text(now.clone()),
@@ -848,17 +848,17 @@ async fn fixture_chapters(
             // it), and created_by_pseud_id. plain_text and word_count are also
             // NOT NULL, which is the whole reason this fixture can drive a
             // measurement at all.
-            "INSERT INTO chapter_revisions \
-             (id, chapter_id, revision_number, document_json, sanitized_html, \
+            "INSERT INTO revisions \
+             (id, unit_id, revision_number, document_json, sanitized_html, \
               plain_text, word_count, created_by_pseud_id, created_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            "INSERT INTO chapter_revisions \
-             (id, chapter_id, revision_number, document_json, sanitized_html, \
+            "INSERT INTO revisions \
+             (id, unit_id, revision_number, document_json, sanitized_html, \
               plain_text, word_count, created_by_pseud_id, created_at) \
              VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid, $9)",
             &[
                 Bind::Text(revision_id),
-                Bind::Text(chapter_id),
+                Bind::Text(unit_id),
                 // A revision without a number cannot be ordered against its
                 // siblings, which is what "the newest revision" means.
                 Bind::Int(1),

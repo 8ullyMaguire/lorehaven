@@ -580,7 +580,7 @@ pub fn bandit_strategy() -> RecStrategyFn {
 /// 1. **Quality is completions over DISTINCT readers.** A completion costs a reader's
 ///    time, so it is the only numerator here that cannot be inflated by a refresh
 ///    (§53.6's argument). `work_view_log` has no uniqueness on the reader, so
-///    `COUNT(*)` would count a chapter opened four times four times and make a work
+///    `COUNT(*)` would count a unit opened four times four times and make a work
 ///    look better-read than it is. Views appear in the denominator precisely because
 ///    they are cheap — they measure reach, which is the thing being divided out.
 ///

@@ -26,7 +26,7 @@ const NOTIFICATIONS = {
       id: 'notif-1',
       kind: 'library_update',
       title: 'A work you follow was updated',
-      body: 'New chapter',
+      body: 'New unit',
       work_id: 'work-1',
       read: false,
       created_at: '2026-09-21T12:00:00Z',

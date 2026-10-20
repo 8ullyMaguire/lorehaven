@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * One work's editor: its metadata, its chapters, its contributors, and the
+   * One work's editor: its metadata, its units, its contributors, and the
    * controls that change its publication state.
    *
    * Two things the interface does not do, deliberately:
@@ -13,20 +13,20 @@
    */
   import {
     ApiError,
-    addChapter,
-    fetchChapter,
+    addUnit,
+    fetchUnit,
     fetchWork,
     inviteContributor,
     isAuthorWork,
     publishWork,
     removeContributor,
-    reorderChapters,
+    reorderUnits,
     setDiscussionMode,
     updateContributor,
     updateWork,
     withdrawWork,
     type AuthorWork,
-    type ChapterContent,
+    type UnitContent,
     type Invitation,
   } from '../lib/api';
   import {
@@ -74,13 +74,13 @@
   let discussionMode = $state('thread_only');
   let discussionMessage = $state<string | null>(null);
 
-  // Chapters.
-  let openChapter = $state<string | null>(null);
-  let chapterContent = $state<ChapterContent | null>(null);
-  let chapterLoading = $state(false);
-  let newChapterTitle = $state('');
-  let addingChapter = $state(false);
-  let chapterError = $state<unknown>(null);
+  // Units.
+  let openUnit = $state<string | null>(null);
+  let unitContent = $state<UnitContent | null>(null);
+  let unitLoading = $state(false);
+  let newUnitTitle = $state('');
+  let addingUnit = $state(false);
+  let unitError = $state<unknown>(null);
 
   // Publication.
   let publishing = $state(false);
@@ -105,18 +105,18 @@
    * The editor is loaded on demand.
    *
    * It carries the rich-text engine, which is most of the bundle; a reader
-   * never needs it, and an author does not need it until they open a chapter.
+   * never needs it, and an author does not need it until they open a unit.
    * Splitting it out is what keeps the reading pages small.
    */
-  type EditorComponent = typeof import('../lib/components/ChapterEditor.svelte').default;
-  let ChapterEditor = $state<EditorComponent | null>(null);
+  type EditorComponent = typeof import('../lib/components/UnitEditor.svelte').default;
+  let UnitEditor = $state<EditorComponent | null>(null);
   let editorLoadFailed = $state(false);
 
   $effect(() => {
-    if (ChapterEditor || editorLoadFailed) return;
-    void import('../lib/components/ChapterEditor.svelte')
+    if (UnitEditor || editorLoadFailed) return;
+    void import('../lib/components/UnitEditor.svelte')
       .then((module) => {
-        ChapterEditor = module.default;
+        UnitEditor = module.default;
       })
       .catch(() => {
         editorLoadFailed = true;
@@ -246,37 +246,37 @@
     }
   }
 
-  async function createChapter(event: SubmitEvent) {
+  async function createUnit(event: SubmitEvent) {
     event.preventDefault();
     const current = work;
     if (!current) return;
-    addingChapter = true;
-    chapterError = null;
+    addingUnit = true;
+    unitError = null;
     try {
-      const chapter = await addChapter(current.id, newChapterTitle.trim());
-      newChapterTitle = '';
+      const unit = await addUnit(current.id, newUnitTitle.trim());
+      newUnitTitle = '';
       await load();
-      await open(chapter.id);
+      await open(unit.id);
     } catch (failure) {
-      chapterError = failure;
+      unitError = failure;
     } finally {
-      addingChapter = false;
+      addingUnit = false;
     }
   }
 
-  async function open(chapterId: string) {
+  async function open(unitId: string) {
     const current = work;
     if (!current) return;
-    openChapter = chapterId;
-    chapterContent = null;
-    chapterLoading = true;
-    chapterError = null;
+    openUnit = unitId;
+    unitContent = null;
+    unitLoading = true;
+    unitError = null;
     try {
-      chapterContent = await fetchChapter(current.id, chapterId);
+      unitContent = await fetchUnit(current.id, unitId);
     } catch (failure) {
-      chapterError = failure;
+      unitError = failure;
     } finally {
-      chapterLoading = false;
+      unitLoading = false;
     }
   }
 
@@ -284,16 +284,16 @@
     const current = work;
     if (!current) return;
     const target = index + delta;
-    if (target < 0 || target >= current.chapters.length) return;
-    const order = current.chapters.map((chapter) => chapter.id);
+    if (target < 0 || target >= current.units.length) return;
+    const order = current.units.map((unit) => unit.id);
     const [moved] = order.splice(index, 1);
     order.splice(target, 0, moved);
-    chapterError = null;
+    unitError = null;
     try {
-      await reorderChapters(current.id, order);
+      await reorderUnits(current.id, order);
       await load();
     } catch (failure) {
-      chapterError = failure;
+      unitError = failure;
     }
   }
 
@@ -545,53 +545,53 @@
     {#if publishError}<ErrorSummary error={publishError} />{/if}
   </section>
 
-  <section aria-labelledby="chapters-heading">
-    <h2 id="chapters-heading">Chapters</h2>
-    {#if chapterError}<ErrorSummary error={chapterError} />{/if}
+  <section aria-labelledby="units-heading">
+    <h2 id="units-heading">Units</h2>
+    {#if unitError}<ErrorSummary error={unitError} />{/if}
 
-    <form class="new-chapter" onsubmit={createChapter}>
-      <TextField label="New chapter" bind:value={newChapterTitle} placeholder="Chapter title" />
-      <Button type="submit" disabled={addingChapter || !canEdit}>Add chapter</Button>
+    <form class="new-unit" onsubmit={createUnit}>
+      <TextField label="New unit" bind:value={newUnitTitle} placeholder="Unit title" />
+      <Button type="submit" disabled={addingUnit || !canEdit}>Add unit</Button>
     </form>
 
-    {#if work.chapters.length === 0}
-      <p class="note">No chapters yet. A work needs at least one with text before it can be published.</p>
+    {#if work.units.length === 0}
+      <p class="note">No units yet. A work needs at least one with text before it can be published.</p>
     {:else}
-      <ol class="chapters">
-        {#each work.chapters as chapter, index (chapter.id)}
-          <li class:open={openChapter === chapter.id}>
-            <div class="chapter-row">
-              <span class="chapter-title">{chapter.title.trim() === '' ? 'Untitled chapter' : chapter.title}</span>
+      <ol class="units">
+        {#each work.units as unit, index (unit.id)}
+          <li class:open={openUnit === unit.id}>
+            <div class="unit-row">
+              <span class="unit-title">{unit.title.trim() === '' ? 'Untitled unit' : unit.title}</span>
               <span class="note">
-                {chapter.word_count} words · {chapter.revision_count}
-                {chapter.revision_count === 1 ? 'revision' : 'revisions'}
+                {unit.word_count} words · {unit.revision_count}
+                {unit.revision_count === 1 ? 'revision' : 'revisions'}
               </span>
-              <div class="chapter-actions">
+              <div class="unit-actions">
                 <Button variant="quiet" size="sm" disabled={!canEdit} onclick={() => void move(index, -1)}>Up</Button>
                 <Button variant="quiet" size="sm" disabled={!canEdit} onclick={() => void move(index, 1)}>Down</Button>
-                <Button variant="quiet" size="sm" onclick={() => void open(chapter.id)}>
-                  {openChapter === chapter.id ? 'Reload' : 'Edit'}
+                <Button variant="quiet" size="sm" onclick={() => void open(unit.id)}>
+                  {openUnit === unit.id ? 'Reload' : 'Edit'}
                 </Button>
               </div>
             </div>
 
-            {#if openChapter === chapter.id}
-              {#if chapterLoading}
+            {#if openUnit === unit.id}
+              {#if unitLoading}
                 <Skeleton lines={3} />
-              {:else if chapterContent}
+              {:else if unitContent}
                 <!--
-                  Keyed by chapter: an editor holds one chapter's text and one
-                  autosave, so switching chapters must build a new one rather
+                  Keyed by unit: an editor holds one unit's text and one
+                  autosave, so switching units must build a new one rather
                   than re-point the old.
                 -->
-                {#key chapterContent.chapter.id}
-                  {#if ChapterEditor}
-                    <ChapterEditor
-                      chapterId={chapter.id}
+                {#key unitContent.unit.id}
+                  {#if UnitEditor}
+                    <UnitEditor
+                      unitId={unit.id}
                       workId={work.id}
-                      version={chapterContent.chapter.version}
-                      document={chapterContent.document}
-                      title={chapterContent.chapter.title}
+                      version={unitContent.unit.version}
+                      document={unitContent.document}
+                      title={unitContent.unit.title}
                       onsaved={() => void load()}
                     />
                   {:else if editorLoadFailed}
@@ -683,7 +683,7 @@
   }
 
   .metadata,
-  .new-chapter,
+  .new-unit,
   .invite {
     display: flex;
     flex-wrap: wrap;
@@ -709,39 +709,39 @@
     font-size: var(--text-sm);
   }
 
-  .chapters {
+  .units {
     list-style: none;
     padding: 0;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    counter-reset: chapter;
+    counter-reset: unit;
   }
 
-  .chapters > li {
+  .units > li {
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
     padding: var(--space-3);
   }
 
-  .chapters > li.open {
+  .units > li.open {
     border-color: var(--color-accent);
   }
 
-  .chapter-row {
+  .unit-row {
     display: flex;
     align-items: center;
     gap: var(--space-3);
     flex-wrap: wrap;
   }
 
-  .chapter-title {
+  .unit-title {
     font-family: var(--font-heading);
     flex: 1;
   }
 
-  .chapter-actions {
+  .unit-actions {
     display: flex;
     gap: var(--space-2);
   }

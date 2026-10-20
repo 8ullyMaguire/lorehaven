@@ -7,14 +7,14 @@
 //!
 //! # What §9.6 asks for, and the two things it forbids
 //!
-//! It asks for "works marked finished, chapters read, estimated words read,
+//! It asks for "works marked finished, units read, estimated words read,
 //! approximate reading time, optional personal streak". Two constraints in the
 //! same paragraph decide the shape of the query:
 //!
 //! * **"Do not count opens as proof of reading."** So nothing here is derived
 //!   from `reading_history_entry` or from `reading_progress.created_at` -- both
 //!   are written by an *open*. Finished works come from `reading_status`,
-//!   which records a decision the reader made, and chapters come from progress
+//!   which records a decision the reader made, and units come from progress
 //!   rows that were advanced.
 //! * **"Label estimates as such."** Reading time is an estimate, so the payload
 //!   carries the method's `approximation` alongside the number, and this test
@@ -23,7 +23,7 @@
 //! # The number that is not obvious
 //!
 //! `Method` for this capability says session length is "wall-clock between two
-//! progress updates on the same chapter, capped at 30 minutes per gap". That is
+//! progress updates on the same unit, capped at 30 minutes per gap". That is
 //! a cap on a *gap*, so a reader who left a tab open overnight contributes 30
 //! minutes, not eight hours. A test that seeds two updates 20 hours apart and
 //! expects 72000 seconds is testing arithmetic; one that expects 1800 is
@@ -170,7 +170,7 @@ async fn a_reader_who_has_read_nothing_gets_zeros_rather_than_a_null() {
     let body = get(&mut client, "own.reading.basic").await;
 
     assert_eq!(reading(&body)["finished_works"], json!(0), "{body}");
-    assert_eq!(reading(&body)["chapters_read"], json!(0), "{body}");
+    assert_eq!(reading(&body)["units_read"], json!(0), "{body}");
     assert_eq!(reading(&body)["words_read"], json!(0), "{body}");
     assert_eq!(reading(&body)["reading_seconds"], json!(0), "{body}");
     tdb.cleanup().await;
@@ -267,7 +267,7 @@ async fn one_readers_reading_is_not_another_readers() {
 
 /// A long gap between progress updates is capped, and the payload says so.
 ///
-/// Two updates on the same chapter 20 hours apart are 72000 seconds of
+/// Two updates on the same unit 20 hours apart are 72000 seconds of
 /// wall-clock, which is what "approximate reading time" must not report: the
 /// documented cap is 30 minutes per gap, so 1800 is the honest answer.
 #[tokio::test]
@@ -380,10 +380,10 @@ async fn seed_status(db: &darkhold_db::Database, account: &str, n: u32, status: 
     result.expect("seed a reading status");
 }
 
-/// Two progress updates on one chapter, `gap_seconds` apart.
+/// Two progress updates on one unit, `gap_seconds` apart.
 ///
-/// The `created_at` stamps are the two ends of the gap, and `chapter_id` is
-/// NULL so the two rows are "the same chapter" in the sense the method means --
+/// The `created_at` stamps are the two ends of the gap, and `unit_id` is
+/// NULL so the two rows are "the same unit" in the sense the method means --
 /// the same work, and therefore the same reading session.
 async fn seed_progress_gap(db: &darkhold_db::Database, account: &str, gap_seconds: i64) {
     // A fixed base instant, so the test does not depend on the wall clock.
@@ -396,7 +396,7 @@ async fn seed_progress_gap(db: &darkhold_db::Database, account: &str, gap_second
             darkhold_db::Backend::Sqlite => {
                 sqlx::query(
                     "INSERT INTO reading_progress
-                         (id, account_id, subject_type, subject_id, chapter_id, position_permille, created_at, updated_at, version)
+                         (id, account_id, subject_type, subject_id, unit_id, position_permille, created_at, updated_at, version)
                      VALUES (?, ?, 'work', ?, NULL, 0, ?, ?, 1)",
                 )
                 .bind(&row)
@@ -411,7 +411,7 @@ async fn seed_progress_gap(db: &darkhold_db::Database, account: &str, gap_second
             darkhold_db::Backend::Postgres => {
                 sqlx::query(
                     "INSERT INTO reading_progress
-                         (id, account_id, subject_type, subject_id, chapter_id, position_permille, created_at, updated_at, version)
+                         (id, account_id, subject_type, subject_id, unit_id, position_permille, created_at, updated_at, version)
                      VALUES ($1::uuid, $2::uuid, 'work', $3::uuid, NULL, 0, $4, $5, 1)",
                 )
                 .bind(&row)
@@ -492,7 +492,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 /// Publish a work through the real doors, returning its id.
 ///
-/// Create, add a chapter, publish -- all through the router, because a fixture
+/// Create, add a unit, publish -- all through the router, because a fixture
 /// that inserts a work directly would not catch a visibility rule that hides it.
 async fn published_work(client: &mut test_support::TestClient, title: &str) -> String {
     let (status, body) = client
@@ -508,27 +508,27 @@ async fn published_work(client: &mut test_support::TestClient, title: &str) -> S
             json!({ "title": "One" }),
         )
         .await;
-    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
-    let chapter = body["id"].as_str().expect("chapter id").to_owned();
-    let chapter_version = body["version"].as_i64().expect("chapter version");
+    assert_eq!(status, StatusCode::CREATED, "add unit: {body}");
+    let unit = body["id"].as_str().expect("unit id").to_owned();
+    let unit_version = body["version"].as_i64().expect("unit version");
 
-    // A chapter needs a document before the work can be published: the publish
+    // A unit needs a document before the work can be published: the publish
     // door refuses an empty work with "an empty work has nothing to read", which
     // is the right rule and an easy 422 to hit in a fixture.
     let doc = json!({ "type": "doc", "content": [
         { "type": "paragraph", "content": [
-            { "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+            { "type": "text", "text": "A unit with enough words to have a middle." }] }] });
     let (status, body) = client
         .request(
             "PATCH",
-            &format!("/api/v1/chapters/{chapter}"),
-            Some(json!({ "expected_version": chapter_version, "document": doc })),
+            &format!("/api/v1/chapters/{unit}"),
+            Some(json!({ "expected_version": unit_version, "document": doc })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "write the chapter: {body}");
+    assert_eq!(status, StatusCode::OK, "write the unit: {body}");
 
     // Publish is optimistic: it names the work version it expects to publish,
-    // and adding a chapter moved that version on, so the value read at create
+    // and adding a unit moved that version on, so the value read at create
     // is stale by now. Read it back rather than guessing.
     let (status, body) = client.get(format!("/api/v1/works/{id}")).await;
     assert_eq!(status, StatusCode::OK, "reload work: {body}");
@@ -826,7 +826,7 @@ async fn seed_progress_on(
         darkhold_db::Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO reading_progress
-                     (id, account_id, subject_type, subject_id, chapter_id, position_permille, created_at, updated_at, version)
+                     (id, account_id, subject_type, subject_id, unit_id, position_permille, created_at, updated_at, version)
                  VALUES (?, ?, 'work', ?, NULL, 0, ?, ?, 1)",
             )
             .bind(&row)
@@ -841,7 +841,7 @@ async fn seed_progress_on(
         darkhold_db::Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO reading_progress
-                     (id, account_id, subject_type, subject_id, chapter_id, position_permille, created_at, updated_at, version)
+                     (id, account_id, subject_type, subject_id, unit_id, position_permille, created_at, updated_at, version)
                  VALUES ($1::uuid, $2::uuid, 'work', $3::uuid, NULL, 0, $4, $5, 1)",
             )
             .bind(&row)

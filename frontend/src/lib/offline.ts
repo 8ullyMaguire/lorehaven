@@ -6,7 +6,7 @@
  * interesting decisions are all about *not* surprising the reader with it:
  *
  *  * The store is bounded. A browser will happily let a site fill the disk, and
- *    a reader who imported a 122-chapter work and exported it four times has a
+ *    a reader who imported a 122-unit work and exported it four times has a
  *    few hundred megabytes of copies of the same thing. Copies are evicted
  *    oldest-first, and the eviction is computed by a pure function so the rule is
  *    testable without a browser.

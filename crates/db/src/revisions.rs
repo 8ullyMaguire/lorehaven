@@ -194,7 +194,7 @@ pub async fn upsert(db: &Database, key: &RevisionKey<'_>, entry: &RevisionEntry)
 /// How many entries have expired.
 ///
 /// Reported rather than deleted. The bytes a stale entry points at must not be
-/// removed here: they may be referenced by a chapter a reader is reading, and
+/// removed here: they may be referenced by a unit a reader is reading, and
 /// `content_blobs` is shared. Deleting the *entry* is safe and is all an
 /// operator needs; deleting the blob is
 /// [`crate::storage::BlobStore::delete_if_unreferenced`]'s decision, made after

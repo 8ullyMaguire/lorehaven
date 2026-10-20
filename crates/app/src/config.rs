@@ -1526,8 +1526,12 @@ pub struct ForumConfig {
 impl Default for ForumConfig {
     fn default() -> Self {
         Self {
+            // **§13.2: `thread_only` is the default for new works.** A new
+            // work's page carries a typed-vote reaction bar and all text
+            // discussion lives in the linked forum thread. `comments_only` is
+            // the legacy shape, supported indefinitely.
             work_discussion_default:
-                darkhold_domain::work_discussion::WorkDiscussionMode::CommentsOnly,
+                darkhold_domain::work_discussion::WorkDiscussionMode::ThreadOnly,
             // Spec §35.2: TL1=10, TL3=30, TL5=60.
             vote_budget: vec![(1, 10), (3, 30), (5, 60)],
             meta_mod_points: 20,
@@ -1591,8 +1595,8 @@ pub struct ExportsConfig {
     /// who owns the export can always be given another one, so a leaked URL
     /// has a small window.
     pub grant_ttl_secs: i64,
-    /// CTA placement in exported ebooks (spec §42): per-chapter (default),
-    /// per-work (last chapter only), or off.
+    /// CTA placement in exported ebooks (spec §42): per-unit (default),
+    /// per-work (last unit only), or off.
     pub cta_placement: String,
     /// The CTA HTML, sanitized by the instance. The reader does not set this.
     pub cta_html: String,
@@ -1606,7 +1610,7 @@ impl Default for ExportsConfig {
         Self {
             retention_days: 0,
             grant_ttl_secs: 3600,
-            cta_placement: "per_chapter".to_string(),
+            cta_placement: "per_unit".to_string(),
             cta_html: "<p>If you enjoyed this work, show the author some love — <strong>leave a comment</strong>, <strong>share it</strong>, or <strong>start a discussion</strong>.</p>".to_string(),
             cta_quorum: 3,
         }
@@ -2463,7 +2467,7 @@ impl Config {
         let imports = ImportsConfig {
             // An empty string in a config file means "unset", not "the solver is
             // the empty URL": the latter would fail at the first challenged
-            // chapter instead of at startup.
+            // unit instead of at startup.
             solver_url: imports_file
                 .solver_url
                 .map(|url| url.trim().to_owned())
@@ -3708,9 +3712,9 @@ impl Config {
             );
         }
         let cta_placement = &self.exports.cta_placement;
-        if cta_placement != "per_chapter" && cta_placement != "per_work" && cta_placement != "off" {
+        if cta_placement != "per_unit" && cta_placement != "per_work" && cta_placement != "off" {
             anyhow::bail!(
-                "exports.cta_placement must be per_chapter, per_work, or off, got {}",
+                "exports.cta_placement must be per_unit, per_work, or off, got {}",
                 cta_placement
             );
         }
@@ -3720,7 +3724,7 @@ impl Config {
                 self.exports.cta_quorum
             );
         }
-        // Checked here rather than at the first challenged chapter: a solver URL
+        // Checked here rather than at the first challenged unit: a solver URL
         // that does not parse is an operator's typo, and a typo should stop the
         // instance rather than surface hours later as an import that cannot read
         // one source.
@@ -4329,7 +4333,7 @@ struct ExportsSection {
     retention_days: Option<i64>,
     /// How long a download grant lives, in seconds.
     grant_ttl_secs: Option<i64>,
-    /// CTA placement: per_chapter (default), per_work, or off (spec §42).
+    /// CTA placement: per_unit (default), per_work, or off (spec §42).
     cta_placement: Option<String>,
     /// The CTA HTML, sanitized by the instance. The reader does not set this.
     cta_html: Option<String>,
