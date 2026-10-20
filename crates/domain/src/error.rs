@@ -274,7 +274,6 @@ pub enum AppError {
 /// is a property of the resource and the actor's question about it is asked
 /// elsewhere; what this function answers is only ever "and what do I say when
 /// the answer is no".
-#[must_use]
 pub fn not_found_if_inaccessible(
     resource: &'static str,
     accessible: bool,

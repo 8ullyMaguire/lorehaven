@@ -761,6 +761,22 @@ mod tests {
         found
     }
 
+    /// The columns migration 0116 adds to `accounts`, read back from the row.
+    ///
+    /// **A named type, not a tuple of eight.** A tuple of eight `Option`s and
+    /// integers is a type nobody can read at the call site, and the compiler
+    /// will not tell you which one is wrong when the order is off.
+    type DarkholdAccountColumns = (
+        i64,
+        i64,
+        Option<String>,
+        Option<i64>,
+        String,
+        Option<String>,
+        f64,
+        Option<String>,
+    );
+
     /// The columns migration 0116 adds to `accounts`, in BOTH dialects.
     ///
     /// The gap the generic helper above exists for, applied to the Darkhold
@@ -817,16 +833,7 @@ mod tests {
             .expect("connect");
         db.migrate().await.expect("migrate");
 
-        let row: (
-            i64,
-            i64,
-            Option<String>,
-            Option<i64>,
-            String,
-            Option<String>,
-            f64,
-            Option<String>,
-        ) = sqlx::query_as(
+        let row: DarkholdAccountColumns = sqlx::query_as(
             "SELECT is_guest, trust_level, consented_at, consent_version, \
                         registration_mode_at_signup, folded_from_account_id, resonance, \
                         supporter_until FROM accounts LIMIT 1",

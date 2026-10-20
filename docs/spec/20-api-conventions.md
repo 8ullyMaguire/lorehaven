@@ -37,8 +37,32 @@
 - The authorisation pipeline: `authenticate → establish actor (anonymous / guest / pseud) → resolve
   the active pseud → load the resource → evaluate the policy → perform → record the audit event`.
 - **Policy lives in policy functions.** The frontend's visibility is convenience, not security.
-- **`Actor` says which it is asking about** — `account_id`, `pseud_id`, `age_state`,
-  `trust_level`, `tier`.
+- **`Actor` says which it is asking about** — `kind` (anonymous / guest / pseud),
+  `account_id`, `pseud_id`, `age_state`, `trust_level`, `tier`.
+- **A token can never exceed its account, and it stops working when the account stops.** The
+  scopes a token carries are chosen by the account that issues it and by nothing else, so the
+  question "may this account hold this scope at all" is answered **at the mint** and not at the
+  door — a door check asks "does this token have the scope", and a token that was issued with
+  `admin.write` does.
+- **A token is a credential an account holds**, so it stops working when the account does:
+  suspended, closed, or **folded** (the fold leaves a tombstone, and a tombstone must not act).
+  The resolver therefore joins the account, and the filter is `status = 'active'` rather than
+  `status <> 'folded'` — **the default has to be the closed one**, so a status nobody has
+  thought about is not treated as active.
+- **The tier and its reason come from one evaluation**, so they cannot disagree. The three T2
+  gates are evaluated in a fixed order — supporter, then trust, then resonance — and exactly one
+  wins, because three overlapping "or" conditions produce an ambiguous tier and an ambiguous tier
+  produces an ambiguous explanation.
+- **A guest is a row in `accounts` with an empty credential and `is_guest = true`** (D-6), and a
+  guest is an *account*: it has a trust level, it can never extend it, and a token it mints
+  cannot exceed it either.
+- **The age gate is separate from the consent gate.** The consent gate refuses a *mutating
+  request* without consent; the age gate decides what an account may *do* once it exists.
+  `consent.age_gate` is `"required"` by default, because D-9 makes the default instance an
+  adult-content host, so **required is the safe default and an instance has to opt out of it
+  deliberately.**
+- **A minor's account requires a guardian authorisation**, and the grant **moves the account's
+  age state** — a recorded authorisation that does not change the state is a row nobody reads.
 
 ## 20.3 Rate limiting
 

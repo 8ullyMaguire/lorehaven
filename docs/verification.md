@@ -1,3 +1,76 @@
+## 2026-10-20 — M2: identity, and the two token holes it found
+
+**Milestone:** M2 · **Requirements:** `DM2-01` … `DM2-08`
+
+The identity model: accounts, the actor, the doctrine, the tokens, the age state, the
+pseudonym's privacy, and the settings. **Three of the eight cards found something live.**
+
+### Two security holes, both closed
+
+**Any account could mint a token with `admin.write`.** The route parsed the requested scopes,
+stored them, and the resolver trusted the stored set — so the token opened every admin door.
+The check that would have caught it was at the *door* ("does this token have the scope"), and
+the token did.
+
+The check is now at the **mint**, and it asks the account's own privileges:
+
+```rust
+let grants = grantable_for(state.db(), &account, &user).await?;
+let refused = darkhold_domain::api_scopes::ungrantable_scopes(&grants, &scopes);
+```
+
+**And a suspended account's token still worked.** The resolver asked only about the token and
+never about the account, so a credential outlived the identity that held it — and a *folded*
+guest's token would have done the same, which is the one case the fold exists to prevent. The
+resolver now joins the account and requires `status = 'active'`:
+
+> **The default has to be the closed one.** The filter is `status = 'active'` rather than
+> `status <> 'folded'`, so a status nobody has thought about is not treated as active.
+
+### One capability that did not exist at all
+
+**A minor could never be authorised.** The `guardian_authorizations` table existed, and nothing
+ever wrote to it: an account that declared itself below the age threshold landed in
+`authorization_required` and **stayed there forever**. The guardian workflow the instance
+advertised could not happen.
+
+The grant now writes the authorisation **and** moves the account's age state — because *a
+recorded authorisation that does not change the state is a row nobody reads*.
+
+And `consent.age_gate` was read by nothing, so the age gate's separation from the consent gate
+was in the specification and not in the code. It now decides whether an account of unknown age
+may write, and `"required"` is the default because D-9 makes the default instance an
+adult-content host: **required is the safe default, and an instance has to opt out of it
+deliberately.**
+
+### The other five cards
+
+| card | what it shipped |
+|---|---|
+| `DM2-01` | migration 0116, both dialects: eight account columns. The types follow the schema's own rules and **not the column names** — `is_guest` is BIGINT, not BOOLEAN, because 0006 says the repository decodes i64 on both engines and a native BOOLEAN would be the one column with a second decode path. The snapshot PII gate caught all eight, and `supporter_until` is **dropped**: a list of who paid, with a date, is a purchasing record about identified-by-pseudonym people |
+| `DM2-02` | the actor model. **The tier and its reason come from ONE evaluation**, so they cannot disagree — which is §12.6 rule 6's whole point, and two functions that each re-evaluated the gates would be how a reader is told two different things |
+| `DM2-03` | the 404-not-403 doctrine in one helper, with the test. **A capability check is not one of the three cases**: "you may not moderate" is a 403, because the door is public knowledge and the permission is not |
+| `DM2-04` | **already satisfied**, and recorded as satisfied rather than left implicit: the session cookie is `darkhold_session`, HttpOnly and SameSite=Lax and Secure in production, the CSRF check covers the writers' subtree, and turning it off in production is a startup error |
+| `DM2-07` | the pseud/account link never leaks. The check is **structural as well as textual**, and it searches for a *fictional* account id as well as the real one — so a leak of a different link would be caught too |
+| `DM2-08` | the settings stay per-domain, and the JSON-bag check reads the **PostgreSQL** migrations, because SQLite has no JSON type at all: every column there is TEXT, so a SQLite scan could never see a bag |
+
+### The gates, on the committed tree
+
+```
+==> fmt        ok: fmt
+==> lint       ok: lint
+==> build      ok: build
+==> test       ok: test
+==> doc        ok: doc
+==> frontend   ok: frontend
+==> dialects   ok: dialects
+==> repo       ok: repo
+==> pg         ok: pg
+```
+
+**4,221 tests · 224 suites · 0 failed, on both engines.** The frontend: **564 tests · 77 files**,
+`svelte-check` **0 errors**.
+
 ## 2026-10-20 — M1: the measured RSS baseline, and the caps that cite it
 
 **Milestone:** M1 · **Requirements:** `DM1-01` … `DM1-10`

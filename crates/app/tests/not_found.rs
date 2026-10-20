@@ -296,9 +296,8 @@ async fn the_doctrine_has_one_helper_and_the_domain_owns_the_wording() {
     // **The doctrine is named in one place**, and the wording is the domain's.
     // A second place would be a second wording, and a second wording is how a
     // caller learns which of two answers to expect.
-    assert_eq!(
+    assert!(
         darkhold_domain::error::not_found_if_inaccessible("work", true).is_ok(),
-        true,
         "an accessible resource is not an error"
     );
     let error = darkhold_domain::error::not_found_if_inaccessible("work", false)
