@@ -25,6 +25,23 @@ use std::collections::BTreeMap;
 /// Result alias used throughout the workspace.
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
 
+/// The optimistic-concurrency detail of a conflict.
+///
+/// **Named, because a client that cannot retry is a client that clobbers.**
+/// A 409 with no version numbers tells the caller that it lost and not what
+/// it lost to, so the only way to find out is to re-read the work — and a
+/// client that re-reads and retries is a client that has to be right about
+/// the second read too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ConflictDetail {
+    /// The field the conflict is about.
+    pub field: &'static str,
+    /// The version the client believed it was editing.
+    pub expected: i64,
+    /// The version the server holds.
+    pub actual: i64,
+}
+
 /// Machine-readable error codes (spec §3.3). The string form is part of the
 /// public API contract: never rename one without a version bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -345,6 +362,22 @@ impl AppError {
     pub const fn retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        }
+    }
+
+    /// The optimistic-concurrency detail, when the error is a conflict.
+    ///
+    /// `None` for every other error, so the response body carries the detail
+    /// only where it means something.
+    #[must_use]
+    pub fn conflict(&self) -> Option<ConflictDetail> {
+        match self {
+            Self::RevisionConflict { expected, actual } => Some(ConflictDetail {
+                field: "version",
+                expected: *expected,
+                actual: *actual,
+            }),
             _ => None,
         }
     }

@@ -1296,6 +1296,11 @@
       "treatment": "rekey_account",
       "why": "Who caused the event, when a person did: the operator who granted a level, the moderator who lifted a sanction. Re-keyed on the same mapping as `accounts.id` -- and **no foreign key**, because an operator's account can be erased and the action they took should not vanish with them.",
       "reviewed_by": "alvaro, 2026-10-20, against spec 11.16 and the Darkhold trust ladder (M3-03)"
+    },
+    "works.derived_activity": {
+      "treatment": "drop_column",
+      "why": "The work's DERIVED activity -- how long ago it was published. **Never a penalty** (spec 6.2): it is not a score, not a demotion, and not a reason to show a work less. The snapshot publishes works and their signals; a recency bucket of the publication date is already derivable from `published_at`, and a stored classification of it would be a second copy of a fact the snapshot can compute. Dropped rather than kept: the value is a derived label with no research value beyond the timestamp it is derived from.",
+      "reviewed_by": "alvaro, 2026-10-20, against spec 11.16 and the Darkhold content model (M4-01)"
     }
   }
 }

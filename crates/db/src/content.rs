@@ -76,7 +76,12 @@ struct WorkRow {
     published_at: Option<String>,
     withdrawn_at: Option<String>,
     show_public_ratings: i64,
+    format: String,
     discussion_mode: String,
+    ai_training: String,
+    derived_activity: String,
+    half_life_bp: Option<i64>,
+    contested_at: Option<String>,
     body_audience: Option<String>,
     created_at: String,
     updated_at: String,
@@ -112,8 +117,34 @@ pub struct Work {
     pub withdrawn_at: Option<String>,
     /// Whether the public rating aggregate is shown on the work page.
     pub show_public_ratings: bool,
+    /// The work's form: prose/poetry/.../other (spec §6.2).
+    pub format: String,
     /// Discussion mode: thread_only/comments_only/both.
     pub discussion_mode: String,
+    /// The author's AI-training statement: allow/deny/unset (spec §15.4).
+    ///
+    /// **A statement, not a protection** — the archive indexes and recommends
+    /// AI-generated works, and this records what the author said, nothing more.
+    pub ai_training: String,
+    /// The work's derived activity: active/slow/dormant/concluded (spec §6.2).
+    ///
+    /// **Never a penalty.**
+    pub derived_activity: String,
+    /// The work's half-life in basis points (spec §11.6), or `None` when it has
+    /// not been scored yet.
+    ///
+    /// **A ranking input only**: never a public number, never a badge, never a
+    /// thing a reader is asked to optimise. It is not published by any public
+    /// surface.
+    ///
+    /// **`None` means "not yet scored", and it is a meaningful absence.** The
+    /// scale runs 0..10000, where **10000 is the maximum** — an evergreen boost
+    /// of 1.5× — and 0 is "no signal, neutral". So a default of 10000 would give
+    /// every unscored work the largest boost the mechanism can give, and the
+    /// unscored works are the newest ones.
+    pub half_life_bp: Option<i64>,
+    /// When the work was contested, RFC 3339.
+    pub contested_at: Option<String>,
     /// Storage form of the body audience, `None` when the work names none.
     ///
     /// `None` means INHERIT, not "public" — see migration 0086 for why the
@@ -353,6 +384,15 @@ pub struct WorkPatch {
     pub completion: Option<String>,
     /// Whether the public rating aggregate is displayed.
     pub show_public_ratings: Option<bool>,
+    /// The work's form (spec §6.2).
+    pub format: Option<String>,
+    /// How the work's discussion works (spec §6.2).
+    pub discussion_mode: Option<String>,
+    /// The author's AI-training statement (spec §15.4).
+    ///
+    /// **The author's own statement about their own work.** Only a
+    /// contributor may set it, and it is a statement and never a protection.
+    pub ai_training: Option<String>,
     /// New body audience (spec §7.7).
     ///
     /// Nested `Option` because the field is nullable and "inherit the instance
@@ -379,13 +419,15 @@ pub enum PublicationOutcome {
 
 const WORK_COLUMNS: &str = "id, owner_pseud_id, title, summary, language, rating, visibility, \
     lifecycle, completion, scheduled_for, published_at, withdrawn_at, show_public_ratings, \
-    discussion_mode, body_audience, created_at, updated_at, version";
+    format, discussion_mode, ai_training, derived_activity, half_life_bp, contested_at, \
+    body_audience, created_at, updated_at, version";
 
 /// The same columns, cast to text for PostgreSQL.
 const WORK_COLUMNS_PG: &str = "id::text AS id, owner_pseud_id::text AS owner_pseud_id, title, \
     summary, language, rating, visibility, lifecycle, completion, scheduled_for, published_at, \
-    withdrawn_at, show_public_ratings, discussion_mode, body_audience, created_at, updated_at, \
-    version";
+    withdrawn_at, show_public_ratings, format, discussion_mode, ai_training, derived_activity, \
+    CAST(half_life_bp AS BIGINT) AS half_life_bp, contested_at, body_audience, created_at, \
+    updated_at, version";
 
 fn decode_work(row: WorkRow) -> ContentResult<Work> {
     Ok(Work {
@@ -402,7 +444,12 @@ fn decode_work(row: WorkRow) -> ContentResult<Work> {
         published_at: row.published_at,
         withdrawn_at: row.withdrawn_at,
         show_public_ratings: row.show_public_ratings != 0,
+        format: row.format,
         discussion_mode: row.discussion_mode,
+        ai_training: row.ai_training,
+        derived_activity: row.derived_activity,
+        half_life_bp: row.half_life_bp,
+        contested_at: row.contested_at,
         body_audience: row.body_audience,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -487,16 +534,30 @@ pub async fn create_work(
     // The value is read from the policy in force rather than hardcoded, so an
     // instance whose default is 'allow' gets 'allow'. §51.1 records the posture
     // WITH the work precisely so the answer survives a later policy change.
+    // `format` and `discussion_mode` are NAMED, not defaulted.
+    //
+    // Their column defaults are 'prose' and 'comments_only' because those are
+    // what the rows that existed before those columns did should say, and
+    // **a new work is not one of those rows**. This archive is of fanfiction,
+    // and the thread is the archive's own surface — so a new work is a
+    // 'fanwork' with a 'thread_only' discussion.
+    //
+    // The alternative is rebuilding the table to change a default, which
+    // SQLite cannot do and whose documented workaround has to switch foreign
+    // keys off inside a transaction — which SQLite refuses. Migration 0119 says
+    // the whole of it.
     let insert_work = db.sql(
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
-                            lifecycle, completion, show_public_ratings, created_at, updated_at, version,
+                            lifecycle, completion, show_public_ratings, format, discussion_mode,
+                            created_at, updated_at, version,
                             generated_content_posture)
-         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1,
+         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', 'thread_only', ?, ?, 1,
                  COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'forbid'))",
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
-                            lifecycle, completion, show_public_ratings, created_at, updated_at, version,
+                            lifecycle, completion, show_public_ratings, format, discussion_mode,
+                            created_at, updated_at, version,
                             generated_content_posture)
-         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1,
+         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', 'thread_only', ?, ?, 1,
                  COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'forbid'))",
     );
 
@@ -637,11 +698,19 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
 /// Returns `Ok(false)` when the version did not match — the caller turns that
 /// into `REVISION_CONFLICT` after re-reading the stored version, so the client
 /// learns what it is racing against.
+/// Apply a patch if the caller's version is current, and record the update.
+///
+/// **The update is an event.** The event log — not the row's `updated_at` —
+/// is what drives freshness and the `updated` sort (spec §6.2), so an update
+/// that does not write an event is an update the archive cannot date. The
+/// acting pseud is required because an event without an actor is a change
+/// nobody made.
 pub async fn update_work(
     db: &Database,
     id: WorkId,
     expected_version: i64,
     patch: &WorkPatch,
+    actor: PseudId,
 ) -> Result<bool> {
     let now = now_rfc3339();
     let flags = patch.show_public_ratings.map(i64::from);
@@ -655,6 +724,9 @@ pub async fn update_work(
                 visibility = COALESCE(?, visibility),
                 completion = COALESCE(?, completion),
                 show_public_ratings = COALESCE(?, show_public_ratings),
+                format = COALESCE(?, format),
+                discussion_mode = COALESCE(?, discussion_mode),
+                ai_training = COALESCE(?, ai_training),
                 -- NOT `COALESCE`: see `WorkPatch::body_audience`. `None` must
                 -- leave the column alone and `Some(None)` must clear it, and
                 -- `COALESCE` collapses the two.
@@ -669,6 +741,9 @@ pub async fn update_work(
                 visibility = COALESCE(?, visibility),
                 completion = COALESCE(?, completion),
                 show_public_ratings = COALESCE(?, show_public_ratings),
+                format = COALESCE(?, format),
+                discussion_mode = COALESCE(?, discussion_mode),
+                ai_training = COALESCE(?, ai_training),
                 body_audience = CASE WHEN ? THEN ? ELSE body_audience END,
                 updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
@@ -683,6 +758,9 @@ pub async fn update_work(
             .bind(patch.visibility.as_deref())
             .bind(patch.completion.as_deref())
             .bind(flags)
+            .bind(patch.format.as_deref())
+            .bind(patch.discussion_mode.as_deref())
+            .bind(patch.ai_training.as_deref())
             // The `CASE WHEN ?` flag, then the value. A single bound `NULL`
             // could not distinguish "clear it" from "leave it alone", which is
             // why this is a flag-plus-value rather than one parameter.
@@ -702,6 +780,9 @@ pub async fn update_work(
             .bind(patch.visibility.as_deref())
             .bind(patch.completion.as_deref())
             .bind(flags)
+            .bind(patch.format.as_deref())
+            .bind(patch.discussion_mode.as_deref())
+            .bind(patch.ai_training.as_deref())
             // The `CASE WHEN ?` flag, then the value. A single bound `NULL`
             // could not distinguish "clear it" from "leave it alone", which is
             // why this is a flag-plus-value rather than one parameter.
@@ -715,7 +796,191 @@ pub async fn update_work(
             .rows_affected(),
     };
 
+    if affected > 0 {
+        // **The event, in the same breath as the change.** A work whose
+        // version moved with no event is a work the `updated` sort cannot
+        // date — and a version that moved with the event missing is the same
+        // defect as a level that changed with no trust event (spec §6.7): the
+        // record says one thing and the history says another.
+        let event_sql = db.sql(
+            "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+                                             idempotency_key, note, occurred_at)
+             VALUES (?, ?, NULL, 'update', ?, NULL, NULL, ?)",
+            "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
+                                             idempotency_key, note, occurred_at)
+             VALUES (?::uuid, ?::uuid, NULL, 'update', ?::uuid, NULL, NULL, ?)",
+        );
+        let event_id = uuid::Uuid::new_v4().to_string();
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query(&event_sql)
+                    .bind(&event_id)
+                    .bind(id.to_string())
+                    .bind(actor.to_string())
+                    .bind(&now)
+                    .execute(db.sqlite_pool().expect("sqlite"))
+                    .await?;
+            }
+            Backend::Postgres => {
+                sqlx::query(&event_sql)
+                    .bind(&event_id)
+                    .bind(id.to_string())
+                    .bind(actor.to_string())
+                    .bind(&now)
+                    .execute(db.postgres_pool().expect("postgres"))
+                    .await?;
+            }
+        }
+    }
+
     Ok(affected > 0)
+}
+
+// ---------------------------------------------------------------------------
+// Freshness (spec §6.2)
+// ---------------------------------------------------------------------------
+
+/// A work's freshness, read from the **event log**.
+///
+/// **The publication age and the update age are different questions.** A work
+/// edited today but published a year ago has a publication age of a year and
+/// an update age of a day, and a surface that answers "what is new?" with the
+/// second and "what has changed?" with the first is answering both wrongly.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkFreshness {
+    /// When the work was last published, from the last `publish` event.
+    pub published_at: Option<String>,
+    /// When the work was last updated, from the last `update` or
+    /// `restore_revision` event.
+    pub updated_at: Option<String>,
+}
+
+/// Which freshness a listing is sorted by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreshnessSort {
+    /// Newest *publication* first.
+    New,
+    /// Most recently *updated* first.
+    Updated,
+}
+
+impl FreshnessSort {
+    /// The stable string the sort is named by.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Updated => "updated",
+        }
+    }
+}
+
+/// A work's freshness, from the event log.
+pub async fn work_freshness(db: &Database, id: WorkId) -> Result<WorkFreshness> {
+    let sql = db.sql(
+        "SELECT
+            (SELECT MAX(occurred_at) FROM publication_events
+              WHERE work_id = ? AND action = 'publish'),
+            (SELECT MAX(occurred_at) FROM publication_events
+              WHERE work_id = ? AND action IN ('update', 'restore_revision'))",
+        "SELECT
+            (SELECT MAX(occurred_at) FROM publication_events
+              WHERE work_id = ?::uuid AND action = 'publish'),
+            (SELECT MAX(occurred_at) FROM publication_events
+              WHERE work_id = ?::uuid AND action IN ('update', 'restore_revision'))",
+    );
+    let row: Option<(Option<String>, Option<String>)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(id.to_string())
+                .bind(id.to_string())
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(id.to_string())
+                .bind(id.to_string())
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    let Some((published_at, updated_at)) = row else {
+        return Ok(WorkFreshness::default());
+    };
+    Ok(WorkFreshness {
+        published_at,
+        updated_at,
+    })
+}
+
+/// The public works, newest-first by the event log.
+///
+/// **`new` and `updated` use the right one each**, and the right one comes
+/// from the event log rather than from the row's timestamp. A work edited
+/// today but published a year ago sorts *late* under `new` and *early* under
+/// `updated` — which is the whole point of having two questions.
+pub async fn list_public_works_by_freshness(
+    db: &Database,
+    sort: FreshnessSort,
+    limit: i64,
+) -> Result<Vec<WorkId>> {
+    let (sqlite, postgres) = match sort {
+        FreshnessSort::New => (
+            "SELECT w.id FROM works w
+               WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+                 AND w.deleted_at IS NULL
+               ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id AND e.action = 'publish') DESC,
+                        w.id DESC
+               LIMIT ?",
+            "SELECT w.id::text FROM works w
+               WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+                 AND w.deleted_at IS NULL
+               ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id AND e.action = 'publish') DESC,
+                        w.id::text DESC
+               LIMIT $1",
+        ),
+        FreshnessSort::Updated => (
+            "SELECT w.id FROM works w
+               WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+                 AND w.deleted_at IS NULL
+               ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id
+                            AND e.action IN ('update', 'restore_revision')) DESC,
+                        w.id DESC
+               LIMIT ?",
+            "SELECT w.id::text FROM works w
+               WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+                 AND w.deleted_at IS NULL
+               ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id
+                            AND e.action IN ('update', 'restore_revision')) DESC,
+                        w.id::text DESC
+               LIMIT $1",
+        ),
+    };
+    let sql = db.sql(sqlite, postgres);
+    let rows: Vec<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    let mut ids = Vec::with_capacity(rows.len());
+    for (raw,) in rows {
+        ids.push(parse_id::<WorkId>(&raw, "work")?);
+    }
+    Ok(ids)
 }
 
 // ---------------------------------------------------------------------------
@@ -1722,7 +1987,12 @@ mod tests {
             published_at: None,
             withdrawn_at: None,
             show_public_ratings: true,
+            format: "fanwork".to_owned(),
             discussion_mode: "both".to_owned(),
+            ai_training: "unset".to_owned(),
+            derived_activity: "active".to_owned(),
+            half_life_bp: None,
+            contested_at: None,
             body_audience: None,
             created_at: String::new(),
             updated_at: String::new(),

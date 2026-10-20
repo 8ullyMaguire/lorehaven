@@ -351,6 +351,19 @@ struct UpdateWorkRequest {
     completion: Option<String>,
     #[serde(default)]
     show_public_ratings: Option<bool>,
+    /// The work's form (spec §6.2).
+    #[serde(default)]
+    format: Option<String>,
+    /// How the work's discussion works (spec §6.2).
+    #[serde(default)]
+    discussion_mode: Option<String>,
+    /// The author's AI-training statement (spec §15.4).
+    ///
+    /// **A statement, not a protection.** The archive indexes and recommends
+    /// AI-generated works, and this records what the author said about their
+    /// own work and nothing else.
+    #[serde(default)]
+    ai_training: Option<String>,
     /// The work's body audience (spec §7.7).
     ///
     /// A tri-state, because "not mentioned" and "set to nothing" are different
@@ -510,8 +523,12 @@ async fn update_work(
 
     let patch = work_patch(&request)?;
 
+    // The acting pseud, because the update is an **event** and an event
+    // without an actor is a change nobody made (spec §6.2: the event log
+    // drives freshness and sort).
+    let actor = acting_pseud(&user)?;
     let changed =
-        content::update_work(state.db(), work.id, request.expected_version, &patch).await?;
+        content::update_work(state.db(), work.id, request.expected_version, &patch, actor).await?;
 
     if !changed {
         let actual = content::current_work_version(state.db(), work.id).await?;
@@ -1999,6 +2016,52 @@ fn validate_completion(raw: &str) -> ApiResult<String> {
     }
 }
 
+/// Validate the work's form (spec §6.2).
+///
+/// **The domain's parser, not a second list.** The vocabulary is the
+/// specification's eighteen, and a form this build does not know is refused
+/// rather than guessed — a work silently filed as a fanwork because its author
+/// typed `fan_work` is a work whose form nobody chose.
+fn validate_format(raw: &str) -> ApiResult<String> {
+    use darkhold_domain::content::WorkFormat;
+    WorkFormat::parse(raw)
+        .map(|format| format.as_str().to_owned())
+        .ok_or_else(|| {
+            ApiError(AppError::field(
+                "format",
+                "A format is one of prose, poetry, essay, article, book, fanwork, \
+                 translation, podfic, audiobook, fan_film, video, fan_comic, comic, \
+                 zine_scan, image, interactive, dataset or other.",
+            ))
+        })
+}
+
+/// Validate the work's discussion mode (spec §6.2).
+fn validate_discussion_mode(raw: &str) -> ApiResult<String> {
+    use darkhold_domain::content::DiscussionMode;
+    DiscussionMode::parse(raw)
+        .map(|mode| mode.as_str().to_owned())
+        .ok_or_else(|| {
+            ApiError(AppError::field(
+                "discussion_mode",
+                "A discussion mode is one of thread_only, comments_only or both.",
+            ))
+        })
+}
+
+/// Validate the author's AI-training statement (spec §15.4).
+fn validate_ai_training(raw: &str) -> ApiResult<String> {
+    use darkhold_domain::content::AiTraining;
+    AiTraining::parse(raw)
+        .map(|value| value.as_str().to_owned())
+        .ok_or_else(|| {
+            ApiError(AppError::field(
+                "ai_training",
+                "An AI-training statement is one of allow, deny or unset.",
+            ))
+        })
+}
+
 /// Validate every field the request wants to change.
 ///
 /// Owned strings rather than borrows: each validated form is a trimmed copy of
@@ -2050,6 +2113,17 @@ fn work_patch(request: &UpdateWorkRequest) -> ApiResult<WorkPatch> {
         visibility,
         completion,
         show_public_ratings: request.show_public_ratings,
+        format: request.format.as_deref().map(validate_format).transpose()?,
+        discussion_mode: request
+            .discussion_mode
+            .as_deref()
+            .map(validate_discussion_mode)
+            .transpose()?,
+        ai_training: request
+            .ai_training
+            .as_deref()
+            .map(validate_ai_training)
+            .transpose()?,
         body_audience,
     })
 }

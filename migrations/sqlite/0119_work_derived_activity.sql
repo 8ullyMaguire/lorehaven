@@ -1,0 +1,64 @@
+-- 0119: the work's derived activity (M4-01).
+--
+-- Spec §6.2. A work carries more than a title and a lifecycle: it has a
+-- **form**, a **discussion mode**, the author's **AI-training statement**, a
+-- **derived activity**, a **half-life**, and a **contested** timestamp.
+--
+-- FIVE OF THE SIX ALREADY EXIST, and this migration does not touch them.
+--
+--   format             0024  — NOT NULL DEFAULT 'prose'
+--   discussion_mode    0038  — NOT NULL DEFAULT 'comments_only'
+--   ai_training        0022  — NOT NULL DEFAULT 'unset'
+--   half_life_bp       0049  — INTEGER, NULL = not yet scored
+--   contested_at       0037  — TEXT, NULL = not contested
+--
+-- **The defaults move, and the rows do not.** The column defaults are changed
+-- by the *insert* naming the columns, not by rebuilding the table:
+--
+--   * `format` becomes 'fanwork' for a **new** work — this is an archive of
+--     fanfiction, and a work that has not said what it is is a work that has
+--     not contradicted being fanfiction. The rows that existed before are
+--     'prose' and **stay 'prose'**: migration 0024 said "every row that existed
+--     before M22 is prose", and that statement is true of them.
+--   * `discussion_mode` becomes 'thread_only' for a **new** work — the thread
+--     is the archive's own surface. Migration 0038 already said the intended
+--     behaviour: "Existing works keep comments_only; the instance default
+--     applies to new works only (never retroactively)." The column's DEFAULT
+--     was the placeholder for the existing rows; the insert is where the
+--     instance default belongs.
+--
+-- A rebuild of `works` would be the other way to change a default, and it is
+-- not worth it: SQLite cannot alter a column's default, the documented
+-- rebuild procedure has to switch foreign keys off — which SQLite refuses to do
+-- inside a transaction, and every migration runs in one — and about thirty
+-- tables have foreign keys pointing at `works`.
+--
+-- `half_life_bp` STAYS NULLABLE, and the card's "NOT NULL DEFAULT 10000" is
+-- **wrong on the merits**. The scale is 0..10000, where **10000 is the maximum:
+-- an evergreen boost of 1.5×** in the ranking (spec §16.3), and 0 is "no
+-- signal, neutral". So a default of 10000 would give every unscored work the
+-- *largest* boost the mechanism can give — and the works that are unscored are
+-- the newest ones. "NULL = not yet scored (too young)" (migration 0049) is a
+-- meaningful absence; a NOT NULL default would replace it with a claim about a
+-- score nobody computed.
+--
+-- THE VOCABULARY IS CLOSED, IN THE DATABASE AS WELL AS IN THE CODE
+--
+-- `derived_activity` is new, so it can carry a CHECK — and it does, on both
+-- engines. The five existing columns cannot: SQLite cannot add a constraint to
+-- an existing column without rebuilding the table, and **the domain's closed
+-- vocabularies are what enforce them on both engines**, identically. A
+-- vocabulary that only the code checks is a vocabulary a direct write can
+-- escape — and the code is the only writer.
+--
+-- `derived_activity` IS NEVER A PENALTY
+--
+-- The value says how long ago the work was published. It is not a score, not a
+-- demotion, and not a reason to show a work less. A work that is dormant is
+-- still in the archive, still reachable, still exportable, and still the
+-- author's. And **the author's state always wins**: a work the author has
+-- declared concluded stays 'concluded', and the nightly recompute must not
+-- overwrite it.
+
+ALTER TABLE works ADD COLUMN derived_activity TEXT NOT NULL DEFAULT 'active'
+    CHECK (derived_activity IN ('active', 'slow', 'dormant', 'concluded'));

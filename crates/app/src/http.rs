@@ -109,6 +109,13 @@ struct ErrorBody {
     message: String,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     field_errors: BTreeMap<String, String>,
+    /// The optimistic-concurrency detail, when the error is a conflict.
+    ///
+    /// **Named, and only where it means something.** A 409 that says "version"
+    /// and gives both numbers is a client that can retry; a 409 that says
+    /// "conflict" is a client that has to re-read and hope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict: Option<darkhold_domain::error::ConflictDetail>,
     request_id: String,
 }
 
@@ -147,6 +154,7 @@ impl IntoResponse for ApiError {
                 code: code.as_str(),
                 message: error.public_message(),
                 field_errors: error.field_errors(),
+                conflict: error.conflict(),
                 request_id,
             },
         };
