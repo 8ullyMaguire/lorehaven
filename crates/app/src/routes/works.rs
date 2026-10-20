@@ -88,6 +88,18 @@ pub fn router() -> Router<AppState> {
                 .delete(clear_work_status),
         )
         .route("/works/{id}/publish", post(publish_work))
+        // The "more like this" ladder (spec §11.5).
+        .route("/works/{id}/more-like-this", get(more_like_this))
+        // The author's explicit relations (spec §6.2).
+        .route("/works/{id}/relations", post(relate_work))
+        // The author's series membership (spec §6.2).
+        .route("/works/{id}/series", post(put_work_in_series))
+        // The author's own declaration that the work contains generated content
+        // (spec §15.4, N-4).
+        .route(
+            "/works/{id}/generated-content",
+            patch(declare_generated_content),
+        )
         .route("/works/{id}/withdraw", post(withdraw_work))
         .route("/works/{id}/chapters", post(add_chapter))
         .route("/works/{id}/reorder-chapters", post(reorder_chapters))
@@ -140,6 +152,18 @@ struct AuthorWorkView {
     show_public_ratings: bool,
     /// The effective discussion mode (thread_only/comments_only/both).
     discussion_mode: String,
+    /// The author's AI-training statement: allow/deny/unset (spec §15.4).
+    ///
+    /// **A statement, not a protection** — and the wording below says so.
+    ai_training: String,
+    /// The statement in words (spec §15.4).
+    ///
+    /// **"this author's stated preference, recorded"**, and never "protected".
+    /// A badge that promises something the archive does not do is a lie with a
+    /// logo, and the archive indexes and recommends AI-generated works (N-4).
+    ai_training_statement: String,
+    /// The generated-content label, when the work carries one.
+    generated_content: Option<GeneratedContentView>,
     /// What the *acting* pseud may do with it.
     role: String,
     chapters: Vec<ChapterView>,
@@ -245,6 +269,14 @@ struct PublicWorkView {
     show_public_ratings: bool,
     /// The effective discussion mode (thread_only/comments_only/both).
     discussion_mode: String,
+    /// The author's AI-training statement: allow/deny/unset (spec §15.4).
+    ///
+    /// **A statement, not a protection** — and the wording below says so.
+    ai_training: String,
+    /// The statement in words (spec §15.4).
+    ai_training_statement: String,
+    /// The generated-content label, when the work carries one.
+    generated_content: Option<GeneratedContentView>,
     /// The public aggregate rating, when the owner allows it and the minimum
     /// count is met. `null` otherwise, including below the threshold.
     rating_summary: Option<PublicRatingSummaryView>,
@@ -263,6 +295,24 @@ struct PublicWorkView {
     /// is the clause, and making it structural is the point: a reader who wrote a
     /// note cannot delete the author's words by being quotable.
     rec_blurb: Option<RecBlurbView>,
+}
+
+/// The generated-content label on a work (spec §15.4, N-4).
+///
+/// **A declared attribute, and never a detection.** The archive does not
+/// detect AI-generated text and does not claim to: the author declared it, the
+/// label says they declared it, and that is the whole of the claim.
+#[derive(Debug, Serialize)]
+struct GeneratedContentView {
+    /// Whether the author declared the work to contain generated content.
+    declared: bool,
+    /// The instance's posture in force when the work was written.
+    posture: String,
+    /// The label, when the work needs one.
+    ///
+    /// `None` under a posture that does not require a label, and `None` for a
+    /// work that declared nothing: there is nothing to disclose.
+    label: Option<String>,
 }
 
 /// §49.4's rec blurb, always attributed and always quotable.
@@ -634,6 +684,313 @@ async fn publish_work(
         tracing::debug!(work = %work.id, "publication replayed for an idempotency key");
     }
 
+    Ok(Json(author_view(&state, &user, &updated).await?))
+}
+
+/// The "more like this" ladder (spec §11.5).
+///
+/// **The ladder is ordered, and each row carries its reason.** A
+/// recommendation without a reason is an advertisement, and so is a
+/// recommendation whose reason is the same string for every row.
+///
+/// **The three taste rungs are named as unavailable**, because the taste
+/// engine is not built until M13/M19. A rung that is not implemented is
+/// *named* rather than answered with a plausible number — a stub that returns
+/// a score is a ranking that looks measured and is not — and a client that
+/// asks for one by name gets a **404 naming the module**, not a
+/// `NOT_IMPLEMENTED`: the thing is not here *yet*, and 501 would be a claim
+/// about the instance rather than about the build.
+async fn more_like_this(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+    Path(id): Path<String>,
+    Query(query): Query<MoreLikeThisQuery>,
+) -> ApiResult<Json<Value>> {
+    use darkhold_domain::discovery::{
+        LadderEntry, LadderReason, MoreLikeThisRung, UnavailableRung,
+    };
+
+    let work_id = parse_work_id(&id)?;
+    // The work has to exist: the ladder is about a work.
+    content::find_work(state.db(), work_id)
+        .await?
+        .ok_or(ApiError(AppError::NotFound { resource: "work" }))?;
+
+    // **A rung the instance cannot serve is a refusal, and it names the
+    // module.** Asking for a taste-ranked recommendation is not a question the
+    // instance can answer yet, and answering it with a shorter list would be a
+    // lie about the work rather than about the build.
+    if let Some(requested) = query.rung.as_deref() {
+        let Some(rung) = MoreLikeThisRung::parse(requested) else {
+            return Err(ApiError(AppError::field(
+                "rung",
+                "A rung is one of next_in_series, same_author, theme_neighbours, \
+                 readers_also_bookmarked or taste_matched.",
+            )));
+        };
+        if rung.needs_taste_engine() {
+            return Err(ApiError(AppError::ModuleUnavailable { module: "taste" }));
+        }
+    }
+
+    let mut items: Vec<LadderEntry> = Vec::new();
+
+    // **Rung 1: the explicit relation.**
+    for related in darkhold_db::series_recs::next_in_series(state.db(), &work_id.to_string())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?
+    {
+        let Ok(related_id) = related.work_id.parse::<WorkId>() else {
+            continue;
+        };
+        items.push(LadderEntry {
+            work_id: related_id,
+            rung: MoreLikeThisRung::NextInSeries,
+            reason: LadderReason::NextInSeries {
+                series_title: related.reason,
+            },
+        });
+    }
+
+    // **Rung 2: the same author.**
+    for related in darkhold_db::series_recs::same_author_works(state.db(), &work_id.to_string())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?
+    {
+        let Ok(related_id) = related.work_id.parse::<WorkId>() else {
+            continue;
+        };
+        items.push(LadderEntry {
+            work_id: related_id,
+            rung: MoreLikeThisRung::SameAuthor,
+            reason: LadderReason::SameAuthor {
+                author_name: related.reason,
+            },
+        });
+    }
+
+    // **The rungs the instance cannot serve yet, named.**
+    let unavailable: Vec<UnavailableRung> = MoreLikeThisRung::all()
+        .into_iter()
+        .filter(|rung| rung.needs_taste_engine())
+        .map(|rung| UnavailableRung {
+            rung,
+            reason: "this rung needs the taste engine, which this instance does not \
+                     run yet"
+                .to_owned(),
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "work_id": work_id,
+        "items": items
+            .iter()
+            .map(|entry| json!({
+                "work_id": entry.work_id,
+                "rung": entry.rung.as_str(),
+                "reason": entry.reason.as_text(),
+            }))
+            .collect::<Vec<_>>(),
+        "unavailable": unavailable
+            .iter()
+            .map(|rung| json!({
+                "rung": rung.rung.as_str(),
+                "reason": rung.reason,
+            }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
+/// The author's explicit relation between their work and another (spec §6.2).
+#[derive(Debug, Deserialize)]
+struct RelateWorkRequest {
+    /// The other work.
+    to_work_id: String,
+    /// The relation: next_in_series, prequel, sequel, side_story or
+    /// translation_of.
+    relation: String,
+}
+
+/// Record an explicit relation between two works.
+///
+/// **The author's own statement**, like the AI declaration: the instance does
+/// not infer "this is the sequel" from a shared tag or a similar title, because
+/// an inferred sequel that is wrong is a reader sent to the wrong book.
+async fn relate_work(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<RelateWorkRequest>,
+) -> ApiResult<Json<Value>> {
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    use darkhold_db::series_recs::WorkRelation;
+    let relation = WorkRelation::parse(&request.relation).ok_or_else(|| {
+        ApiError(AppError::field(
+            "relation",
+            "A relation is one of next_in_series, prequel, sequel, side_story or \
+             translation_of.",
+        ))
+    })?;
+    let to_work_id = parse_work_id(&request.to_work_id)?;
+
+    // The other work has to exist: a relation to a work that is not here is a
+    // relation nobody can follow.
+    if content::find_work(state.db(), to_work_id).await?.is_none() {
+        return Err(ApiError(AppError::NotFound { resource: "work" }));
+    }
+
+    let relation_id = darkhold_db::series_recs::relate_works(
+        state.db(),
+        &work.id.to_string(),
+        &to_work_id.to_string(),
+        relation,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "id": relation_id,
+        "from_work_id": work.id,
+        "to_work_id": to_work_id,
+        "relation": relation.as_str(),
+    })))
+}
+
+/// The author's series membership for a work (spec §6.2).
+#[derive(Debug, Deserialize)]
+struct PutInSeriesRequest {
+    /// The series' stable handle. A series with this handle is created if it
+    /// does not exist.
+    slug: String,
+    /// The series' title.
+    title: String,
+    /// The work's position in the series. **The author's order, and the only
+    /// order there is.**
+    position: i64,
+}
+
+/// Put a work in a series, creating the series if it is new.
+///
+/// **The order is the author's.** There is no other order, because no signal
+/// here could support one and inventing an order would silently contradict the
+/// author.
+async fn put_work_in_series(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<PutInSeriesRequest>,
+) -> ApiResult<Json<Value>> {
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+    if request.position < 1 {
+        return Err(ApiError(AppError::field(
+            "position",
+            "A position is one or more: the author's order starts at one.",
+        )));
+    }
+
+    let series_id = darkhold_db::series_recs::put_in_series(
+        state.db(),
+        &request.slug,
+        &request.title,
+        &work.id.to_string(),
+        request.position,
+        Some(acting_pseud(&user)?.to_string()),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "series_id": series_id,
+        "slug": request.slug,
+        "work_id": work.id,
+        "position": request.position,
+    })))
+}
+
+/// The query the ladder takes.
+#[derive(Debug, Deserialize)]
+pub struct MoreLikeThisQuery {
+    /// One rung, when the client wants that rung rather than the ladder.
+    pub rung: Option<String>,
+}
+
+/// The author's declaration about their own work (spec §15.4, N-4).
+#[derive(Debug, Deserialize)]
+struct GeneratedContentDeclarationRequest {
+    /// `declared` or `undeclared`.
+    ///
+    /// **Two values, and "I did not say anything" is one of them.** A work
+    /// that declared nothing and a work that declared itself clean are
+    /// different records, and collapsing them would let an author's silence
+    /// read as a statement.
+    declaration: String,
+}
+
+/// Record — or withdraw — the author's declaration that the work contains
+/// generated content.
+///
+/// **A declaration, never a detection.** The archive does not detect
+/// AI-generated text and does not claim to (N-4): the author says so, and the
+/// label says they said so.
+///
+/// **The instance's posture decides what happens to the declaration, and its
+/// refusal names the policy** (spec §6.9): under `forbid` a declared work is
+/// refused, and the refusal says "this instance forbids generated content" —
+/// the rule, not a bare error.
+async fn declare_generated_content(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<GeneratedContentDeclarationRequest>,
+) -> ApiResult<Json<AuthorWorkView>> {
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    use darkhold_domain::generated_content::GeneratedContentDeclaration;
+    let declaration = match request.declaration.as_str() {
+        "declared" => GeneratedContentDeclaration::DeclaredGenerated,
+        "undeclared" => GeneratedContentDeclaration::Undeclared,
+        other => {
+            return Err(ApiError(AppError::field(
+                "declaration",
+                format!("A declaration is one of declared or undeclared, not {other:?}."),
+            )))
+        }
+    };
+
+    let posture = darkhold_db::generated_content::generated_content_policy(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    let declared_at = crate::format_rfc3339(time::OffsetDateTime::now_utc());
+    darkhold_db::generated_content::stamp_work_posture(
+        state.db(),
+        &work.id.to_string(),
+        declaration,
+        posture,
+        &declared_at,
+    )
+    .await
+    // The refusal names the policy (spec §6.9), and it is a **refusal, not a
+    // fault**: the instance has said no and the author is told which rule.
+    .map_err(|refusal| {
+        ApiError(AppError::Validation {
+            message: refusal.to_string(),
+            field_errors: Default::default(),
+        })
+    })?;
+
+    let updated = reload(&state, work.id).await?;
     Ok(Json(author_view(&state, &user, &updated).await?))
 }
 
@@ -1368,6 +1725,9 @@ async fn author_view(
         withdrawn_at: work.withdrawn_at.clone(),
         show_public_ratings: work.show_public_ratings,
         discussion_mode: work.discussion_mode.clone(),
+        ai_training: work.ai_training.clone(),
+        ai_training_statement: ai_training_statement(&work.ai_training),
+        generated_content: generated_content_view(&state, &work).await,
         role,
         chapters: chapters.into_iter().map(ChapterView::from).collect(),
         contributors: contributor_views,
@@ -1463,6 +1823,9 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         published_at: work.published_at.clone(),
         show_public_ratings: work.show_public_ratings,
         discussion_mode: work.discussion_mode.clone(),
+        ai_training: work.ai_training.clone(),
+        ai_training_statement: ai_training_statement(&work.ai_training),
+        generated_content: generated_content_view(&state, &work).await,
         rating_summary: rating_summary.map(|summary| PublicRatingSummaryView {
             count: summary.count,
             mean_stars: summary.mean_permille as f64 / 1000.0,
@@ -1473,6 +1836,48 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         chapters: chapters.into_iter().map(ChapterView::from).collect(),
         rec_blurb,
     })
+}
+
+/// The generated-content label on a work (spec §15.4, N-4).
+///
+/// **A declared attribute, and never a detection.** The archive does not detect
+/// AI-generated text and does not claim to: the author declared it, the label
+/// says they declared it, and that is the whole of the claim.
+///
+/// A failure to read the label must not hide the work: the work is the reader's
+/// business and the label is a detail.
+async fn generated_content_view(state: &AppState, work: &Work) -> Option<GeneratedContentView> {
+    use darkhold_domain::generated_content::GeneratedContentDeclaration;
+    match darkhold_db::generated_content::work_generated_content(state.db(), &work.id.to_string())
+        .await
+    {
+        Ok(Some(posture)) => Some(GeneratedContentView {
+            declared: posture.declaration == GeneratedContentDeclaration::DeclaredGenerated,
+            posture: posture.posture.as_str().to_owned(),
+            label: posture
+                .needs_marker()
+                .then(|| "declared by its author as containing generated content".to_owned()),
+        }),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::warn!(%error, "the generated-content label could not be read");
+            None
+        }
+    }
+}
+
+/// The author's AI-training statement, in words (spec §15.4).
+///
+/// **"this author's stated preference, recorded"** — the specification's own
+/// words — and never "protected". The archive indexes and recommends
+/// AI-generated works (N-4), so a badge that promised protection would promise
+/// something the archive does not do.
+fn ai_training_statement(stored: &str) -> String {
+    use darkhold_domain::content::AiTraining;
+    AiTraining::parse(stored)
+        .unwrap_or_default()
+        .as_statement()
+        .to_owned()
 }
 
 async fn reload(state: &AppState, id: WorkId) -> ApiResult<Work> {
@@ -1502,7 +1907,7 @@ async fn record_view_for_work(
         false,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     if is_new {
         work_metrics::increment_views(state.db(), &work_id.to_string())
             .await
@@ -1543,7 +1948,7 @@ async fn toggle_kudos(
         &actor.account_id.to_string(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     // §50.1: the reason rides along with the kudos rather than on its own
     // endpoint. Only stored when the kudos actually landed — toggling OFF removes
@@ -1713,7 +2118,7 @@ async fn create_highlight(
         body.note.as_deref(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     let signal = darkhold_db::reasons_store::highlight_signal(state.db(), &work_id.to_string())
         .await
@@ -1804,7 +2209,7 @@ async fn set_work_status(
         status,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     Ok(Json(library::status_json(&row)))
 }
 
@@ -1823,7 +2228,7 @@ async fn clear_work_status(
         &work_id.to_string(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     if !removed {
         return Err(ApiError(AppError::NotFound {
             resource: "reading status",

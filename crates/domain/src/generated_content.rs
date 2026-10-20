@@ -33,16 +33,10 @@ use std::fmt;
 
 /// The instance's generated-content posture (§51.1).
 ///
-/// Exactly three values, no `unknown`, and the default is [`Self::Forbid`].
+/// Exactly three values, no `unknown`, and the default is [`Self::Allow`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GeneratedContentPosture {
     /// Refuse at write time, before the work row exists.
-    ///
-    /// The default for a new instance. `allow` is the only value that changes what
-    /// the corpus *is*, so §51.1 makes an instance choose it deliberately rather
-    /// than arriving there by omission — and an operator who wants nothing
-    /// generated has to do nothing, which is the safe direction to point.
-    #[default]
     Forbid,
     /// Accept, and label the work wherever it is shown.
     Disclose,
@@ -52,6 +46,18 @@ pub enum GeneratedContentPosture {
     /// a disclosure UI it does not believe in. This is the whole reason the posture
     /// is instance policy rather than a fixed rule: the two other values assume the
     /// operator wants to prevent or to flag generated work, and some do not.
+    ///
+    /// **The default** (spec §6.9, D-4/N-4). The archive indexes and recommends
+    /// AI-generated works, labelled as a declared attribute — and the reason is
+    /// about this archive and not about safety in the abstract: the owner's corpus
+    /// has 8 of 54 works carrying `ai-generated text`, and **he writes them**. An
+    /// archive whose default refuses the work its own author writes is an archive
+    /// that refuses its author.
+    ///
+    /// The posture is still the operator's and nothing raises it (spec §6.9): an
+    /// operator who wants nothing generated sets `forbid`, and the refusal that
+    /// follows names the policy.
+    #[default]
     Allow,
 }
 

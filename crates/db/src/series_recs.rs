@@ -344,3 +344,321 @@ impl SeriesRow {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Series, relations and the "more like this" ladder (spec §6.2, §11.5)
+// ---------------------------------------------------------------------------
+
+/// An explicit relation between two works (spec §6.2).
+///
+/// **A closed vocabulary of five**, and the same list the schema's `CHECK`
+/// holds. A relation outside it is not a relation the instance can explain,
+/// and a free-text relation would make "next in series" and "the next one,
+/// probably" indistinguishable — which is exactly the distinction the ladder's
+/// first rung rests on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkRelation {
+    /// The next work in the series. The ladder's first rung reads this one.
+    NextInSeries,
+    /// The work that came before this one.
+    Prequel,
+    /// The work that came after this one.
+    Sequel,
+    /// A story in the same world that is not part of the series.
+    SideStory,
+    /// A translation of this work.
+    TranslationOf,
+}
+
+impl WorkRelation {
+    /// The relation's stable name, as the schema stores it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NextInSeries => "next_in_series",
+            Self::Prequel => "prequel",
+            Self::Sequel => "sequel",
+            Self::SideStory => "side_story",
+            Self::TranslationOf => "translation_of",
+        }
+    }
+
+    /// Parse the stored name, refusing an unknown relation.
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "next_in_series" => Some(Self::NextInSeries),
+            "prequel" => Some(Self::Prequel),
+            "sequel" => Some(Self::Sequel),
+            "side_story" => Some(Self::SideStory),
+            "translation_of" => Some(Self::TranslationOf),
+            _ => None,
+        }
+    }
+}
+
+/// One ladder recommendation, as the store produces it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedWork {
+    /// The work recommended.
+    pub work_id: String,
+    /// The reason, in the words the reader sees.
+    pub reason: String,
+}
+
+/// The works explicitly related to this one as *next in series*, with the
+/// series' title.
+///
+/// **The explicit relation, not the series' order** (spec §11.5). The series'
+/// order is the author's, and a relation is a statement about two works that
+/// may not be in a series at all — so the ladder's first rung reads the
+/// relation and the series is where the *reason* comes from.
+pub async fn next_in_series(db: &Database, work_id: &str) -> Result<Vec<RelatedWork>> {
+    let sql = db.sql(
+        "SELECT r.to_work_id, COALESCE(s.title, '')
+           FROM work_relations r
+           LEFT JOIN series_entries e ON e.work_id = r.from_work_id
+           LEFT JOIN series s ON s.id = e.series_id
+          WHERE r.from_work_id = ? AND r.relation_type = 'next_in_series'
+          ORDER BY r.to_work_id",
+        "SELECT r.to_work_id::text, COALESCE(s.title, '')
+           FROM work_relations r
+           LEFT JOIN series_entries e ON e.work_id = r.from_work_id
+           LEFT JOIN series s ON s.id = e.series_id
+          WHERE r.from_work_id = $1::uuid AND r.relation_type = 'next_in_series'
+          ORDER BY r.to_work_id::text",
+    );
+    let rows: Vec<(String, String)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .map(|(work_id, series_title)| RelatedWork {
+            work_id,
+            reason: if series_title.is_empty() {
+                "the next one in its series".to_owned()
+            } else {
+                format!("the next one in {series_title}")
+            },
+        })
+        .collect())
+}
+
+/// The same author's other published works, with the author's public name.
+///
+/// **The author's public face, never the account.** The name on a byline is
+/// what a reader knows the author by, and the account behind it is not
+/// something this surface may publish (spec §7).
+pub async fn same_author_works(db: &Database, work_id: &str) -> Result<Vec<RelatedWork>> {
+    let sql = db.sql(
+        "SELECT w.id, COALESCE(p.display_name, p.handle)
+           FROM works w
+           JOIN pseuds p ON p.id = w.owner_pseud_id
+          WHERE w.owner_pseud_id = (SELECT owner_pseud_id FROM works WHERE id = ?)
+            AND w.id <> ?
+            AND w.lifecycle = 'published'
+            AND w.visibility = 'public'
+            AND w.deleted_at IS NULL
+          ORDER BY w.published_at DESC, w.id",
+        "SELECT w.id::text, COALESCE(p.display_name, p.handle)
+           FROM works w
+           JOIN pseuds p ON p.id = w.owner_pseud_id
+          WHERE w.owner_pseud_id = (SELECT owner_pseud_id FROM works WHERE id = $1::uuid)
+            AND w.id <> $1::uuid
+            AND w.lifecycle = 'published'
+            AND w.visibility = 'public'
+            AND w.deleted_at IS NULL
+          ORDER BY w.published_at DESC, w.id::text",
+    );
+    let rows: Vec<(String, String)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .map(|(work_id, author_name)| RelatedWork {
+            work_id,
+            reason: format!("more by {author_name}"),
+        })
+        .collect())
+}
+
+/// Record an explicit relation between two works.
+pub async fn relate_works(
+    db: &Database,
+    from_work_id: &str,
+    to_work_id: &str,
+    relation: WorkRelation,
+) -> Result<String, sqlx::Error> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = crate::identity::now_rfc3339();
+    let sql = db.sql(
+        "INSERT INTO work_relations (id, from_work_id, to_work_id, relation_type, created_at, updated_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, 1)",
+        "INSERT INTO work_relations (id, from_work_id, to_work_id, relation_type, created_at, updated_at, version)
+         VALUES (?::uuid, ?::uuid, ?::uuid, $4, $5, $6, 1)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(from_work_id)
+                .bind(to_work_id)
+                .bind(relation.as_str())
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(from_work_id)
+                .bind(to_work_id)
+                .bind(relation.as_str())
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(id)
+}
+
+/// Put a work in a series, creating the series if it is new.
+///
+/// **The series is created on demand** rather than by a separate call, because
+/// a series with one entry is the common case and a two-step dance to publish
+/// one work in a series is a step nobody will take.
+///
+/// The position is the author's and there is no other order.
+pub async fn put_in_series(
+    db: &Database,
+    slug: &str,
+    title: &str,
+    work_id: &str,
+    position: i64,
+    owner_pseud_id: Option<String>,
+) -> Result<String, sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    let series_id = uuid::Uuid::new_v4().to_string();
+
+    // The series, upserted by its slug. `ON CONFLICT DO NOTHING` and then a
+    // read, rather than an upsert that overwrites the title: a series' title
+    // is its own and a second work joining it must not rename it.
+    let insert_series = db.sql(
+        "INSERT INTO series (id, slug, title, description, owner_pseud_id, created_at, updated_at, version)
+         VALUES (?, ?, ?, '', ?, ?, ?, 1)
+         ON CONFLICT(slug) DO NOTHING",
+        "INSERT INTO series (id, slug, title, description, owner_pseud_id, created_at, updated_at, version)
+         VALUES (?::uuid, $1, $2, '', $3::uuid, $4, $5, 1)
+         ON CONFLICT(slug) DO NOTHING",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&insert_series)
+                .bind(&series_id)
+                .bind(slug)
+                .bind(title)
+                .bind(owner_pseud_id.as_deref())
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&insert_series)
+                .bind(&series_id)
+                .bind(slug)
+                .bind(title)
+                .bind(owner_pseud_id.as_deref())
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+
+    let read_series = db.sql(
+        "SELECT id FROM series WHERE slug = ?",
+        "SELECT id::text FROM series WHERE slug = $1",
+    );
+    let existing: String = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&read_series)
+                .bind(slug)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&read_series)
+                .bind(slug)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+
+    // The entry. `ON CONFLICT (series_id, work_id) DO UPDATE` so a work that
+    // moves position is updated rather than duplicated — the series' order is
+    // one order, and a work in it twice would be two.
+    let entry_id = uuid::Uuid::new_v4().to_string();
+    let insert_entry = db.sql(
+        "INSERT INTO series_entries (id, series_id, work_id, position, created_at, updated_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(series_id, work_id) DO UPDATE SET position = excluded.position,
+             updated_at = excluded.updated_at, version = series_entries.version + 1",
+        "INSERT INTO series_entries (id, series_id, work_id, position, created_at, updated_at, version)
+         VALUES (?::uuid, $1::uuid, $2::uuid, $3, $4, $5, 1)
+         ON CONFLICT(series_id, work_id) DO UPDATE SET position = excluded.position,
+             updated_at = excluded.updated_at, version = series_entries.version + 1",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&insert_entry)
+                .bind(&entry_id)
+                .bind(&existing)
+                .bind(work_id)
+                .bind(position)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&insert_entry)
+                .bind(&entry_id)
+                .bind(&existing)
+                .bind(work_id)
+                .bind(position)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+
+    Ok(existing)
+}

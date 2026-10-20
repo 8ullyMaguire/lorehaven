@@ -2104,6 +2104,40 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     },
     // The modlog: readable by any signed-in reader (spec §14.6). **Not
     // `Public`** — an anonymous reader gets 401, not the record.
+    // The "more like this" ladder (spec §11.5). **Public**: a reader with no
+    // session may ask what is next to a work.
+    RouteEntry {
+        file: "works.rs",
+        handler: "more_like_this",
+        method: "GET",
+        path: "/works/{id}/more-like-this",
+        audience: Audience::Public,
+    },
+    // The author's explicit relations (spec §6.2).
+    RouteEntry {
+        file: "works.rs",
+        handler: "relate_work",
+        method: "POST",
+        path: "/works/{id}/relations",
+        audience: Audience::Authenticated,
+    },
+    // The author's series membership (spec §6.2).
+    RouteEntry {
+        file: "works.rs",
+        handler: "put_work_in_series",
+        method: "POST",
+        path: "/works/{id}/series",
+        audience: Audience::Authenticated,
+    },
+    // The author's own declaration that the work contains generated content
+    // (spec §15.4, N-4). **A declaration, never a detection.**
+    RouteEntry {
+        file: "works.rs",
+        handler: "declare_generated_content",
+        method: "PATCH",
+        path: "/works/{id}/generated-content",
+        audience: Audience::Authenticated,
+    },
     RouteEntry {
         file: "governance.rs",
         handler: "modlog",

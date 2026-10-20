@@ -68,7 +68,11 @@ pub async fn generated_content_policy(db: &Database) -> Result<GeneratedContentP
     // (a migration that skipped it, or a hand-edited row) and defaulting it would
     // hide that behind a policy nobody chose.
     match stored {
-        None => Ok(GeneratedContentPosture::Forbid),
+        // **The default is `allow`** (spec §6.9, D-4/N-4): the archive indexes
+        // and recommends AI-generated works, labelled as a declared attribute.
+        // An instance that has *decided* keeps its decision -- this arm is the
+        // answer for an instance that has not.
+        None => Ok(GeneratedContentPosture::Allow),
         Some(raw) => raw
             .parse::<GeneratedContentPosture>()
             .map_err(|UnknownPosture(raw)| {

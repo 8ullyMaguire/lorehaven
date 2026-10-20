@@ -361,6 +361,17 @@ pub struct OwnedWork {
     pub word_count: i64,
     /// The acting pseud's role on it.
     pub role: String,
+    /// The author's AI-training statement: allow/deny/unset (spec §15.4).
+    ///
+    /// **A statement, not a protection.** The archive indexes and recommends
+    /// AI-generated works, and this records what the author said about their
+    /// own work and nothing else.
+    pub ai_training: String,
+    /// Whether the author declared the work to contain generated content.
+    ///
+    /// **A declared attribute** (N-4), and never a detection: the archive does
+    /// not detect AI-generated text and does not claim to.
+    pub generated_declared: bool,
 }
 
 /// The fields a `PATCH /works/:id` may change.
@@ -552,13 +563,13 @@ pub async fn create_work(
                             created_at, updated_at, version,
                             generated_content_posture)
          VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', 'thread_only', ?, ?, 1,
-                 COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'forbid'))",
+                 COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'allow'))",
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
                             lifecycle, completion, show_public_ratings, format, discussion_mode,
                             created_at, updated_at, version,
                             generated_content_posture)
          VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', 'thread_only', ?, ?, 1,
-                 COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'forbid'))",
+                 COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'allow'))",
     );
 
     let insert_owner = db.sql(
@@ -648,6 +659,8 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
         "SELECT w.id AS id, w.title AS title, w.lifecycle AS lifecycle, w.visibility AS visibility,
                 w.completion AS completion, w.rating AS rating, w.updated_at AS updated_at,
                 w.published_at AS published_at, w.version AS version,
+                w.ai_training AS ai_training,
+                (w.generated_declared_at IS NOT NULL) AS generated_declared,
                 (SELECT COUNT(*) FROM chapters c
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS chapter_count,
                 (SELECT COALESCE(CAST(SUM(r.word_count) AS BIGINT), 0)
@@ -662,6 +675,8 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
         "SELECT w.id::text AS id, w.title, w.lifecycle, w.visibility,
                 w.completion, w.rating, w.updated_at,
                 w.published_at, w.version,
+                w.ai_training,
+                (w.generated_declared_at IS NOT NULL) AS generated_declared,
                 (SELECT COUNT(*) FROM chapters c
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS chapter_count,
                 (SELECT COALESCE(SUM(r.word_count), 0)::bigint

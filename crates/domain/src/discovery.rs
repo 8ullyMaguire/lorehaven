@@ -1,5 +1,158 @@
 use crate::ids::WorkId;
 
+// ---------------------------------------------------------------------------
+// The "more like this" ladder (spec §11.5)
+// ---------------------------------------------------------------------------
+
+/// A rung of the "more like this" ladder (spec §11.5).
+///
+/// **The ladder is ordered, and the order is the whole design.** The first
+/// rungs are facts about the work — the explicit relation, the same author —
+/// and they are *true*; the later rungs are inferences, and they are
+/// inferences about a reader. A recommendation that comes from a fact is
+/// better than one that comes from a similarity score, and the ladder says so
+/// by being a ladder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MoreLikeThisRung {
+    /// **Next in series** — the explicit relation.
+    NextInSeries,
+    /// **Same author, other works.**
+    SameAuthor,
+    /// **Theme neighbours** — the works sharing the most-weighted tags of this
+    /// work's themes.
+    ThemeNeighbours,
+    /// **Readers also bookmarked** — item-item co-bookmark similarity.
+    ReadersAlsoBookmarked,
+    /// **Taste-matched** — the reader's own profile, where one exists.
+    TasteMatched,
+}
+
+impl MoreLikeThisRung {
+    /// The rung's stable name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NextInSeries => "next_in_series",
+            Self::SameAuthor => "same_author",
+            Self::ThemeNeighbours => "theme_neighbours",
+            Self::ReadersAlsoBookmarked => "readers_also_bookmarked",
+            Self::TasteMatched => "taste_matched",
+        }
+    }
+
+    /// The rung's position in the ladder, counting from one.
+    #[must_use]
+    pub const fn position(self) -> u8 {
+        match self {
+            Self::NextInSeries => 1,
+            Self::SameAuthor => 2,
+            Self::ThemeNeighbours => 3,
+            Self::ReadersAlsoBookmarked => 4,
+            Self::TasteMatched => 5,
+        }
+    }
+
+    /// Whether the rung needs the taste engine.
+    ///
+    /// **The three that do are not implemented until M13/M19**, and a rung that
+    /// is not implemented is *named as unavailable* rather than answered with a
+    /// plausible number — a stub that returns a score is a ranking that looks
+    /// measured and is not.
+    #[must_use]
+    pub const fn needs_taste_engine(self) -> bool {
+        matches!(
+            self,
+            Self::ThemeNeighbours | Self::ReadersAlsoBookmarked | Self::TasteMatched
+        )
+    }
+
+    /// Every rung, in ladder order.
+    #[must_use]
+    pub fn all() -> Vec<MoreLikeThisRung> {
+        vec![
+            Self::NextInSeries,
+            Self::SameAuthor,
+            Self::ThemeNeighbours,
+            Self::ReadersAlsoBookmarked,
+            Self::TasteMatched,
+        ]
+    }
+
+    /// The rung with this name, if there is one.
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "next_in_series" => Some(Self::NextInSeries),
+            "same_author" => Some(Self::SameAuthor),
+            "theme_neighbours" => Some(Self::ThemeNeighbours),
+            "readers_also_bookmarked" => Some(Self::ReadersAlsoBookmarked),
+            "taste_matched" => Some(Self::TasteMatched),
+            _ => None,
+        }
+    }
+}
+
+/// The reason a work is on the "more like this" ladder.
+///
+/// **A recommendation without a reason is an advertisement** (spec §11.5), and
+/// so is a recommendation whose reason is the same string for every row. The
+/// reason is *why this work, for this reader*, and the two facts the ladder
+/// rests on are the explicit relation and the authorship.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LadderReason {
+    /// The work is the next one in the series this work belongs to.
+    NextInSeries {
+        /// The series' title.
+        series_title: String,
+    },
+    /// The work is by the same author.
+    SameAuthor {
+        /// The author's public name.
+        author_name: String,
+    },
+}
+
+impl LadderReason {
+    /// The reason's wording, for the reader.
+    #[must_use]
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::NextInSeries { series_title } => {
+                format!("the next one in {series_title}")
+            }
+            Self::SameAuthor { author_name } => {
+                format!("more by {author_name}")
+            }
+        }
+    }
+}
+
+/// A recommendation on the ladder: the work, the rung that found it, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LadderEntry {
+    /// The work recommended.
+    pub work_id: WorkId,
+    /// The rung that found it.
+    pub rung: MoreLikeThisRung,
+    /// Why this work, for this reader.
+    pub reason: LadderReason,
+}
+
+/// A rung the ladder cannot serve yet.
+///
+/// **Named, not silently absent.** A client that asks for a taste-ranked
+/// recommendation and gets a shorter list has no way to tell an empty ladder
+/// from an unimplemented one, and an empty ladder reads as "this work has no
+/// neighbours", which is a statement about the work rather than about the
+/// build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnavailableRung {
+    /// The rung.
+    pub rung: MoreLikeThisRung,
+    /// Why it is unavailable, in words.
+    pub reason: String,
+}
+
 /// A recommendation candidate with its score and reason.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {

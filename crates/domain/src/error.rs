@@ -80,6 +80,8 @@ pub enum ErrorCode {
     /// refusal as a capability refusal tells the reader to go edit a plugin
     /// manifest when the thing they need to change is their own standing.
     TrustLevelInsufficient,
+    /// A module of the instance is not available.
+    ModuleUnavailable,
     /// Our fault. Details are logged, never returned.
     Internal,
     /// The instance lacks the program this operation needs.
@@ -107,6 +109,7 @@ impl ErrorCode {
             Self::InsufficientCredits => "INSUFFICIENT_CREDITS",
             Self::ExtensionPermissionDenied => "EXTENSION_PERMISSION_DENIED",
             Self::TrustLevelInsufficient => "TRUST_LEVEL_INSUFFICIENT",
+            Self::ModuleUnavailable => "MODULE_UNAVAILABLE",
             Self::ConverterUnavailable => "CONVERTER_UNAVAILABLE",
             Self::Internal => "INTERNAL",
             Self::NotImplemented => "NOT_IMPLEMENTED",
@@ -260,6 +263,19 @@ pub enum AppError {
         message: String,
     },
 
+    /// A module of the instance is not available.
+    ///
+    /// **404, not 501.** The thing is not here *yet*, and the client is owed a
+    /// "not here" rather than a "never going to happen" — the two are different
+    /// facts with different remedies, and `NOT_IMPLEMENTED` says "this instance
+    /// does not do that", which is a claim about the instance and not about the
+    /// build.
+    #[error("the {module} module is not available on this instance")]
+    ModuleUnavailable {
+        /// The module that is not available.
+        module: &'static str,
+    },
+
     /// An unexpected fault. The inner error is logged, never returned.
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
@@ -311,6 +327,7 @@ impl AppError {
             Self::InvalidCredentials => ErrorCode::AuthRequired,
             Self::AccessDenied | Self::MissingScope { .. } => ErrorCode::AccessDenied,
             Self::NotFound { .. } => ErrorCode::NotFound,
+            Self::ModuleUnavailable { .. } => ErrorCode::ModuleUnavailable,
             Self::Validation { .. } => ErrorCode::ValidationFailed,
             Self::RevisionConflict { .. } => ErrorCode::RevisionConflict,
             Self::RateLimited { .. } => ErrorCode::RateLimited,
@@ -341,7 +358,7 @@ impl AppError {
             | Self::ContentRestricted
             | Self::ExtensionPermissionDenied { .. }
             | Self::TrustLevelInsufficient { .. } => 403,
-            Self::NotFound { .. } => 404,
+            Self::NotFound { .. } | Self::ModuleUnavailable { .. } => 404,
             Self::Validation { .. } | Self::SourceUnsupported { .. } => 422,
             // The request is well formed and the instance cannot serve it: the
             // program that would is absent. 422 rather than 503 — nothing is
