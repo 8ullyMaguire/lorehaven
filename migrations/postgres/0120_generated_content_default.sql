@@ -40,13 +40,16 @@
 -- is not worth a default nothing reaches.
 
 CREATE TABLE generated_content_policy_new (
-    id          TEXT    PRIMARY KEY,
+    -- The id columns are UUIDs on PostgreSQL and TEXT on SQLite, because
+    -- `accounts.id` is: a foreign key to a column that is TEXT in one dialect
+    -- and UUID in the other cannot be declared with one type.
+    id          UUID    PRIMARY KEY,
     posture     TEXT    NOT NULL DEFAULT 'allow'
         CHECK (posture IN ('forbid', 'disclose', 'allow')),
-    updated_by  TEXT    REFERENCES accounts (id) ON DELETE SET NULL,
+    updated_by  UUID    REFERENCES accounts (id) ON DELETE SET NULL,
     created_at  TEXT    NOT NULL,
     updated_at  TEXT    NOT NULL,
-    version     INTEGER NOT NULL DEFAULT 1
+    version     BIGINT  NOT NULL DEFAULT 1
 );
 
 INSERT INTO generated_content_policy_new
