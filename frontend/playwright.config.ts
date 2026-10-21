@@ -28,6 +28,31 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      // The no-JavaScript journeys run in their own project, and this one
+      // does not run them.
+      testIgnore: /reader-no-js\.spec\.ts/,
+    },
+    {
+      /**
+       * The same browser with **JavaScript switched off**.
+       *
+       * The reading surface is server-rendered HTML (spec §8.5, §21.1):
+       * *"the reader works without JavaScript"*. A single-page application
+       * cannot be that surface — its content is fetched after the document
+       * loads — so the reader is written by the server and this project is
+       * what proves it.
+       */
+      name: 'no-js',
+      use: {
+        ...devices['Desktop Chrome'],
+        javaScriptEnabled: false,
+      },
+      // **Only** the no-JavaScript journeys. The project's name is not
+      // enough to exclude a suite from another project, so the selection is
+      // by file -- which is also why the suite carries no conditional skip:
+      // a suite that skips itself has to know the project's name, and the
+      // file is the thing that knows.
+      testMatch: /reader-no-js\.spec\.ts/,
     },
   ],
   webServer: {

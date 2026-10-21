@@ -371,7 +371,16 @@
       {#each work.units as unit (unit.id)}
         {@const unitHref = `${workHref}/units/${unit.id}`}
         <li>
-          <a href={unitHref} onclick={(event) => handleLinkClick(event, unitHref)}>
+          <!--
+            A **real link**, and deliberately NOT a client-side navigation. The
+            reading surface is server-rendered HTML (spec §8.5): the server
+            writes the page, because a reader with JavaScript switched off
+            must still be able to read. A `handleLinkClick` here would ask the
+            SPA to render the reader instead, and the SPA would fetch the
+            content -- which is the thing the server-rendered page exists to
+            avoid.
+          -->
+          <a href={unitHref}>
             {unit.title.trim() === '' ? 'Untitled unit' : unit.title}
           </a>
           <span class="note">{unit.word_count} words</span>

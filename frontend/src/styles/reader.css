@@ -1,0 +1,218 @@
+/*
+ * The reading surface's own layout (spec §10.1, §21.1).
+ *
+ * # Why this file exists
+ *
+ * The reader is **server-rendered HTML** (spec §8.5): the server writes the
+ * page, and JavaScript only improves it. So the reader's layout has to live in
+ * the stylesheet the *server* links — which is this application's own
+ * stylesheet — and not in a component's `<style>` block, because a Svelte
+ * component's styles are not in the document until the component is mounted,
+ * and a reader with JavaScript off would get an unstyled page.
+ *
+ * That is the whole reason this file is not `Reader.svelte`'s problem: the
+ * page must look right before any JavaScript runs, and after it runs.
+ *
+ * # The scale is the reader's own
+ *
+ * The colours come from `--reader-*` (tokens.css), which is a **separate
+ * scale** from the site's `--color-*` (spec §10.1, §21.1). Changing the site
+ * theme does not change the reader's appearance, and the reader's own
+ * preference does not change the site's.
+ *
+ * The three size variables — `--reader-font-scale`, `--reader-line-height` and
+ * `--reader-measure` — are written **inline on the document root** by the
+ * server, from the account's typography preference. They are the reader's own
+ * numbers, and they follow the reader to another device (spec §10.3).
+ */
+
+.reader-surface {
+  margin: 0;
+  padding: 0;
+  background: var(--reader-bg);
+  color: var(--reader-text);
+  font-family: var(--font-reader);
+  font-size: calc(1rem * var(--reader-font-scale, 1));
+  line-height: var(--reader-line-height, 1.6);
+}
+
+.reader-surface a {
+  color: var(--reader-link);
+}
+
+/*
+ * The bar: the work's title and the way back. It is **not** sticky, because
+ * the interface disappears while reading (spec §21.1) and a bar that follows
+ * the reader down the page is an interface over the text.
+ */
+.reader-surface__bar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3, 0.75rem);
+  padding: var(--space-4, 1rem) var(--space-5, 1.5rem);
+  border-bottom: 1px solid var(--reader-rule);
+}
+
+.reader-surface__work {
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--text-sm, 0.875rem);
+  text-decoration: none;
+}
+
+.reader-surface__work:hover,
+.reader-surface__work:focus-visible {
+  text-decoration: underline;
+}
+
+/*
+ * The table of contents. A reader who wants to know how long the work is
+ * should be able to see it without scrolling to the end, and a reader with
+ * JavaScript off must be able to reach any unit from here.
+ */
+.reader-surface__toc {
+  padding: var(--space-4, 1rem) var(--space-5, 1.5rem);
+  border-bottom: 1px solid var(--reader-rule);
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.reader-surface__toc ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem) var(--space-4, 1rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reader-surface__toc a {
+  text-decoration: none;
+}
+
+.reader-surface__toc a:hover,
+.reader-surface__toc a:focus-visible {
+  text-decoration: underline;
+}
+
+.reader-surface__toc a.is-current {
+  color: var(--reader-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+/*
+ * The text itself. The measure is the reader's own — a line of prose that
+ * runs the width of a screen is a line nobody can read.
+ */
+.reader-surface__main {
+  display: block;
+  margin: 0 auto;
+  padding: var(--space-6, 1.5rem) var(--space-5, 1.5rem) var(--space-6, 1.5rem);
+  max-width: calc(var(--reader-measure, 66ch) + 2 * var(--space-5, 1.5rem));
+}
+
+.reader-surface__title {
+  margin: 0 0 var(--space-5, 1.5rem);
+  font-family: var(--font-heading, Georgia, serif);
+  font-size: calc(var(--text-2xl, 1.75rem) * var(--reader-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.reader-surface__body {
+  font-family: var(--font-reader);
+  font-size: calc(1rem * var(--reader-font-scale, 1));
+  line-height: var(--reader-line-height, 1.6);
+}
+
+.reader-surface__body p {
+  margin: 0 0 1em;
+}
+
+/*
+ * The empty state explains itself (spec §21.1). A unit with no text says so,
+ * rather than presenting an empty column.
+ */
+.reader-surface__empty {
+  color: var(--reader-muted);
+  font-style: italic;
+}
+
+/*
+ * The way on. Both links are always present — a missing "next" would be a
+ * reader guessing, and the absent one is marked rather than removed.
+ */
+.reader-surface__nav {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4, 1rem);
+  margin: 0 auto;
+  padding: var(--space-5, 1.5rem);
+  max-width: calc(var(--reader-measure, 66ch) + 2 * var(--space-5, 1.5rem));
+  border-top: 1px solid var(--reader-rule);
+  font-family: var(--font-interface, system-ui, sans-serif);
+}
+
+.reader-surface__nav a {
+  text-decoration: none;
+  padding: var(--space-2, 0.5rem) 0;
+}
+
+.reader-surface__nav a:hover,
+.reader-surface__nav a:focus-visible {
+  text-decoration: underline;
+}
+
+.reader-surface__nav .is-absent {
+  color: var(--reader-muted);
+}
+
+/*
+ * The position form. It is **always present**, because it is the no-JavaScript
+ * path: with JavaScript the same form carries the live position, and without
+ * it the reader presses the button and their place is recorded. A form that
+ * appears only when JavaScript runs is a form that fails when it does not.
+ */
+.reader-surface__position {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 0.75rem);
+  margin: 0 auto;
+  padding: var(--space-4, 1rem) var(--space-5, 1.5rem);
+  max-width: calc(var(--reader-measure, 66ch) + 2 * var(--space-5, 1.5rem));
+  border-top: 1px solid var(--reader-rule);
+  color: var(--reader-muted);
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.reader-surface__position input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 6rem;
+}
+
+.reader-surface__position button {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border: 1px solid var(--reader-rule);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: transparent;
+  color: var(--reader-text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.reader-surface__position button:hover,
+.reader-surface__position button:focus-visible {
+  border-color: var(--reader-link);
+  color: var(--reader-link);
+}
+
+/*
+ * The keyboard path is complete (spec §21.1): the focus ring is visible, and
+ * it is the reader's own colour rather than the site's.
+ */
+.reader-surface :focus-visible {
+  outline: 2px solid var(--reader-link);
+  outline-offset: 2px;
+}

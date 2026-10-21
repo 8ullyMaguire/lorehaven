@@ -2225,12 +2225,12 @@ async fn ensure_readable(state: &AppState, user: &SessionUser, work_id: WorkId) 
 // Validation and conversion
 // ---------------------------------------------------------------------------
 
-fn parse_work_id(raw: &str) -> ApiResult<WorkId> {
+pub(crate) fn parse_work_id(raw: &str) -> ApiResult<WorkId> {
     raw.parse()
         .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))
 }
 
-fn parse_unit_id(raw: &str) -> ApiResult<UnitId> {
+pub(crate) fn parse_unit_id(raw: &str) -> ApiResult<UnitId> {
     raw.parse()
         .map_err(|_| ApiError(AppError::NotFound { resource: "unit" }))
 }

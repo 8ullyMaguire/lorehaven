@@ -114,6 +114,50 @@ fn file_response(path: &str, bytes: Vec<u8>, mime: String) -> Response {
     response
 }
 
+/// The stylesheet the application ships, for a page that is not the SPA shell.
+///
+/// The reader surface is **server-rendered HTML** (spec §8.5), and it needs
+/// the same stylesheet the shell uses — so the reader's `--reader-*` scale and
+/// the site's scale are one source of truth rather than two files that agree
+/// today.
+///
+/// The filename is **content-hashed** by the build, so it cannot be written
+/// down. It is read out of the shell's own HTML, which is where the truth
+/// lives: a build that renames the bundle changes the shell and this follows.
+/// Guessing the name would work until the first rebuild.
+pub async fn app_stylesheet(state: &AppState) -> Option<String> {
+    let shell = load(state.config().assets.dir.as_deref(), "index.html").await?;
+    let html = String::from_utf8_lossy(&shell.0);
+    // The first `<link rel="stylesheet" href="...">`. The shell links one
+    // stylesheet; a second one would be a different question.
+    let mut rest = html.as_ref();
+    while let Some(at) = rest.find("<link") {
+        let tail = &rest[at..];
+        let Some(end) = tail.find('>') else {
+            break;
+        };
+        let tag = &tail[..=end];
+        if tag.contains("stylesheet") {
+            if let Some(href) = attribute(tag, "href") {
+                return Some(href.to_owned());
+            }
+        }
+        rest = &tail[end + 1..];
+    }
+    None
+}
+
+/// The value of an HTML attribute in a tag, if it has one.
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let at = tag.find(name)?;
+    let rest = &tag[at + name.len()..];
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('=')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
 /// A 404 that is honest about being a 404.
 fn not_found(path: &str) -> Response {
     let body = format!(

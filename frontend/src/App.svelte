@@ -1,4 +1,16 @@
 <script lang="ts">
+  /**
+   * The `unit-read` route is GONE, and deliberately so.
+   *
+   * The reading surface is **server-rendered HTML** (spec §8.5): the server
+   * writes the page, so a reader with JavaScript switched off can still
+   * read. A client-side route here would ask the SPA to render the reader
+   * instead, and the SPA fetches its content -- the very thing the
+   * server-rendered page exists to avoid.
+   *
+   * The URL is unchanged (`/works/{id}/units/{unitId}`), and the server
+   * answers it before the SPA shell ever sees it.
+   */
   import Button from './lib/components/Button.svelte';
   import { clearCopies, copiesUsage } from './lib/offline';
   import Drawer from './lib/components/Drawer.svelte';
@@ -33,7 +45,6 @@
   import Planned from './routes/Planned.svelte';
   import PseudProfile from './routes/PseudProfile.svelte';
   import Pseuds from './routes/Pseuds.svelte';
-  import Reader from './routes/Reader.svelte';
   import Register from './routes/Register.svelte';
   import Search from './routes/Search.svelte';
   import Settings from './routes/Settings.svelte';
@@ -460,8 +471,6 @@
     <WorkEditor workId={route.params?.workId ?? ''} />
   {:else if route.id === 'work-read'}
     <WorkPage workId={route.params?.workId ?? ''} />
-  {:else if route.id === 'unit-read'}
-    <Reader workId={route.params?.workId ?? ''} unitId={route.params?.unitId ?? ''} />
   {:else if route.id === 'history'}
     <History />
   {:else if route.id === 'import'}

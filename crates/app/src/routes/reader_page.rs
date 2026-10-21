@@ -1,0 +1,844 @@
+//! The reading surface: **server-rendered HTML** (spec §8.5, §10.1, §21.1).
+//!
+//! # Why the reader is rendered here and not in the browser
+//!
+//! Spec §8.5: *"The reader is server-rendered HTML — no JavaScript required to
+//! read."* Spec §21.1: *"Accessibility is a floor: the reader works without
+//! JavaScript."* And the plan's T-M5-01 asks for the whole chain — open a
+//! work, read a unit, move to the next one, come back — with **the navigation
+//! as a real link, not a fetch**.
+//!
+//! A single-page application cannot be that surface. Its content is fetched
+//! after the document loads, so with JavaScript off the reader gets an empty
+//! page and a spinner that never resolves. The reader is therefore rendered
+//! here, by the server, from the same stores the API reads.
+//!
+//! # What JavaScript is still for
+//!
+//! The reader is a **document that JavaScript improves**, not a document that
+//! JavaScript provides. Without it, the reader can read, navigate, save a
+//! place and reveal a gated section. With it, the position save becomes
+//! continuous rather than a button, and the notes panel appears. Nothing the
+//! reader needs is on the other side of that line.
+//!
+//! # The URL keeps its shape
+//!
+//! The reader lives at `/works/{work_id}/units/{unit_id}` — the path the SPA
+//! already used, so the site's links do not change and the specification's
+//! reader URLs (§8.5) are honoured. The server answers that path, so the SPA
+//! shell never sees it; the site links to it with a **real link**, which is
+//! what "the chapter navigation is a real link, not a fetch" asks for.
+//!
+//! # The escaping
+//!
+//! Everything on this page is escaped by [`crate::html`], which makes the
+//! decision in its API rather than at each call site. The single exception is
+//! the unit's `sanitized_html`, which the **server** produced from the
+//! validated editor document (spec §8.3, ADR 0002) — the one value here that
+//! is markup rather than text.
+
+use axum::extract::{Form, Path, State};
+use axum::http::{header, StatusCode};
+use axum::response::{Html as AxumHtml, IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
+use axum::Router;
+
+use serde::Deserialize;
+
+use darkhold_db::content;
+use darkhold_db::reading::{self, ProgressInput};
+use darkhold_domain::AppError;
+
+use crate::auth::MaybeSession;
+use crate::html::Html;
+use crate::http::{ApiError, ApiResult};
+use crate::routes::works::{actor_for, parse_unit_id, parse_work_id, reading_decision, Reading};
+use crate::state::AppState;
+
+/// The reading surface's routes.
+///
+/// Mounted at the **root**, not under `/api/v1`: these are pages, and a page
+/// under `/api/` would be an API client asking for HTML. The route inventory
+/// records them with the same care as the rest.
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/works/{work_id}/units/{unit_id}", get(read_unit_page))
+        .route(
+            "/works/{work_id}/units/{unit_id}/position",
+            post(save_position),
+        )
+        .route(
+            "/works/{work_id}/units/{unit_id}/typography",
+            post(save_typography),
+        )
+        .route("/works/{work_id}/units/{unit_id}/notes", post(save_note))
+        .route(
+            "/works/{work_id}/units/{unit_id}/notes/{note_id}/delete",
+            post(delete_note),
+        )
+}
+
+/// The form the position save posts.
+///
+/// Every field is a string, because a form post is strings — and the values
+/// are parsed and **validated** below rather than trusted, because a form post
+/// is whatever the client sent.
+#[derive(Debug, Default, Deserialize)]
+pub struct PositionForm {
+    /// Where in the unit the reader was, in permille.
+    #[serde(default)]
+    pub position_permille: String,
+    /// The paragraph the reader was at.
+    #[serde(default)]
+    pub paragraph_anchor: String,
+    /// The revision the reader was reading.
+    #[serde(default)]
+    pub content_revision: String,
+    /// The unit the reader was in. Defaults to the unit in the path.
+    #[serde(default)]
+    pub unit_id: String,
+    /// The device the reader was on. Empty means "this one".
+    #[serde(default)]
+    pub device_id: String,
+}
+
+/// The form the typography control posts.
+///
+/// The reader's appearance is the reader's own (spec §10.1), and the control
+/// is a **form** rather than a fetch: a reader without JavaScript must be able
+/// to change how the page looks, exactly as they must be able to read it.
+#[derive(Debug, Default, Deserialize)]
+pub struct TypographyForm {
+    #[serde(default)]
+    pub font_scale: String,
+    #[serde(default)]
+    pub line_height: String,
+    #[serde(default)]
+    pub measure: String,
+    #[serde(default)]
+    pub reader_theme: String,
+}
+
+/// The form a reader's note posts.
+#[derive(Debug, Default, Deserialize)]
+pub struct NoteForm {
+    /// The note's text.
+    #[serde(default)]
+    pub body: String,
+}
+
+/// Serve the reading page.
+async fn read_unit_page(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((work_id, unit_id)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+    let contributors =
+        darkhold_db::collaboration::contributors_for_work(state.db(), work_id).await?;
+    let actor = actor_for(session.as_ref());
+
+    match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
+        Reading::Contributor | Reading::Public => {}
+        Reading::Denied(error) => return Err(ApiError(error)),
+    }
+
+    let units = content::units_for_work(state.db(), work_id).await?;
+    let unit = units
+        .iter()
+        .find(|candidate| candidate.id == unit_id)
+        .cloned()
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "unit" }))?;
+
+    let revision = match unit.current_revision_id {
+        Some(id) => content::find_revision(state.db(), id).await?,
+        None => None,
+    };
+
+    // The reader's own appearance, when there is a reader to have one. A
+    // signed-out reader gets the defaults, and the page still reads.
+    let typography = match session.as_ref() {
+        Some(user) => reading::typography_for(state.db(), user.account_id).await?,
+        None => reading::Typography::default(),
+    };
+
+    let position = units.iter().position(|candidate| candidate.id == unit_id);
+    let previous = position
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| units.get(index));
+    let next = position.and_then(|index| units.get(index + 1));
+
+    // The reader's own notes, when there is a reader with a face to own them.
+    // A note is private to its pseud (spec §10.3), so a signed-out reader
+    // has none and sees nothing about notes at all.
+    let notes = match session.as_ref().and_then(|user| user.pseud_id) {
+        Some(pseud) => reading::notes_for(state.db(), pseud, "work", &work_id.to_string()).await?,
+        None => Vec::new(),
+    };
+
+    // The narration, when the work has a published one. A draft edition is
+    // the author's working copy, and saying it exists would leak the shape of
+    // work nobody else can read yet.
+    let narration = darkhold_db::media::list_media_editions(state.db(), &work_id.to_string())
+        .await?
+        .into_iter()
+        .find(|edition| edition.edition_kind == "narration" && edition.published_at.is_some())
+        .map(|edition| edition.id);
+
+    let stylesheet = crate::assets::app_stylesheet(&state).await;
+    let body = render_page(
+        &work,
+        &unit,
+        revision
+            .as_ref()
+            .map(|revision| revision.sanitized_html.as_str()),
+        &units,
+        previous,
+        next,
+        &typography,
+        stylesheet.as_deref(),
+        &notes,
+        narration.as_deref(),
+        session.is_some(),
+    );
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            // The reader's page is a document, and a document must not be
+            // cached by a proxy as if it were the shell: the page carries the
+            // reader's own preferences.
+            (header::CACHE_CONTROL, "private, no-store"),
+        ],
+        AxumHtml(body),
+    )
+        .into_response())
+}
+
+/// Save the reader's place, and return them to the page.
+///
+/// The **form post** is the no-JavaScript path: a reader without JavaScript
+/// still gets a place saved, because arriving at a unit is itself a reading
+/// and the page says so. With JavaScript, the same endpoint is what the
+/// continuous save posts to.
+///
+/// A refusal is not a failure here. The reader is sent back to the page they
+/// were on, because a position that could not be saved is not something a
+/// reader can do anything about, and an error page would lose the text they
+/// were reading.
+async fn save_position(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((work_id, unit_id)): Path<(String, String)>,
+    Form(form): Form<PositionForm>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+    let back = format!("/works/{work_id}/units/{unit_id}");
+
+    let Some(user) = session else {
+        // A signed-out reader has no place to save to: the position lives on
+        // the account, not in the browser (spec §10.3). The browser keeps its
+        // own copy, and the server says so by sending the reader back.
+        return Ok(Redirect::to(&back).into_response());
+    };
+
+    // The permille is parsed, not trusted: a form post is whatever the client
+    // sent, and a position of 4000 permille is not a position.
+    let fraction: u16 = form
+        .position_permille
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .map(|value| value.clamp(0, 1000) as u16)
+        .unwrap_or(0);
+
+    let revision = if form.content_revision.trim().is_empty() {
+        None
+    } else {
+        form.content_revision
+            .trim()
+            .parse::<darkhold_domain::RevisionId>()
+            .ok()
+    };
+
+    let anchor = if form.paragraph_anchor.trim().is_empty() {
+        None
+    } else {
+        Some(form.paragraph_anchor.trim())
+    };
+
+    let device = if form.device_id.trim().is_empty() {
+        None
+    } else {
+        Some(form.device_id.trim())
+    };
+
+    let result = reading::save_progress(
+        state.db(),
+        ProgressInput {
+            account: user.account_id,
+            pseud: user.pseud_id,
+            subject_type: "work",
+            subject_id: &work_id.to_string(),
+            unit_id: Some(&unit_id.to_string()),
+            revision,
+            anchor,
+            fraction,
+            device,
+        },
+    )
+    .await;
+    if let Err(error) = result {
+        tracing::error!(%error, "the position save failed");
+    }
+
+    Ok(Redirect::to(&back).into_response())
+}
+
+/// Save the reader's appearance, and return them to the page.
+async fn save_typography(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((work_id, unit_id)): Path<(String, String)>,
+    Form(form): Form<TypographyForm>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+    let back = format!("/works/{work_id}/units/{unit_id}");
+
+    let Some(user) = session else {
+        return Ok(Redirect::to(&back).into_response());
+    };
+
+    // The numbers are parsed and **clamped**, not trusted: a form post is
+    // whatever the client sent, and a font scale of 900 is not a font scale.
+    let font_scale = form
+        .font_scale
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .map(|value| value.clamp(0.8, 2.0))
+        .unwrap_or(1.0);
+    let line_height = form
+        .line_height
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .map(|value| value.clamp(1.0, 3.0))
+        .unwrap_or(1.6);
+    let measure = form
+        .measure
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .map(|value| value.clamp(30, 120))
+        .unwrap_or(66);
+    // The theme is one of the four the stylesheet defines. A theme the
+    // stylesheet does not have is a theme that renders as the default, so the
+    // set is closed here rather than trusted.
+    let reader_theme = match form.reader_theme.trim() {
+        "paper" | "white" | "sepia" | "dark" => form.reader_theme.trim().to_owned(),
+        _ => "sepia".to_owned(),
+    };
+
+    let current = reading::typography_for(state.db(), user.account_id).await?;
+    let _ = reading::save_typography(
+        state.db(),
+        reading::TypographyInput {
+            account: user.account_id,
+            expected_version: current.version,
+            font_scale,
+            line_height,
+            measure,
+            reader_theme: &reader_theme,
+            distraction_free: current.distraction_free,
+        },
+    )
+    .await;
+
+    Ok(Redirect::to(&back).into_response())
+}
+
+/// Save a reader's note, and return them to the page.
+async fn save_note(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((work_id, unit_id)): Path<(String, String)>,
+    Form(form): Form<NoteForm>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+    let back = format!("/works/{work_id}/units/{unit_id}");
+
+    let Some(user) = session else {
+        return Ok(Redirect::to(&back).into_response());
+    };
+    let Some(pseud) = user.pseud_id else {
+        return Ok(Redirect::to(&back).into_response());
+    };
+
+    let body = form.body.trim();
+    if !body.is_empty() {
+        let _ = reading::save_note(
+            state.db(),
+            user.account_id,
+            pseud,
+            "work",
+            &work_id.to_string(),
+            None,
+            body,
+        )
+        .await;
+    }
+
+    Ok(Redirect::to(&back).into_response())
+}
+
+/// Delete a reader's note, and return them to the page.
+async fn delete_note(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((work_id, unit_id, note_id)): Path<(String, String, String)>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+    let back = format!("/works/{work_id}/units/{unit_id}");
+
+    if let Some(user) = session {
+        if let Some(pseud) = user.pseud_id {
+            let _ = reading::delete_note(state.db(), pseud, &note_id).await;
+        }
+    }
+
+    Ok(Redirect::to(&back).into_response())
+}
+
+/// Render the reading page.
+#[allow(clippy::too_many_arguments)]
+fn render_page(
+    work: &content::Work,
+    unit: &content::Unit,
+    sanitized_html: Option<&str>,
+    units: &[content::Unit],
+    previous: Option<&content::Unit>,
+    next: Option<&content::Unit>,
+    typography: &reading::Typography,
+    stylesheet: Option<&str>,
+    notes: &[reading::Note],
+    narration: Option<&str>,
+    signed_in: bool,
+) -> String {
+    let mut page = Html::new();
+
+    page.raw("<!DOCTYPE html>");
+    // The reader's theme is the reader's own: the `data-reader` attribute
+    // selects the reader scale, and the site scale is a different set of
+    // variables entirely (spec §10.1, §21.1).
+    page.open(
+        "html",
+        &[("lang", "en"), ("data-reader", &typography.reader_theme)],
+    );
+    page.open("head", &[]);
+    page.void("meta", &[("charset", "utf-8")]);
+    page.void(
+        "meta",
+        &[
+            ("name", "viewport"),
+            ("content", "width=device-width, initial-scale=1"),
+        ],
+    );
+    let title = if unit.title.trim().is_empty() {
+        work.title.clone()
+    } else {
+        format!("{} — {}", unit.title, work.title)
+    };
+    page.open("title", &[]).text(&title).close("title");
+    // The stylesheet is the one the application already ships, so the reader's
+    // scale and the site's scale are literally the same source of truth.
+    if let Some(href) = stylesheet {
+        page.void("link", &[("rel", "stylesheet"), ("href", href)]);
+    }
+    // The reader's own appearance, written inline so it overrides the
+    // stylesheet's reader scale without touching the site's scale.
+    let properties = crate::html::style_block(&[
+        (
+            "--reader-font-scale",
+            &format!("{:.2}", typography.font_scale),
+        ),
+        (
+            "--reader-line-height",
+            &format!("{:.2}", typography.line_height),
+        ),
+        ("--reader-measure", &format!("{}ch", typography.measure)),
+    ]);
+    page.open("style", &[]).raw(&properties).close("style");
+    page.close("head");
+
+    page.open("body", &[("class", "reader-surface")]);
+
+    // ── the bar: the work, and the way back ────────────────────────────────
+    page.open("header", &[("class", "reader-surface__bar")]);
+    page.open(
+        "a",
+        &[
+            ("class", "reader-surface__work"),
+            ("href", &work_href(work)),
+        ],
+    );
+    page.text(&work.title);
+    page.close("a");
+    page.close("header");
+
+    // ── the table of contents ─────────────────────────────────────────────
+    if units.len() > 1 {
+        page.open(
+            "nav",
+            &[("class", "reader-surface__toc"), ("aria-label", "Contents")],
+        );
+        page.open("ol", &[]);
+        for candidate in units {
+            let is_current = candidate.id == unit.id;
+            page.open("li", &[]);
+            page.open_opt(
+                "a",
+                &[
+                    ("href", Some(&unit_href(work, candidate))),
+                    ("class", Some(if is_current { "is-current" } else { "" })),
+                    ("aria-current", if is_current { Some("page") } else { None }),
+                ],
+            );
+            let label = if candidate.title.trim().is_empty() {
+                format!("Unit {}", candidate.order_key / 10)
+            } else {
+                candidate.title.clone()
+            };
+            page.text(&label);
+            page.close("a");
+            page.close("li");
+        }
+        page.close("ol");
+        page.close("nav");
+    }
+
+    // ── the unit ──────────────────────────────────────────────────────────
+    page.open("main", &[("class", "reader-surface__main")]);
+    page.open("article", &[("class", "reader-surface__unit")]);
+    if !unit.title.trim().is_empty() {
+        page.open("h1", &[("class", "reader-surface__title")]);
+        page.text(&unit.title);
+        page.close("h1");
+    }
+    page.open("div", &[("class", "reader-surface__body")]);
+    match sanitized_html {
+        // The one raw insertion on this page, and it is markup the SERVER
+        // produced (spec §8.3, ADR 0002).
+        Some(html) => {
+            page.raw(html);
+        }
+        // A unit with no revision yet has no body. The empty state explains
+        // itself (spec §21.1): "every empty state explains itself".
+        None => {
+            page.open("p", &[("class", "reader-surface__empty")]);
+            page.text("This unit has no text yet.");
+            page.close("p");
+        }
+    }
+    page.close("div");
+    page.close("article");
+
+    // ── the way on ────────────────────────────────────────────────────────
+    page.open("nav", &[("class", "reader-surface__nav")]);
+    match previous {
+        Some(previous) => {
+            page.open(
+                "a",
+                &[
+                    ("class", "reader-surface__prev"),
+                    ("rel", "prev"),
+                    ("href", &unit_href(work, previous)),
+                ],
+            );
+            page.text("Previous");
+            page.close("a");
+        }
+        None => {
+            page.open("span", &[("class", "reader-surface__prev is-absent")]);
+            page.text("Previous");
+            page.close("span");
+        }
+    }
+    match next {
+        Some(next) => {
+            page.open(
+                "a",
+                &[
+                    ("class", "reader-surface__next"),
+                    ("rel", "next"),
+                    ("href", &unit_href(work, next)),
+                ],
+            );
+            page.text("Next");
+            page.close("a");
+        }
+        None => {
+            page.open("span", &[("class", "reader-surface__next is-absent")]);
+            page.text("Next");
+            page.close("span");
+        }
+    }
+    page.close("nav");
+
+    // ── the narration ─────────────────────────────────────────────────────
+    //
+    // An `<audio>` element and nothing else. The edition's audio is served by
+    // the instance's own media route, so the player works without JavaScript.
+    if let Some(edition) = narration {
+        page.open("section", &[("class", "reader-surface__narration")]);
+        page.open(
+            "audio",
+            &[
+                ("controls", "controls"),
+                ("src", &format!("/editions/{edition}/audio")),
+                ("preload", "metadata"),
+            ],
+        );
+        page.close("audio");
+        page.close("section");
+    }
+
+    // ── the reader's notes ────────────────────────────────────────────────
+    //
+    // Private to the reader's own face (spec §10.3), and a **form**: a note
+    // is written without JavaScript, and a note that could only be written by
+    // a fetch would be a note a reader without JavaScript could not keep.
+    if signed_in {
+        page.open("section", &[("class", "reader-surface__notes")]);
+        page.open("h2", &[]).text("Your notes").close("h2");
+        if notes.is_empty() {
+            page.open("p", &[("class", "reader-surface__empty")]);
+            page.text("You have not written a note on this work.");
+            page.close("p");
+        } else {
+            page.open("ul", &[("class", "reader-surface__note-list")]);
+            for note in notes {
+                page.open("li", &[]);
+                page.open("p", &[]).text(&note.body).close("p");
+                page.open(
+                    "form",
+                    &[
+                        ("class", "reader-surface__note-delete"),
+                        ("method", "post"),
+                        (
+                            "action",
+                            &format!(
+                                "/works/{}/units/{}/notes/{}/delete",
+                                work.id, unit.id, note.id
+                            ),
+                        ),
+                    ],
+                );
+                page.open("button", &[("type", "submit")]);
+                page.text("Delete this note");
+                page.close("button");
+                page.close("form");
+                page.close("li");
+            }
+            page.close("ul");
+        }
+        page.open(
+            "form",
+            &[
+                ("class", "reader-surface__note-form"),
+                ("method", "post"),
+                (
+                    "action",
+                    &format!("/works/{}/units/{}/notes", work.id, unit.id),
+                ),
+            ],
+        );
+        page.open("label", &[("for", "reader-note")]);
+        page.text("Write a note to yourself about this work.");
+        page.close("label");
+        page.open(
+            "textarea",
+            &[("id", "reader-note"), ("name", "body"), ("rows", "3")],
+        );
+        page.close("textarea");
+        page.open("button", &[("type", "submit")]);
+        page.text("Save the note");
+        page.close("button");
+        page.close("form");
+        page.close("section");
+    }
+
+    // ── the typography control ────────────────────────────────────────────
+    //
+    // The reader's appearance is the reader's own (spec §10.1, §21.1), and the
+    // control is a **form**: a reader without JavaScript must be able to
+    // change how the page looks, exactly as they must be able to read it.
+    if signed_in {
+        page.open("section", &[("class", "reader-surface__typography")]);
+        page.open("h2", &[]).text("How this page looks").close("h2");
+        page.open(
+            "form",
+            &[
+                ("method", "post"),
+                (
+                    "action",
+                    &format!("/works/{}/units/{}/typography", work.id, unit.id),
+                ),
+            ],
+        );
+        page.open("label", &[("for", "reader-font-scale")]);
+        page.text("Text size");
+        page.close("label");
+        page.open(
+            "input",
+            &[
+                ("type", "range"),
+                ("id", "reader-font-scale"),
+                ("name", "font_scale"),
+                ("min", "0.8"),
+                ("max", "2"),
+                ("step", "0.05"),
+                ("value", &format!("{:.2}", typography.font_scale)),
+            ],
+        );
+        page.close("input");
+        page.open("label", &[("for", "reader-line-height")]);
+        page.text("Line spacing");
+        page.close("label");
+        page.open(
+            "input",
+            &[
+                ("type", "range"),
+                ("id", "reader-line-height"),
+                ("name", "line_height"),
+                ("min", "1"),
+                ("max", "3"),
+                ("step", "0.05"),
+                ("value", &format!("{:.2}", typography.line_height)),
+            ],
+        );
+        page.close("input");
+        page.open("label", &[("for", "reader-measure")]);
+        page.text("Line length");
+        page.close("label");
+        page.open(
+            "input",
+            &[
+                ("type", "number"),
+                ("id", "reader-measure"),
+                ("name", "measure"),
+                ("min", "30"),
+                ("max", "120"),
+                ("value", &typography.measure.to_string()),
+            ],
+        );
+        page.close("input");
+        page.open("label", &[("for", "reader-theme")]);
+        page.text("Page colour");
+        page.close("label");
+        page.open(
+            "select",
+            &[("id", "reader-theme"), ("name", "reader_theme")],
+        );
+        for theme in ["paper", "white", "sepia", "dark"] {
+            let selected = theme == typography.reader_theme;
+            page.open_opt(
+                "option",
+                &[
+                    ("value", Some(theme)),
+                    ("selected", if selected { Some("selected") } else { None }),
+                ],
+            );
+            page.text(theme);
+            page.close("option");
+        }
+        page.close("select");
+        page.open("button", &[("type", "submit")]);
+        page.text("Save");
+        page.close("button");
+        page.close("form");
+        page.close("section");
+    }
+
+    // ── the position form ─────────────────────────────────────────────────
+    //
+    // The form is the **no-JavaScript path**, and it is always present: with
+    // JavaScript the same form carries the live position, and without it the
+    // reader presses the button and their place is recorded. A form that
+    // appears only when JavaScript runs is a form that fails when it does not.
+    page.open(
+        "form",
+        &[
+            ("class", "reader-surface__position"),
+            ("method", "post"),
+            (
+                "action",
+                &format!("/works/{}/units/{}/position", work.id, unit.id),
+            ),
+        ],
+    );
+    page.open("label", &[("for", "reader-position")]);
+    page.text("Where did you stop?");
+    page.close("label");
+    page.open(
+        "input",
+        &[
+            ("type", "range"),
+            ("id", "reader-position"),
+            ("name", "position_permille"),
+            ("min", "0"),
+            ("max", "1000"),
+            ("value", "0"),
+            ("step", "10"),
+        ],
+    );
+    page.close("input");
+    page.void(
+        "input",
+        &[
+            ("type", "hidden"),
+            ("name", "unit_id"),
+            ("value", &unit.id.to_string()),
+        ],
+    );
+    if let Some(revision) = unit.current_revision_id {
+        page.void(
+            "input",
+            &[
+                ("type", "hidden"),
+                ("name", "content_revision"),
+                ("value", &revision.to_string()),
+            ],
+        );
+    }
+    page.open("button", &[("type", "submit")]);
+    page.text("Save my place");
+    page.close("button");
+    page.close("form");
+
+    page.close("main");
+    page.close("body");
+    page.close("html");
+
+    page.finish()
+}
+
+/// The page URL for a work.
+fn work_href(work: &content::Work) -> String {
+    format!("/works/{}", work.id)
+}
+
+/// The page URL for a unit of a work.
+fn unit_href(work: &content::Work, unit: &content::Unit) -> String {
+    format!("/works/{}/units/{}", work.id, unit.id)
+}

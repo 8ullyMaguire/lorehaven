@@ -20,6 +20,7 @@ pub mod cursor;
 pub mod derivative;
 pub mod doctor;
 pub mod exports;
+pub mod html;
 pub mod http;
 pub mod imports;
 pub mod keys;

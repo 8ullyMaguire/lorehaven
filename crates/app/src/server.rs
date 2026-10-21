@@ -869,6 +869,29 @@ pub fn build_router(state: AppState) -> Router {
         // Merged at the root level (not under /api/v1) so ActivityPub endpoints
         // are reachable at /federation/inbox, /federation/actor, etc.
         .merge(routes::federation::routes())
+        // The reading surface: **server-rendered HTML** (spec §8.5). Also at
+        // the root, because a page is not an API response -- and it must be
+        // merged rather than nested, or the reader's URL would carry the
+        // `/api/v1` prefix that belongs to the JSON the SPA fetches.
+        //
+        // Merged BEFORE the fallback, so the server answers the reader's URL
+        // and the SPA shell never sees it. The site's links to the reader are
+        // real links, which is what "the chapter navigation is a real link,
+        // not a fetch" asks for.
+        //
+        // **Its own session loading.** The session middleware wraps the
+        // `/api/v1` subtree, and this route is not in it -- so without its
+        // own the reader page would answer every signed-in reader as an
+        // anonymous one, and the position save would silently do nothing.
+        // That is the kind of fault that looks like a working feature: the
+        // page renders, the form posts, the redirect comes back, and nothing
+        // was recorded.
+        .merge(
+            routes::reader_page::router().layer(middleware::from_fn_with_state(
+                state.clone(),
+                auth::load_session,
+            )),
+        )
         .nest("/api/v1", api)
         .fallback(assets::serve)
         .layer(RequestBodyLimitLayer::new(config.server.max_body_bytes))

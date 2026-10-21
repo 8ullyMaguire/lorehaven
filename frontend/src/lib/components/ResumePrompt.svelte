@@ -8,7 +8,6 @@
    * is rather than asking the reader to trust a percentile.
    */
   import type { ProgressResolution, ServerPosition } from '../api';
-  import { handleLinkClick } from '../router';
 
   interface Props {
     workId: string;
@@ -43,11 +42,14 @@
     <p>
       You were <strong>{describe(stored)}</strong> last time you read this.
     </p>
-    <a
-      class="resume-link"
-      href={href(null, stored)}
-      onclick={(event) => handleLinkClick(event, href(null, stored))}
-    >
+    <!--
+      A **real link**. The reading surface is server-rendered HTML (spec
+      §8.5), so the browser must ask the server for it -- a client-side
+      navigation would ask the SPA to render the reader instead, and the SPA
+      fetches its content, which is the thing the server-rendered page exists
+      to avoid.
+    -->
+    <a class="resume-link" href={href(null, stored)}>
       Resume reading
     </a>
   </aside>
@@ -59,7 +61,7 @@
       {#if resolution.mine}
         {@const mine = resolution.mine}
         <li>
-          <a href={href(null, mine)} onclick={(event) => handleLinkClick(event, href(null, mine))}>
+          <a href={href(null, mine)}>
             {describe(mine)}
           </a>
         </li>
@@ -67,7 +69,7 @@
       {#if resolution.other}
         {@const other = resolution.other}
         <li>
-          <a href={href(null, other)} onclick={(event) => handleLinkClick(event, href(null, other))}>
+          <a href={href(null, other)}>
             {describe(other)}
           </a>
         </li>

@@ -1,6 +1,15 @@
 @import './styles/tokens.css';
 
 /*
+ * The reading surface's layout. It is imported HERE and not in a component
+ * because the reader is server-rendered HTML (spec §8.5): the server writes
+ * the page, so its styles must be in the stylesheet the SERVER links -- and
+ * a component's styles are not in the document until the component is
+ * mounted, which never happens for a reader with JavaScript off.
+ */
+@import './styles/reader.css';
+
+/*
  * Global element styling. Components own their own look; this file exists so
  * that plain HTML emitted by the reader (sanitized work content) and the app
  * agree on fundamentals.

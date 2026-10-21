@@ -112,16 +112,17 @@ describe('routing', () => {
     expect(work.id).toBe('work-read');
     expect(work.params?.workId).toBe('6f2a9c-1');
 
+    // The reader's URL is NOT resolved by the SPA. The reading surface is
+    // server-rendered HTML (spec §8.5), so the server answers
+    // `/works/<id>/units/<unitId>` before the shell ever sees it. A
+    // client-side route here would be a second reader.
     const unit = matchRoute('/works/6f2a9c-1/units/aaa-2');
-    expect(unit.id).toBe('unit-read');
-    expect(unit.params?.workId).toBe('6f2a9c-1');
-    expect(unit.params?.unitId).toBe('aaa-2');
+    expect(unit.id).not.toBe('unit-read');
   });
 
   it('decodes percent-encoded identifiers, because a URL is not a request', () => {
-    const match = matchRoute('/works/a%20b/units/c%2Fd');
-    expect(match.params?.workId).toBe('a b');
-    expect(match.params?.unitId).toBe('c/d');
+    const match = matchRoute('/pseud/a%20b');
+    expect(match.params?.handle).toBe('a b');
   });
 
   it('ignores trailing slashes so links and URLs agree', () => {

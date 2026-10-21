@@ -4494,6 +4494,57 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // The reading surface — server-rendered HTML (spec §8.5, §10.1).
+    //
+    // These are PAGES and not API responses, so they are merged at the root
+    // rather than nested under `/api/v1`. The audience is **Public**: a
+    // signed-out visitor may read a published work, and a reader page that
+    // asked for a session would be a login wall in front of the archive's own
+    // content.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "reader_page.rs",
+        handler: "read_unit_page",
+        method: "GET",
+        path: "/works/{work_id}/units/{unit_id}",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_page.rs",
+        handler: "save_typography",
+        method: "POST",
+        path: "/works/{work_id}/units/{unit_id}/typography",
+        // **Public, and deliberately so** -- see `save_position` below.
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_page.rs",
+        handler: "save_note",
+        method: "POST",
+        path: "/works/{work_id}/units/{unit_id}/notes",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_page.rs",
+        handler: "delete_note",
+        method: "POST",
+        path: "/works/{work_id}/units/{unit_id}/notes/{note_id}/delete",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_page.rs",
+        handler: "save_position",
+        method: "POST",
+        path: "/works/{work_id}/units/{unit_id}/position",
+        // **Public, and deliberately so.** The door is reachable by anyone:
+        // a signed-out reader's post is redirected back to the page they were
+        // on, because their place lives in their browser and not on an
+        // account (spec §10.3), and a 401 would be a failure where the
+        // specification asks for a degradation. "The position save degrades to
+        // a form post, not a failure" — T-M5-01.
+        audience: Audience::Public,
+    },
+    // ------------------------------------------------------------------
     // Monetization — additional routes not in main table (spec §20)
     // ------------------------------------------------------------------
     RouteEntry {

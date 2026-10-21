@@ -25,7 +25,6 @@ export type RouteId =
   | 'write'
   | 'work-editor'
   | 'work-read'
-  | 'unit-read'
   | 'history'
   | 'import'
   | 'library'
@@ -148,20 +147,17 @@ export function matchRoute(path: string): RouteMatch {
   /*
    * `/works/<id>` and `/works/<id>/units/<unitId>` are the reader's URLs,
    * and the same work URL answers its author with the editing view. The router
-   * therefore resolves both to the work route and lets the page decide: which
-   * view to render depends on the server's answer, not on the path.
+   * therefore resolves the work to the work route and lets the page decide:
+   * which view to render depends on the server's answer, not on the path.
+   *
+   * **The unit URL is not resolved here.** The reading surface is
+   * server-rendered HTML (spec §8.5): the server writes the page, so a
+   * reader with JavaScript switched off can still read. The server answers
+   * `/works/<id>/units/<unitId>` before the SPA shell ever sees it, and the
+   * site's links to it are real links. A client-side route for it would be a
+   * second reader -- and the SPA's version fetches its content, which is the
+   * thing the server-rendered page exists to avoid.
    */
-  const unitMatch = normalised.match(/^\/works\/([^/]+)\/units\/([^/]+)$/);
-  if (unitMatch) {
-    return {
-      id: 'unit-read',
-      path: normalised,
-      params: {
-        workId: decodeURIComponent(unitMatch[1]),
-        unitId: decodeURIComponent(unitMatch[2]),
-      },
-    };
-  }
 
   if (normalised === '/library/history') {
     return { id: 'history', path: normalised };
