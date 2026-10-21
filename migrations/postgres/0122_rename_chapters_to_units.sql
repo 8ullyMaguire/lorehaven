@@ -93,6 +93,9 @@ ALTER TABLE topic_schedules RENAME COLUMN chapter_end TO unit_end;
 -- The spoiler scope: a unit rather than a "chapter".
 ALTER TABLE forum_topics RENAME COLUMN spoiler_scope_chapter TO spoiler_scope_unit;
 
+-- The coordinates' length spread: the spread of the work's unit lengths.
+ALTER TABLE work_coordinates RENAME COLUMN chapter_length_spread TO unit_length_spread;
+
 -- ── the indexes ───────────────────────────────────────────────────────────
 
 -- The indexes are dropped and recreated here rather than renamed, so that the

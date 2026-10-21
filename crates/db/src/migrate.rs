@@ -650,6 +650,193 @@ mod tests {
         }
     }
 
+    /// The two dialects must end up with **the same schema**.
+    ///
+    /// The parity test above compares the columns a migration *declares*, and a
+    /// rename declares nothing — it moves a column that an earlier migration
+    /// created. So a rename present in one dialect and absent in the other is
+    /// invisible to it, and the engine that did not get it keeps the old name
+    /// forever.
+    ///
+    /// That is not hypothetical: migration 0122 renamed
+    /// `work_coordinates.chapter_length_spread` to `unit_length_spread` on
+    /// SQLite and not on PostgreSQL, and every PostgreSQL test that measured a
+    /// work failed with *"column \"unit_length_spread\" of relation
+    /// \"work_coordinates\" does not exist"*. SQLite was green throughout,
+    /// because SQLite was the dialect that got the rename.
+    ///
+    /// **The comparison is of the RESULTING schema, not of the statements.**
+    /// That is what makes it exact rather than merely strict: the two
+    /// dialects are allowed to reach the same schema by different routes.
+    /// Migration 0075 renames a broken table out of the way and recreates it on
+    /// SQLite, while PostgreSQL simply creates it — the same schema, two
+    /// shapes — and a test that demanded the same *statements* would fail on a
+    /// divergence the specification permits.
+    #[test]
+    fn the_two_dialects_end_up_with_the_same_schema() {
+        /// The `(table -> columns)` a dialect has after every migration.
+        fn cumulative_schema(backend: Backend) -> std::collections::BTreeMap<String, Vec<String>> {
+            let mut tables: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+                std::collections::BTreeMap::new();
+            for migration in catalogue(backend) {
+                for (name, columns) in declared_columns(migration.sql) {
+                    let entry = tables.entry(name).or_default();
+                    for column in columns {
+                        entry.insert(column);
+                    }
+                }
+                for (table, from, to) in column_renames(migration.sql) {
+                    if let Some(columns) = tables.get_mut(&table) {
+                        columns.remove(&from);
+                        columns.insert(to);
+                    }
+                }
+                for (from, to) in table_renames(migration.sql) {
+                    if let Some(columns) = tables.remove(&from) {
+                        tables.insert(to, columns);
+                    }
+                }
+                for table in dropped_tables(migration.sql) {
+                    tables.remove(&table);
+                }
+            }
+            tables
+                .into_iter()
+                .map(|(name, columns)| (name, columns.into_iter().collect()))
+                .collect()
+        }
+
+        let sqlite = cumulative_schema(Backend::Sqlite);
+        let postgres = cumulative_schema(Backend::Postgres);
+
+        let only_sqlite: Vec<&String> = sqlite
+            .keys()
+            .filter(|k| !postgres.contains_key(*k))
+            .collect();
+        let only_postgres: Vec<&String> = postgres
+            .keys()
+            .filter(|k| !sqlite.contains_key(*k))
+            .collect();
+        assert!(
+            only_sqlite.is_empty() && only_postgres.is_empty(),
+            "the two dialects end up with different tables -- sqlite only {only_sqlite:?}, \
+             postgres only {only_postgres:?}"
+        );
+
+        for (name, columns) in &sqlite {
+            assert_eq!(
+                columns, &postgres[name],
+                "{name} has different columns on the two engines"
+            );
+        }
+    }
+
+    /// The `(table -> columns)` a migration declares, as `CREATE TABLE` and
+    /// `ALTER TABLE ... ADD COLUMN` state them.
+    fn declared_columns(sql: &str) -> std::collections::BTreeMap<String, Vec<String>> {
+        let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for (name, columns) in declared_schema(sql) {
+            if name.starts_with("fk:") || name.starts_with("index:") {
+                continue;
+            }
+            out.insert(name, columns);
+        }
+        out
+    }
+
+    /// The words of a statement, with the trailing `;` dropped.
+    ///
+    /// The migrations spell these statements in whatever case the file uses, so
+    /// the comparison is on the upper-cased words and the *values* are read
+    /// from the original text.
+    fn words(line: &str) -> Vec<String> {
+        line.trim()
+            .trim_end_matches(';')
+            .split_whitespace()
+            .map(|w| w.to_owned())
+            .collect()
+    }
+
+    /// The column renames a migration performs, as `(table, from, to)`.
+    ///
+    /// `ALTER TABLE <table> RENAME COLUMN <from> TO <to>`
+    fn column_renames(sql: &str) -> Vec<(String, String, String)> {
+        let mut out = Vec::new();
+        for line in strip_comments(sql).lines() {
+            let words = words(line);
+            // ALTER TABLE <table> RENAME COLUMN <from> TO <to>
+            //   0        1      2         3      4       5      6   7
+            if words.len() < 7 {
+                continue;
+            }
+            if !words[0].eq_ignore_ascii_case("ALTER")
+                || !words[1].eq_ignore_ascii_case("TABLE")
+                || !words[3].eq_ignore_ascii_case("RENAME")
+                || !words[4].eq_ignore_ascii_case("COLUMN")
+                || !words[6].eq_ignore_ascii_case("TO")
+            {
+                continue;
+            }
+            out.push((
+                words[2].to_lowercase(),
+                words[5].to_lowercase(),
+                words[7].to_lowercase(),
+            ));
+        }
+        out
+    }
+
+    /// The table renames a migration performs, as `(from, to)`.
+    ///
+    /// `ALTER TABLE <from> RENAME TO <to>`
+    fn table_renames(sql: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for line in strip_comments(sql).lines() {
+            let words = words(line);
+            // ALTER TABLE <from> RENAME TO <to>
+            //   0        1      2       3      4   5
+            if words.len() < 5 {
+                continue;
+            }
+            if !words[0].eq_ignore_ascii_case("ALTER")
+                || !words[1].eq_ignore_ascii_case("TABLE")
+                || !words[3].eq_ignore_ascii_case("RENAME")
+                || !words[4 - 1].eq_ignore_ascii_case("TO")
+            {
+                continue;
+            }
+            out.push((words[2].to_lowercase(), words[4].to_lowercase()));
+        }
+        out
+    }
+
+    /// The tables a migration drops.
+    fn dropped_tables(sql: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in strip_comments(sql).lines() {
+            let line = line.trim();
+            let upper = line.to_uppercase();
+            if !upper.starts_with("DROP TABLE") {
+                continue;
+            }
+            let rest = line["DROP TABLE".len()..].trim();
+            let rest = rest
+                .strip_prefix("IF EXISTS ")
+                .or_else(|| rest.strip_prefix("IF EXISTS "))
+                .unwrap_or(rest)
+                .trim();
+            let name = rest
+                .split([' ', ';', '\t'])
+                .next()
+                .unwrap_or_default()
+                .to_lowercase();
+            if !name.is_empty() {
+                out.push(name);
+            }
+        }
+        out
+    }
+
     /// A foreign key's column and the column it references must have the
     /// **same type**, and a copied column must have the same type as the one
     /// it comes from — in the same dialect.

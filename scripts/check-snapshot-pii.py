@@ -58,9 +58,14 @@ POLICY = REPO / "docs" / "snapshot-column-policy.json"
 # and a 27th table gaining account_id is a policy question, not a detail.
 COVERED_TABLES = {
     "accounts", "pseuds", "webhook_endpoints", "sessions",
-    "imports", "works", "chapters", "reading_events", "kudos",
+    "imports", "works", "units", "reading_events", "kudos",
     "comments", "devices", "device_tokens", "login_attempts",
 }
+# `chapters` was renamed to `units` by migration 0122 (spec §5: a **unit** is a
+# part of a work). The name the instance uses *now* is the one this gate watches,
+# because a gate that watched the old name would be watching a table that no
+# longer exists -- which is exactly what it did before the rename, and the
+# table that now holds the body was not on its list at all.
 
 # Columns whose NAME establishes that they carry an addressable identity.
 # These are covered on ANY table, because a table named `foo` can still gain a
@@ -140,6 +145,25 @@ ADD_COLUMN_RE = re.compile(
     r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)",
     re.I,
 )
+# The migrations are a SEQUENCE: a table is created, then possibly renamed, then
+# possibly dropped. A gate that reads only the CREATE TABLE statements
+# describes a schema that never existed -- after migration 0122 renamed
+# `chapters` to `units`, this gate saw `chapters` and not `units`, so the
+# covered table it was watching was one the instance no longer has, and the
+# table that now holds the body was not on its list at all.
+RENAME_TABLE_RE = re.compile(
+    r"ALTER\s+TABLE\s+([a-z_][a-z0-9_]*)\s+RENAME\s+TO\s+([a-z_][a-z0-9_]*)",
+    re.I,
+)
+RENAME_COLUMN_RE = re.compile(
+    r"ALTER\s+TABLE\s+([a-z_][a-z0-9_]*)\s+RENAME\s+COLUMN\s+([a-z_][a-z0-9_]*)\s+TO\s+"
+    r"([a-z_][a-z0-9_]*)",
+    re.I,
+)
+DROP_TABLE_RE = re.compile(
+    r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)",
+    re.I,
+)
 # A column definition line: leading name, then a type. Excludes PRIMARY KEY,
 # FOREIGN KEY, CONSTRAINT, UNIQUE, CHECK and index clauses.
 COLUMN_LINE_RE = re.compile(r"^\s*([a-z_][a-z0-9_]*)\s+[a-z]", re.I)
@@ -160,31 +184,67 @@ def parse_inventory(migrations_dir: pathlib.Path) -> dict[str, set[str]]:
     Later migrations win on conflicts, and ALTER TABLE ADD COLUMN accumulates,
     which is what makes this see a column added in migration 0092 as readily as
     one created in migration 0001.
+
+    **The migrations are a sequence.** A table is created, then possibly
+    renamed, then possibly dropped, and the name the instance uses *now* is the
+    last of those. Reading only the CREATE TABLE statements leaves a schema
+    that never existed -- after migration 0122 renamed `chapters` to `units`,
+    this saw `chapters` and not `units`, so it watched a table the instance no
+    longer had and did not watch the one that now holds the body. A renamed
+    column keeps its place under its new name, and a dropped table is gone.
     """
     tables: dict[str, set[str]] = {}
     for path in sorted(migrations_dir.glob("*.sql")):
         sql = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+        # The order inside one file matters: a rebuild renames the old table
+        # away, creates the new one, and drops the old one.
+        events: list[tuple[int, str, re.Match[str]]] = []
         for m in ADD_COLUMN_RE.finditer(sql):
-            tables.setdefault(m.group(1).lower(), set()).add(m.group(2).lower())
+            events.append((m.start(), "add", m))
         for m in CREATE_TABLE_RE.finditer(sql):
-            table = m.group(1).lower()
-            # Walk the balanced parens of this CREATE TABLE body.
-            start = m.end()
-            depth, i = 1, start
-            while i < len(sql) and depth:
-                if sql[i] == "(":
-                    depth += 1
-                elif sql[i] == ")":
-                    depth -= 1
-                i += 1
-            body = sql[start : i - 1]
-            for line in body.splitlines():
-                line = line.strip().rstrip(",")
-                if not line:
-                    continue
-                cm = COLUMN_LINE_RE.match(line)
-                if cm and cm.group(1).lower() not in NOT_A_COLUMN:
-                    tables.setdefault(table, set()).add(cm.group(1).lower())
+            events.append((m.start(), "create", m))
+        for m in RENAME_TABLE_RE.finditer(sql):
+            events.append((m.start(), "rename_table", m))
+        for m in RENAME_COLUMN_RE.finditer(sql):
+            events.append((m.start(), "rename_column", m))
+        for m in DROP_TABLE_RE.finditer(sql):
+            events.append((m.start(), "drop", m))
+        for _, kind, m in sorted(events, key=lambda e: e[0]):
+            if kind == "add":
+                tables.setdefault(m.group(1).lower(), set()).add(m.group(2).lower())
+            elif kind == "create":
+                table = m.group(1).lower()
+                # Walk the balanced parens of this CREATE TABLE body.
+                start = m.end()
+                depth, i = 1, start
+                while i < len(sql) and depth:
+                    if sql[i] == "(":
+                        depth += 1
+                    elif sql[i] == ")":
+                        depth -= 1
+                    i += 1
+                body = sql[start : i - 1]
+                for line in body.splitlines():
+                    line = line.strip().rstrip(",")
+                    if not line:
+                        continue
+                    cm = COLUMN_LINE_RE.match(line)
+                    if cm and cm.group(1).lower() not in NOT_A_COLUMN:
+                        tables.setdefault(table, set()).add(cm.group(1).lower())
+            elif kind == "rename_table":
+                old, new = m.group(1).lower(), m.group(2).lower()
+                tables[new] = tables.pop(old, set())
+            elif kind == "rename_column":
+                table, old, new = (
+                    m.group(1).lower(),
+                    m.group(2).lower(),
+                    m.group(3).lower(),
+                )
+                if table in tables and old in tables[table]:
+                    tables[table].discard(old)
+                    tables[table].add(new)
+            elif kind == "drop":
+                tables.pop(m.group(1).lower(), None)
     return tables
 
 

@@ -966,6 +966,8 @@ pub async fn list_public_works_by_freshness(
                WHERE w.lifecycle = 'published' AND w.visibility = 'public'
                  AND w.deleted_at IS NULL
                ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id AND e.action = 'publish') IS NULL ASC,
+                        (SELECT MAX(e.occurred_at) FROM publication_events e
                           WHERE e.work_id = w.id AND e.action = 'publish') DESC,
                         w.id DESC
                LIMIT ?",
@@ -973,6 +975,8 @@ pub async fn list_public_works_by_freshness(
                WHERE w.lifecycle = 'published' AND w.visibility = 'public'
                  AND w.deleted_at IS NULL
                ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id AND e.action = 'publish') IS NULL ASC,
+                        (SELECT MAX(e.occurred_at) FROM publication_events e
                           WHERE e.work_id = w.id AND e.action = 'publish') DESC,
                         w.id::text DESC
                LIMIT $1",
@@ -983,6 +987,9 @@ pub async fn list_public_works_by_freshness(
                  AND w.deleted_at IS NULL
                ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
                           WHERE e.work_id = w.id
+                            AND e.action IN ('update', 'restore_revision')) IS NULL ASC,
+                        (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id
                             AND e.action IN ('update', 'restore_revision')) DESC,
                         w.id DESC
                LIMIT ?",
@@ -990,6 +997,9 @@ pub async fn list_public_works_by_freshness(
                WHERE w.lifecycle = 'published' AND w.visibility = 'public'
                  AND w.deleted_at IS NULL
                ORDER BY (SELECT MAX(e.occurred_at) FROM publication_events e
+                          WHERE e.work_id = w.id
+                            AND e.action IN ('update', 'restore_revision')) IS NULL ASC,
+                        (SELECT MAX(e.occurred_at) FROM publication_events e
                           WHERE e.work_id = w.id
                             AND e.action IN ('update', 'restore_revision')) DESC,
                         w.id::text DESC
