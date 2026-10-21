@@ -1,3 +1,44 @@
+## 2026-10-22 — M6-02: the floor decides what is a node, and not what is known
+
+**Milestone:** M6 · **Requirements:** `DM6-02`
+
+### The floor is not optional, and the measurement says why
+
+97 % of the freeform namespace is singletons: 587,258 of 634,190 names are on exactly one
+work. Without a floor, "browse the taxonomy" is 634,231 rows of one-off user phrases, and
+every count on the page is a count of one. The default floor is **five works** and it is
+**configurable per kind** — a warning is worth a node at one work and a freeform tag is not
+worth one at one work.
+
+### The floor decides what appears in the tree, and not what the instance knows
+
+A tag on one work is still stored, still searchable and still countable, and it is an
+**assertion** rather than a node. The test asserts both halves: the search finds it, and the
+browse does not.
+
+### The default is `browsable`, and that is deliberate
+
+Every entity that exists today was created by a human through the taxonomy UI, and the
+established vocabulary is not a set of singletons. Defaulting to `assertion_only` would empty
+the browse of the whole existing corpus the moment the migration ran — **and it would be
+invisible**. An entity created **by a signal** is an assertion until a recount says
+otherwise.
+
+### The state is a column, and the count is denormalised
+
+A subquery counting the works would make the browse's own filter depend on a count over the
+largest table in the schema — and the count changes with every tag written. `node_count` is
+denormalised on purpose, and a **recount** fills it: a default of zero would put every entity
+below every floor.
+
+**And the recount is idempotent**, which is what makes it a bin's job and not a script.
+
+### The browse's total is the count above the floor
+
+A reader who sees "12 of 900" learns something, and a reader who sees "900" learns nothing.
+
+---
+
 ## 2026-10-21 — M6-01: two tables describing one thing become one
 
 **Milestone:** M6 · **Requirements:** `DM6-01`

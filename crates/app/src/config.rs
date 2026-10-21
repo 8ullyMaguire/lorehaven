@@ -131,6 +131,8 @@ pub struct Config {
     /// What the importer may do about a source that refuses a plain request.
     pub imports: ImportsConfig,
     pub retention: RetentionConfig,
+    /// The taxonomy's floors (spec §6.4, R-23).
+    pub taxonomy: TaxonomyConfig,
     /// Calibrated decision models (spec §11.14, amendment
     /// `calibrated-decision-models.md`).
     pub decisions: DecisionsConfig,
@@ -2684,6 +2686,22 @@ impl Config {
                 // value for the other three.
                 None => RetentionGovernanceConfig::default(),
             },
+            taxonomy: TaxonomyConfig {
+                // `and_then`: an absent value yields the default, which is the
+                // same shape as the retention section's -- a typo looks like a
+                // setting that did not apply rather than like a broken
+                // instance.
+                entity_floor: file
+                    .taxonomy
+                    .as_ref()
+                    .and_then(|taxonomy| taxonomy.entity_floor)
+                    .unwrap_or(darkhold_db::entity_floor::DEFAULT_FLOOR),
+                entity_floor_by_kind: file
+                    .taxonomy
+                    .as_ref()
+                    .and_then(|taxonomy| taxonomy.entity_floor_by_kind.clone())
+                    .unwrap_or_default(),
+            },
             retention: RetentionConfig {
                 // `and_then(parse_stored)`: an unrecognised value yields `None`
                 // and therefore the default, which is the fail-closed direction
@@ -3238,6 +3256,7 @@ impl Config {
             // drove a solver by default would make every test that fetches a page
             // depend on which escalations happened to be configured.
             imports: ImportsConfig::default(),
+            taxonomy: TaxonomyConfig::default(),
             retention: RetentionConfig::default(),
             decisions: DecisionsConfig::default(),
             theme: ThemeConfig::default(),
@@ -3814,6 +3833,7 @@ struct FileConfig {
     meta_ranker: Option<MetaRankerSection>,
     /// Body-audience baseline (spec §7.7).
     retention: Option<RetentionSection>,
+    taxonomy: Option<TaxonomySection>,
     /// Roadmap participation (spec §29.4).
     roadmap: Option<RoadmapSection>,
     /// Retention governance (spec §5, §19.15, amendment §5).
@@ -4023,6 +4043,43 @@ struct RetentionGovernanceSection {
     binding_mode: Option<bool>,
 }
 
+/// The taxonomy's floors (spec §6.4, R-23).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaxonomyConfig {
+    /// The work-count floor a canonical entity clears to be a node in the tree.
+    ///
+    /// **Five works by default** (spec §6.4), and configurable per kind. The
+    /// floor is configuration and not a constant because the question it
+    /// answers is preference-shaped -- "how big does a name have to be before
+    /// this instance will call it a node?" -- and the answer carries no
+    /// authority over any reader, any ranking, or any account.
+    pub entity_floor: i64,
+    /// A floor for a named kind, overriding `entity_floor`.
+    ///
+    /// A warning is worth a node at one work and a freeform tag is not worth
+    /// one at one work, so the kinds do not share a floor by default.
+    pub entity_floor_by_kind: std::collections::BTreeMap<String, i64>,
+}
+
+impl Default for TaxonomyConfig {
+    fn default() -> Self {
+        Self {
+            entity_floor: darkhold_db::entity_floor::DEFAULT_FLOOR,
+            entity_floor_by_kind: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl TaxonomyConfig {
+    /// The floor for one kind of entity, as the store wants it.
+    pub fn floors(&self) -> darkhold_db::entity_floor::EntityFloors {
+        darkhold_db::entity_floor::EntityFloors {
+            default: self.entity_floor,
+            by_kind: self.entity_floor_by_kind.clone(),
+        }
+    }
+}
+
 /// The `[retention]` table (spec §7.7): who may read a body by default.
 ///
 /// This table did not exist, and the absence was invisible. `retention:
@@ -4060,6 +4117,19 @@ struct RetentionSection {
     /// once: a field on the struct with no `FileConfig` member reads as
     /// configurable in every test and is silently ignored in a real file.
     body_request_min_trust: Option<i64>,
+}
+
+/// The `[taxonomy]` table (spec §6.4, R-23).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaxonomySection {
+    /// The work-count floor a canonical entity clears to be a node in the tree.
+    ///
+    /// Five by default, and configurable per kind. A **number** rather than a
+    /// derived value, because the number is what the operator sets.
+    entity_floor: Option<i64>,
+    /// A floor for a named kind, overriding `entity_floor`.
+    entity_floor_by_kind: Option<std::collections::BTreeMap<String, i64>>,
 }
 /// The `[decisions]` file section.
 ///

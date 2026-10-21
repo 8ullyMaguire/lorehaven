@@ -356,11 +356,11 @@ pub async fn ensure_node_from_signal(
     // Reinforcing a node must not rewrite a curator's chosen display form, and
     // agreement is not curation.
     let sql = db.sql(
-        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
-         VALUES (?, ?, ?, ?, ?, 'unverified', 1)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count, node_state)
+         VALUES (?, ?, ?, ?, ?, 'unverified', 1, 'assertion_only')
          ON CONFLICT (kind, norm) DO UPDATE SET signal_count = canonical_entities.signal_count + 1",
-        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
-         VALUES ($1::uuid, $2, $3, $4, $5, 'unverified', 1)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count, node_state)
+         VALUES ($1::uuid, $2, $3, $4, $5, 'unverified', 1, 'assertion_only')
          ON CONFLICT (kind, norm) DO UPDATE SET signal_count = canonical_entities.signal_count + 1",
     );
     match db.backend() {

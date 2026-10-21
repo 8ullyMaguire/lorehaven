@@ -292,13 +292,20 @@ async fn list_tags(
 ) -> ApiResult<Json<serde_json::Value>> {
     let sort = resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "tags").await;
 
-    let tags = darkhold_db::taxonomy::list_tags(
+    // **The browse shows the TREE, and the tree is the entities above the
+    // floor** (spec §6.4, R-23). An entity below it is an assertion: the work
+    // says "this is a Slow Burn", and the taxonomy does not claim there is a
+    // Slow Burn *node*. The assertion is still stored, still searchable and
+    // still countable -- the floor decides what appears in the tree and not
+    // what the instance knows.
+    let (tags, total) = darkhold_db::entity_floor::browsable(
         state.db(),
+        "tag",
         params.limit.clamp(1, 200),
         params.offset.max(0),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     let mut items: Vec<TagItem> = tags
         .into_iter()
@@ -312,7 +319,15 @@ async fn list_tags(
 
     apply_tag_sort(&mut items, &sort);
 
-    Ok(Json(serde_json::json!({ "items": items, "sort": sort })))
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "sort": sort,
+        // **The total is the count of the entities ABOVE THE FLOOR**, not the
+        // count of the rows in the table. A reader who sees "12 of 900" learns
+        // something, and a reader who sees "900" learns nothing.
+        "total": total,
+        "floor": state.config().taxonomy.entity_floor,
+    })))
 }
 
 fn apply_tag_sort(items: &mut [TagItem], sort: &str) {
