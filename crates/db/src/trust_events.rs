@@ -201,7 +201,7 @@ pub async fn list_for_account(
         "SELECT id::text, account_id::text, CAST(from_level AS BIGINT), CAST(to_level AS BIGINT),
                 cause, evidence_ref, actor_account_id::text, created_at
            FROM trust_events WHERE account_id = ?::uuid
-          ORDER BY created_at DESC, id DESC LIMIT $2",
+          ORDER BY created_at DESC, id DESC LIMIT ?",
     );
     let rows: Vec<EventRow> = match db.backend() {
         Backend::Sqlite => {

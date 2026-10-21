@@ -22,6 +22,24 @@
 - **work** — `title`, `summary`, `language`, `content_rating`, `visibility`, `lifecycle`,
   `completion`, `format`, `discussion_mode`, `ai_training` (the author's statement),
   `owner_pseud_id`, `derived_activity`, `half_life_bp`, `contested_at`, `deleted_at`.
+  - **What the implementation settled.** Five of these six columns already existed and
+    the work was to bring them to this table's shape. **The defaults move and the rows
+    do not**: a *new* work is a `fanwork` with a `thread_only` discussion, and the rows
+    that predate the change keep `'prose'` and `'comments_only'` — which is what the
+    migrations that introduced those columns said they should. A table rebuild would be
+    the other way to change a default, and SQLite cannot alter one.
+  - **`derived_activity` is never a penalty.** It says how long ago the work was
+    published and it is not a score, a demotion, or a reason to show a work less. And
+    **the author's state always wins** — a work the author has declared concluded stays
+    concluded, and the nightly recompute must not overwrite it.
+  - **`half_life_bp` is nullable, and "NULL = not yet scored" is a meaningful
+    absence.** The scale runs 0..10000, where 10000 is the *maximum* — an evergreen
+    boost of 1.5× — so a default of 10000 would give every unscored work the largest
+    boost the mechanism can give, and the unscored works are the newest ones.
+  - **The full engine follows the tier threshold.** This table's level-4 row says "the
+    full engine (T2) **if `full_min_trust` is 4**", so `tiers.full_min_trust` decides
+    where the full engine sits and the ladder's row follows it. There is no second
+    configuration key to keep in step, and no way for them to disagree.
   - `lifecycle` ∈ draft · scheduled · published · withdrawn · deleted
   - `visibility` ∈ public · unlisted · restricted
   - `completion` ∈ in_progress · complete · hiatus · abandoned

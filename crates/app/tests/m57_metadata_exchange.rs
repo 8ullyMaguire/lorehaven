@@ -1283,9 +1283,14 @@ async fn real_work_id(h: &Harness) -> String {
     // using the account the harness already created avoids a second fixture that
     // could fail for unrelated reasons.
     let account_id = h.sole_account_id().await;
+    // The PostgreSQL half uses `$n` and not `?n`: `rewrite_placeholders`
+    // renumbers every `?` to `$1`, `$2`, ... and leaves the digit behind, so
+    // `?1` becomes `$11` -- a parameter eleven, in a statement that binds one.
+    // `id::text` because `pseuds.id` is a UUID column on PostgreSQL and the
+    // row is read into a `String`.
     let pseud_sql = h.db().sql(
         "SELECT id FROM pseuds WHERE account_id = ?1 LIMIT 1",
-        "SELECT id FROM pseuds WHERE account_id = ?1::uuid LIMIT 1",
+        "SELECT id::text FROM pseuds WHERE account_id = $1::uuid LIMIT 1",
     );
     let pseud_id: String = match h.db().backend() {
         darkhold_db::Backend::Sqlite => {
@@ -1311,7 +1316,7 @@ async fn real_work_id(h: &Harness) -> String {
          VALUES (?1, ?2, 'Held Work', '', 'en', 'general', 'public', 'published', 'complete', 1, ?3, ?3, 1)",
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility, \
          lifecycle, completion, show_public_ratings, created_at, updated_at, version) \
-         VALUES (?1::uuid, ?2::uuid, 'Held Work', '', 'en', 'general', 'public', 'published', 'complete', 1, $3, $3, 1)",
+         VALUES ($1::uuid, $2::uuid, 'Held Work', '', 'en', 'general', 'public', 'published', 'complete', 1, $3, $3, 1)",
     );
     match h.db().backend() {
         darkhold_db::Backend::Sqlite => {

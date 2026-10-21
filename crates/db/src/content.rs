@@ -586,7 +586,7 @@ pub async fn create_work_with_discussion_mode(
                             lifecycle, completion, show_public_ratings, format, discussion_mode,
                             created_at, updated_at, version,
                             generated_content_posture)
-         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', $4, $5, $6, 1,
+         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, 'fanwork', ?, ?, ?, 1,
                  COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'allow'))",
     );
 

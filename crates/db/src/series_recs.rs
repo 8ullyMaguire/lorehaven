@@ -519,7 +519,7 @@ pub async fn relate_works(
         "INSERT INTO work_relations (id, from_work_id, to_work_id, relation_type, created_at, updated_at, version)
          VALUES (?, ?, ?, ?, ?, ?, 1)",
         "INSERT INTO work_relations (id, from_work_id, to_work_id, relation_type, created_at, updated_at, version)
-         VALUES (?::uuid, ?::uuid, ?::uuid, $4, $5, $6, 1)",
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, 1)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -574,7 +574,7 @@ pub async fn put_in_series(
          VALUES (?, ?, ?, '', ?, ?, ?, 1)
          ON CONFLICT(slug) DO NOTHING",
         "INSERT INTO series (id, slug, title, description, owner_pseud_id, created_at, updated_at, version)
-         VALUES (?::uuid, $1, $2, '', $3::uuid, $4, $5, 1)
+         VALUES (?::uuid, ?, ?, '', ?::uuid, ?, ?, 1)
          ON CONFLICT(slug) DO NOTHING",
     );
     match db.backend() {
@@ -631,7 +631,7 @@ pub async fn put_in_series(
          ON CONFLICT(series_id, work_id) DO UPDATE SET position = excluded.position,
              updated_at = excluded.updated_at, version = series_entries.version + 1",
         "INSERT INTO series_entries (id, series_id, work_id, position, created_at, updated_at, version)
-         VALUES (?::uuid, $1::uuid, $2::uuid, $3, $4, $5, 1)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, 1)
          ON CONFLICT(series_id, work_id) DO UPDATE SET position = excluded.position,
              updated_at = excluded.updated_at, version = series_entries.version + 1",
     );

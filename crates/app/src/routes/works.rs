@@ -1690,7 +1690,7 @@ async fn author_view(
         discussion_mode: work.discussion_mode.clone(),
         ai_training: work.ai_training.clone(),
         ai_training_statement: ai_training_statement(&work.ai_training),
-        generated_content: generated_content_view(&state, &work).await,
+        generated_content: generated_content_view(state, work).await,
         role,
         units: units.into_iter().map(UnitView::from).collect(),
         contributors: contributor_views,
@@ -1788,7 +1788,7 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         discussion_mode: work.discussion_mode.clone(),
         ai_training: work.ai_training.clone(),
         ai_training_statement: ai_training_statement(&work.ai_training),
-        generated_content: generated_content_view(&state, &work).await,
+        generated_content: generated_content_view(state, work).await,
         rating_summary: rating_summary.map(|summary| PublicRatingSummaryView {
             count: summary.count,
             mean_stars: summary.mean_permille as f64 / 1000.0,
@@ -1870,7 +1870,7 @@ async fn record_view_for_work(
         false,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
     if is_new {
         work_metrics::increment_views(state.db(), &work_id.to_string())
             .await
@@ -1911,7 +1911,7 @@ async fn toggle_kudos(
         &actor.account_id.to_string(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     // §50.1: the reason rides along with the kudos rather than on its own
     // endpoint. Only stored when the kudos actually landed — toggling OFF removes
@@ -2081,7 +2081,7 @@ async fn create_highlight(
         body.note.as_deref(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let signal = darkhold_db::reasons_store::highlight_signal(state.db(), &work_id.to_string())
         .await
@@ -2172,7 +2172,7 @@ async fn set_work_status(
         status,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
     Ok(Json(library::status_json(&row)))
 }
 
@@ -2191,7 +2191,7 @@ async fn clear_work_status(
         &work_id.to_string(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
     if !removed {
         return Err(ApiError(AppError::NotFound {
             resource: "reading status",

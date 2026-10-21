@@ -104,6 +104,26 @@ ADD_COLUMN = re.compile(
     r"(?=\s*(?:,|;|$))",
     re.IGNORECASE | re.MULTILINE,
 )
+# The migrations are a SEQUENCE: a table is created, then possibly renamed, then
+# possibly dropped. A schema read from the CREATE TABLE statements alone
+# describes a schema that never existed -- after migration 0122 renamed
+# `chapters` to `units`, the schema knew `chapters` and not `units`, and every
+# rule that consults the schema silently skipped the statements against the
+# table the instance actually has. A skipped statement is worse than a wrong
+# one: the gate says nothing and looks clean.
+RENAME_TABLE = re.compile(
+    r"ALTER\s+TABLE\s+([a-z_][a-z0-9_]*)\s+RENAME\s+TO\s+([a-z_][a-z0-9_]*)",
+    re.IGNORECASE,
+)
+RENAME_COLUMN = re.compile(
+    r"ALTER\s+TABLE\s+([a-z_][a-z0-9_]*)\s+RENAME\s+COLUMN\s+([a-z_][a-z0-9_]*)\s+TO\s+"
+    r"([a-z_][a-z0-9_]*)",
+    re.IGNORECASE,
+)
+DROP_TABLE = re.compile(
+    r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)",
+    re.IGNORECASE,
+)
 
 
 def load_schema(migrations: pathlib.Path) -> dict[str, dict[str, str]]:
@@ -115,32 +135,74 @@ def load_schema(migrations: pathlib.Path) -> dict[str, dict[str, str]]:
     skips it. `DROP COLUMN` is deliberately not handled: a dropped column still
     reading as present only makes a checker noisier, never quieter, and this
     repository does not drop columns in a migration.
+
+    **The migrations are read as a sequence.** A table is created, then possibly
+    renamed, then possibly dropped, and the name the instance uses *now* is the
+    last of those. Reading only the CREATE TABLE statements leaves a schema that
+    never existed: after migration 0122 renamed `chapters` to `units`, the schema
+    knew `chapters` and not `units`, so every statement against `units` was read
+    against a table the gate had never heard of and skipped without a word. A
+    skipped statement is worse than a wrong one -- the gate says nothing and
+    looks clean.
+
+    So the sequence is followed: a rename moves a table's columns to its new
+    name, a renamed column keeps its type under its new name, and a dropped
+    table is gone -- which matters for a rebuild, where the table created later
+    under the same name is a *different* table with its own definition.
     """
     schema: dict[str, dict[str, str]] = {}
     for path in sorted(migrations.glob("*.sql")):
         text = path.read_text(encoding="utf-8", errors="replace")
+        # The order inside one file matters: a rebuild renames the old table
+        # away, creates the new one, and drops the old one.
+        events: list[tuple[int, str, re.Match[str]]] = []
         for match in CREATE_TABLE.finditer(text):
-            table, body = match.group(1).lower(), match.group(2)
-            columns = schema.setdefault(table, {})
-            found = list(COLUMN.finditer(body)) + list(LAST_COLUMN.finditer(body))
-            for col in found:
-                # The trailing constraint group is non-greedy, so on
-                # `uuid NOT NULL` the captured type can still carry it.
-                coltype = " ".join(col.group(2).split()).lower()
-                for noise in ("not null", "null", "primary key", "unique"):
-                    coltype = re.sub(rf"\b{noise}\b.*", "", coltype).strip()
-                # Last writer wins. A table is often declared once and then
-                # redeclared by a later migration that retypes columns, and the
-                # schema the database actually has is the last one applied.
-                columns[col.group(1).lower()] = coltype
-        # Later in the same file than CREATE_TABLE, and again last-writer-wins, so a
-        # migration that retypes via ADD COLUMN overrides the declared type.
+            events.append((match.start(), "create", match))
         for match in ADD_COLUMN.finditer(text):
-            table, col = match.group(1).lower(), match.group(2).lower()
-            coltype = " ".join(match.group(3).split()).lower()
-            for noise in ("not null", "null", "primary key", "unique", "default"):
-                coltype = re.sub(rf"\b{noise}\b.*", "", coltype).strip()
-            schema.setdefault(table, {})[col] = coltype
+            events.append((match.start(), "add", match))
+        for match in RENAME_TABLE.finditer(text):
+            events.append((match.start(), "rename_table", match))
+        for match in RENAME_COLUMN.finditer(text):
+            events.append((match.start(), "rename_column", match))
+        for match in DROP_TABLE.finditer(text):
+            events.append((match.start(), "drop", match))
+        for _, kind, match in sorted(events, key=lambda e: e[0]):
+            if kind == "create":
+                table, body = match.group(1).lower(), match.group(2)
+                columns = schema.setdefault(table, {})
+                found = list(COLUMN.finditer(body)) + list(LAST_COLUMN.finditer(body))
+                for col in found:
+                    # The trailing constraint group is non-greedy, so on
+                    # `uuid NOT NULL` the captured type can still carry it.
+                    coltype = " ".join(col.group(2).split()).lower()
+                    for noise in ("not null", "null", "primary key", "unique"):
+                        coltype = re.sub(rf"\b{noise}\b.*", "", coltype).strip()
+                    # Last writer wins. A table is often declared once and then
+                    # redeclared by a later migration that retypes columns, and the
+                    # schema the database actually has is the last one applied.
+                    columns[col.group(1).lower()] = coltype
+            elif kind == "add":
+                # Later in the same file than CREATE_TABLE, and again
+                # last-writer-wins, so a migration that retypes via ADD COLUMN
+                # overrides the declared type.
+                table, col = match.group(1).lower(), match.group(2).lower()
+                coltype = " ".join(match.group(3).split()).lower()
+                for noise in ("not null", "null", "primary key", "unique", "default"):
+                    coltype = re.sub(rf"\b{noise}\b.*", "", coltype).strip()
+                schema.setdefault(table, {})[col] = coltype
+            elif kind == "rename_table":
+                old, new = match.group(1).lower(), match.group(2).lower()
+                schema[new] = schema.pop(old, {})
+            elif kind == "rename_column":
+                table, old, new = (
+                    match.group(1).lower(),
+                    match.group(2).lower(),
+                    match.group(3).lower(),
+                )
+                if table in schema and old in schema[table]:
+                    schema[table][new] = schema[table].pop(old)
+            elif kind == "drop":
+                schema.pop(match.group(1).lower(), None)
     return schema
 
 

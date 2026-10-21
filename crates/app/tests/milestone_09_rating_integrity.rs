@@ -203,11 +203,13 @@ impl Harness {
         .expect("create_pseud");
 
         if let Some(level) = trust {
-            self.exec(&format!(
-                "INSERT INTO trust_levels (account, level, computed_at, basis) \
-                 VALUES ('{account}', {level}, '2026-01-01T00:00:00Z', 'test')"
-            ))
-            .await;
+            // **The store's writer, not a raw INSERT.** Registration now
+            // computes the account's level, so the row exists and a bare
+            // INSERT would collide with it -- and the collision is a *primary
+            // key* error, which says nothing about what the test meant.
+            darkhold_db::governance::set_trust(self.db(), &account.to_string(), level, "test")
+                .await
+                .expect("set the trust level");
         }
 
         let now = "2026-01-01T00:00:00Z";

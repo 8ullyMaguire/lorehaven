@@ -50,6 +50,25 @@ API can return it").
 
 Each row carries its reason. **A recommendation without a reason is an advertisement.**
 
+### What the implementation settled
+
+- **The ladder is ordered and the reasons are not uniform.** The first two rungs are
+  *facts* about the work — the explicit relation and the same author — and the test
+  asserts that no two rows carry the same reason string, because a ladder whose every
+  row said "because it is similar" is an advertisement with a JSON wrapper.
+- **The three taste rungs are named as unavailable**, and asking for one by name answers
+  **404 with `MODULE_UNAVAILABLE`**. A new code rather than `NOT_IMPLEMENTED`, because
+  that is 501 and says "this instance does not do that" — a claim about the *instance*
+  rather than about the build, and a client that cannot tell the two apart will stop
+  asking.
+- **A rung that is not implemented is named, not silently absent.** A client that gets
+  a shorter list has no way to tell an empty ladder from an unimplemented one, and an
+  empty ladder reads as "this work has no neighbours" — which is a statement about the
+  work.
+- **The series' order is the author's and there is no other order.** A "smart" ordering
+  would have to be derived from a signal, and no signal here could support one and
+  inventing an order would silently contradict the author.
+
 ## 11.6 Trending and half-life
 
 - **Trending** is time-decayed, on tags and on works.

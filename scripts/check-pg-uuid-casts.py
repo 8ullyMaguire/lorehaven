@@ -25,6 +25,14 @@ MIGRATIONS = "migrations/postgres"
 
 CREATE_TABLE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\((.*?)\n\);", re.S)
 COLUMN = re.compile(r"\s*(\w+)\s+(\w+)")
+# The migrations are a *sequence*: a table is created, then possibly renamed,
+# then possibly dropped. A gate that reads only the CREATE TABLE statements
+# describes a schema that never existed -- after migration 0122 renamed
+# `chapters` to `units`, the map knew `chapters` and not `units`, and four
+# *correct* casts were reported as mismatches.
+RENAME_TABLE = re.compile(r"ALTER TABLE\s+(\w+)\s+RENAME TO\s+(\w+)", re.I)
+RENAME_COLUMN = re.compile(r"ALTER TABLE\s+(\w+)\s+RENAME COLUMN\s+(\w+)\s+TO\s+(\w+)", re.I)
+DROP_TABLE = re.compile(r"DROP TABLE(?:\s+IF EXISTS)?\s+(\w+)", re.I)
 TABLE_REF = re.compile(r"\b(?:FROM|INTO|UPDATE|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?")
 # The fault is a *bind* cast that does not match the column it is compared
 # against: `text_column = $n::uuid`. It is not a cast on the column side, because
@@ -72,16 +80,68 @@ def same_family(declared: str, cast: str) -> bool:
 
 
 def column_types(migration_dir: pathlib.Path) -> dict[tuple[str, str], str]:
-    """Map ``(table, column) -> declared type`` from the PostgreSQL migrations."""
+    """Map ``(table, column) -> declared type`` from the PostgreSQL migrations.
+
+    **The migrations are a sequence, not a bag of CREATE TABLE statements.**
+    A table is created, then possibly renamed, then possibly dropped, and the
+    name the instance uses *now* is the last of those. Reading only the
+    CREATE TABLE statements leaves the map describing a schema that never
+    existed: after migration 0122 renamed `chapters` to `units`, the map knew
+    `chapters` and not `units`, so every statement against `units` was read as
+    a statement against a table the gate had never heard of, and the four
+    `work_id:: uuid` casts that were *correct* were reported as mismatches --
+    a gate that cries wolf on correct code is a gate nobody reads.
+
+    So the sequence is followed:
+
+    * `ALTER TABLE x RENAME TO y` -- `x`'s columns become `y`'s;
+    * `ALTER TABLE x RENAME COLUMN a TO b` -- the column is renamed in place;
+    * `DROP TABLE x` -- `x` is gone, and a table created later under the same
+      name is a *different* table with its own definition.
+
+    The last point is why the create does not simply overwrite: migration 0035
+    rebuilds `export_jobs`, and the rebuild's definition is the one the
+    instance runs.
+    """
     types: dict[tuple[str, str], str] = {}
     for path in sorted(migration_dir.glob("*.sql")):
-        for match in CREATE_TABLE.finditer(path.read_text()):
-            table, body = match.group(1), match.group(2)
-            for line in body.split("\n"):
-                column = COLUMN.match(line)
-                if column:
-                    # First definition wins: a later ALTER is a different table.
-                    types.setdefault((table, column.group(1)), column.group(2).lower())
+        text = path.read_text()
+        # The order inside one file matters: 0035 renames the old table away,
+        # creates the new one, and drops the old one -- and the new one is the
+        # one that survives.
+        events: list[tuple[int, str, re.Match[str]]] = []
+        for match in CREATE_TABLE.finditer(text):
+            events.append((match.start(), "create", match))
+        for match in RENAME_TABLE.finditer(text):
+            events.append((match.start(), "rename_table", match))
+        for match in RENAME_COLUMN.finditer(text):
+            events.append((match.start(), "rename_column", match))
+        for match in DROP_TABLE.finditer(text):
+            events.append((match.start(), "drop", match))
+        for _, kind, match in sorted(events, key=lambda e: e[0]):
+            if kind == "create":
+                table, body = match.group(1), match.group(2)
+                for line in body.split("\n"):
+                    column = COLUMN.match(line)
+                    if column:
+                        types[(table, column.group(1))] = column.group(2).lower()
+            elif kind == "rename_table":
+                old, new = match.group(1), match.group(2)
+                moved = {
+                    (new, column): declared
+                    for (table, column), declared in types.items()
+                    if table == old
+                }
+                for key in [k for k in types if k[0] == old]:
+                    del types[key]
+                types.update(moved)
+            elif kind == "rename_column":
+                table, old, new = match.group(1), match.group(2), match.group(3)
+                if (table, old) in types:
+                    types[(table, new)] = types.pop((table, old))
+            elif kind == "drop":
+                for key in [k for k in types if k[0] == match.group(1)]:
+                    del types[key]
     return types
 
 

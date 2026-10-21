@@ -287,6 +287,22 @@ async fn a_declared_ai_work_is_still_indexed_and_recommended_and_labelled() {
     );
     assert_eq!(page["ai_training"], "deny", "{page}");
 
+    // **And the list carries it too.** The work's page is where a reader meets
+    // the work; the list is where a reader meets it *before* opening it, and a
+    // label that only appears on the page is a label most readers never see.
+    let (status, list) = client.get("/api/v1/works").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let items = list.as_array().expect("the list is an array");
+    let mine = items
+        .iter()
+        .find(|item| item["id"] == work_id.as_str())
+        .unwrap_or_else(|| panic!("the work is in the author's list: {list}"));
+    assert_eq!(mine["ai_training"], "deny", "{mine}");
+    assert_eq!(
+        mine["generated_declared"], true,
+        "and the list says the work is a declared-AI work: {mine}"
+    );
+
     // **And the work is still indexed and recommended.** N-4: the archive
     // indexes and recommends AI-generated works. A statement about *training*
     // says nothing about whether the work is in the archive, and a work that

@@ -176,6 +176,7 @@ run_dialects() {
     for script in \
         scripts/check-pg-arm-uses-sqlite-pool.py \
         scripts/check-pg-backend-arm-placeholders.py \
+        scripts/check-pg-placeholder-mixing.py \
         scripts/check-pg-subquery-alias.py \
         scripts/check-pg-uuid-casts.py \
         scripts/check-uncast-pg-placeholders.py \
