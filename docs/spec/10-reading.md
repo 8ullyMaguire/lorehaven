@@ -6,6 +6,27 @@
 
 ## 10.1 The reader surface
 
+**The reader is a document, and it is rendered by the server.** A single-page application
+cannot be a surface that works without JavaScript: its content arrives *after* the document
+loads, so with JavaScript off the reader gets an empty page — and every test in the
+repository would still be green, because the tests run in a browser with JavaScript. So the
+reader is server-rendered, the navigation is a **real link**, and JavaScript improves the
+document rather than providing it.
+
+**The escaping is decided by the API, not at each call site.** Everything on the page is
+escaped by default and there is exactly one way to emit markup; the single exception is the
+unit's `sanitized_html`, which the *server* produced from the validated editor document. A
+client-side renderer would be a second set of escaping rules to get wrong.
+
+**A spoiler gate omits the text; it does not hide it.** A hidden element with the text in
+it is not a gate — it is a gate a reader walks past with the source view, that a screen
+reader reads aloud, and that a search engine indexes. The text is not in the response until
+the reader asks, and the asking is a **form post**, so it works without JavaScript.
+
+**"Did not finish" is the reader's own note to themselves.** It is private, it is
+reversible, and it is never a judgement: nothing about it reaches the author, and a warmth
+meter on your own reading is a streak-shaped dark pattern.
+
 - a **server-rendered** page that works without JavaScript;
 - a typography control that is the reader's alone, independent of the site theme;
 - chapter navigation, a table of contents, a next-unit link;
@@ -28,6 +49,17 @@ violence" sees a *filtered list*, and the filter is visible and reversible. A re
 nothing sees everything, with the warnings attached.
 
 ## 10.3 Reading state
+
+**The position is on the account, and a position against an older revision is not applied
+silently.** The revisions are append-only, so the unit's current revision and the revision
+the reader's place was recorded against can differ — and the text in between may have been
+rewritten. The page says the place is **stale** and does not apply it: putting a reader at
+a fraction of a text they have not read is worse than starting them at the top with an
+honest note.
+
+**The progress indicator says "unknown" rather than "0 %".** A reader told they are at the
+beginning of a unit they have read is told something false, and a false 0 % is worse than no
+number.
 
 `reading_progress` · `reading_event` · `reading_session` · `reading_aggregate` ·
 `did_not_finish` (private) · `interaction_warmth` (private to the reader; shown to the *author* as
