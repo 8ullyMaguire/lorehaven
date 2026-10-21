@@ -972,7 +972,8 @@ pub async fn list_work_warnings(db: &Database, work_id: &str) -> Result<Vec<Work
            JOIN taxonomy_nodes tn ON tn.id = w.warning_node_id
           WHERE w.work_id = ?
           ORDER BY w.severity DESC, tn.canonical ASC",
-        "SELECT w.work_id::text, w.unit_id, w.warning_node_id, tn.canonical, w.severity,
+        "SELECT w.work_id::text, w.unit_id, w.warning_node_id, tn.canonical,
+                CAST(w.severity AS BIGINT) AS severity,
                 w.depiction, w.declaration, w.spoiler_safe_note
            FROM work_warnings w
            JOIN taxonomy_nodes tn ON tn.id = w.warning_node_id

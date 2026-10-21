@@ -1639,7 +1639,17 @@ def int4_sites(
             rf"{re.escape(col)}\s*::[^\s,]+(?:\s+AS\s+{re.escape(col)}\b)?", head, re.I
         ):
             continue
-        if re.search(rf"CAST\(\s*(?:[a-z_]\w*\s*\.\s*)?{re.escape(col)}\s*\)", head, re.I):
+        # `CAST(col AS BIGINT)` as well as `CAST(col)`. The comment above
+        # names the widening form as accepted, and the pattern did not
+        # implement it: it required the closing paren straight after the
+        # column, so the *idiomatic* widening cast -- the one the estate's own
+        # ledger names -- was reported as a fault. A gate that reports the
+        # correct form is a gate nobody reads.
+        if re.search(
+            rf"CAST\(\s*(?:[a-z_]\w*\s*\.\s*)?{re.escape(col)}\s*(?:AS\s+\w+\s*)?\)",
+            head,
+            re.I,
+        ):
             continue
         for columns in known.values():
             if columns.get(col) in INT4_COLUMNS:
