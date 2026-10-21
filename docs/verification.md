@@ -9,14 +9,15 @@ content warnings, the spoiler gate, the progress indicator, and the "did not fin
 
 | gate | result |
 |---|---|
-| `cargo test --workspace --no-fail-fast` (SQLite) | **4,307 tests · 242 suites · 0 failed · exit 0** |
-| `cargo test --workspace --no-fail-fast` (PostgreSQL 18.6) | **4,307 tests · 242 suites · 0 failed · exit 0** |
+| `cargo test --workspace --no-fail-fast` (SQLite) | **4,308 tests · 242 suites · 0 failed · exit 0** |
+| `cargo test --workspace --no-fail-fast` (PostgreSQL 18.6) | **4,308 tests · 242 suites · 0 failed · exit 0** |
 | `node ./node_modules/vitest.mjs run` | **558 tests · 76 files · exit 0** |
 | `node ./node_modules/svelte-check` | **0 errors** |
-| `node ./node_modules/@playwright/test/cli.js test reader-no-js` | **3 passed · exit 0** — a browser with JavaScript switched off |
+| `node ./node_modules/@playwright/test/cli.js test` | **134 passed · 10.2 minutes · exit 0** — including the three in the `no-js` project |
 | `python3 scripts/reachability.py` | exit 0 — every one of the 306 tables has a reader and a writer |
 | `python3 scripts/check-vocabulary.py` | exit 0 |
 | `python3 scripts/check-pg-placeholder-mixing.py` | exit 0 |
+| `python3 scripts/check-frontend-routes.py` | exit 0 — **new gate** |
 | `python3 scripts/check-snapshot-pii.py` | exit 0 — 2,287 columns, all with a decision |
 
 ### The reader is a document, and the SPA's reader is gone
