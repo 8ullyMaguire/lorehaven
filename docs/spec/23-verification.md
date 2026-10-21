@@ -108,6 +108,28 @@ decoded as i64 (`CAST(1 AS BIGINT)`), `ALTER TABLE ADD CONSTRAINT` needing a new
 bundled one, `ESCAPE ''`, `TIMESTAMPTZ` comparison, TEXT/UUID pseudo-FKs, and partial-index
 `ON CONFLICT` predicates.
 
+**A PostgreSQL statement carries one numbering scheme.** The dialect helper renumbers every
+`?` to `$1`, `$2`, ... and leaves a hand-written `$n` exactly where it is. A statement that
+mixes the two spellings therefore has two numbering systems in it, and the helper reconciles
+them only when the counts happen to agree. When they do not, **the failure is silent** — every
+SQLite test passes, because SQLite never sees the PostgreSQL half — and the rewrite makes one
+number name two columns. The Darkhold `create_work` insert shipped in exactly that shape, and
+the work's discussion mode came back as the wrong one.
+
+So the rule is stated positively, and it is the house convention rather than a prohibition:
+
+- the PostgreSQL half carries **one** scheme — every bind a `?` (the helper numbers them) or
+  every bind a `$n` (the helper leaves them alone);
+- the PostgreSQL half may not use SQLite's **numbered** `?1` form, because the helper turns
+  the `?` into `$1` and leaves the digit, so `?1::uuid` becomes `$11::uuid` — a parameter
+  eleven, in a statement that binds one.
+
+**A gate that reads the schema must follow the migrations as a sequence.** A table is created,
+then possibly renamed, then possibly dropped, and the name the instance uses *now* is the last
+of those. A checker that reads only the `CREATE TABLE` statements describes a schema that never
+existed, and the two failures look opposite and are the same mistake: one reports **correct**
+statements as faults, and the other **skips** the statements it cannot place and looks clean.
+
 **The bundled SQLite version matters.** The sqlx build bundles SQLite 3.46.0, not the system
 library. A script reads the version from `Cargo.lock` and the vendored header, so a lockfile bump
 retires the rules itself — and **exits non-zero if it cannot read the version**.
