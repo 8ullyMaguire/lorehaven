@@ -509,12 +509,12 @@ pub async fn get_arena_pool(
             let _pool = db.sqlite_pool().ok_or(pool_err())?;
             let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(
                 "SELECT w.id, w.title, w.summary,
-                        COALESCE((SELECT tn.canonical FROM taxonomy_nodes tn
+                        COALESCE((SELECT tn.canonical FROM canonical_entities tn
                                   JOIN work_tags wt ON tn.id = wt.node_id
                                   WHERE wt.work_id = w.id AND tn.kind = 'fandom'
                                   LIMIT 1), ''),
                         COALESCE((SELECT GROUP_CONCAT(tn2.canonical, ',')
-                                  FROM taxonomy_nodes tn2
+                                  FROM canonical_entities tn2
                                   JOIN work_tags wt2 ON tn2.id = wt2.node_id
                                   WHERE wt2.work_id = w.id AND tn2.kind = 'tag'), ''),
                         COALESCE(wc.word_count, 0)
@@ -564,12 +564,12 @@ pub async fn get_arena_pool(
                 // `w.id` is UUID on PostgreSQL and the row type is String, so cast
                 // it to text: sqlx will not decode UUID into String.
                 "SELECT w.id::text, w.title, w.summary,
-                        COALESCE((SELECT tn.canonical FROM taxonomy_nodes tn
+                        COALESCE((SELECT tn.canonical FROM canonical_entities tn
                                   JOIN work_tags wt ON tn.id = wt.node_id
                                   WHERE wt.work_id = w.id AND tn.kind = 'fandom'
                                   LIMIT 1), ''),
                         COALESCE((SELECT string_agg(tn2.canonical, ',')
-                                  FROM taxonomy_nodes tn2
+                                  FROM canonical_entities tn2
                                   JOIN work_tags wt2 ON tn2.id = wt2.node_id
                                   WHERE wt2.work_id = w.id AND tn2.kind = 'tag'), ''),
                         COALESCE(wc.word_count, 0)::bigint
@@ -791,7 +791,7 @@ async fn fetch_work_tag_weights_sqlite(
     sqlx::query_as::<_, (String, i64)>(
         "SELECT tn.canonical, COALESCE(wt.weight, 0)
          FROM work_tags wt
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = ?",
     )
     .bind(work_id)
@@ -812,7 +812,7 @@ async fn fetch_work_tag_weights_postgres(
         // mismatch, so this only ever surfaces on the PostgreSQL leg.
         "SELECT tn.canonical, COALESCE(wt.weight, 0)
          FROM work_tags wt
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = $1::uuid",
     )
     .bind(work_id)

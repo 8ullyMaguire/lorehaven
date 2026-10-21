@@ -726,7 +726,7 @@ so the count can only go down and every fix is visible.**
 | `media_collection_items` | read, never written | a reader with no writer: the feature's other half was never built |
 | `media_rights` | read, never written | a reader with no writer: the feature's other half was never built |
 | `quality_signals` | read, never written | a reader with no writer: the feature's other half was never built |
-| `taxonomy_closure` | read, never written | a reader with no writer: the feature's other half was never built |
+| `entity_closure` | read, never written | a reader with no writer: the feature's other half was never built |
 | `work_moods` | read, never written | a reader with no writer: the feature's other half was never built |
 | `ai_consents` | neither | a migration with a table: nothing in the instance uses it |
 | `announcements` | neither | a migration with a table: nothing in the instance uses it |
@@ -756,8 +756,8 @@ so the count can only go down and every fix is visible.**
 | `stat_snapshots` | neither | a migration with a table: nothing in the instance uses it |
 | `streak_milestones` | neither | a migration with a table: nothing in the instance uses it |
 | `subscriptions` | neither | a migration with a table: nothing in the instance uses it |
-| `taxonomy_edges` | neither | a migration with a table: nothing in the instance uses it |
-| `taxonomy_node_scope` | neither | a migration with a table: nothing in the instance uses it |
+| `entity_edges` | neither | a migration with a table: nothing in the instance uses it |
+| `entity_scope` | neither | a migration with a table: nothing in the instance uses it |
 | `work_index_policy` | neither | a migration with a table: nothing in the instance uses it |
 | `work_orphans` | neither | a migration with a table: nothing in the instance uses it |
 | `work_passages` | neither | a migration with a table: nothing in the instance uses it |

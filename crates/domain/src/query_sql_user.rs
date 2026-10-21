@@ -136,8 +136,8 @@ fn render_fielded(field: QueryField, value: &str) -> Result<SqlFragment, QueryEr
         // somebody posted under a new one.
         //
         // The alias arm is the part that is easy to forget and impossible to
-        // notice. `taxonomy_nodes.canonical` holds the spelling the instance
-        // chose; `taxonomy_aliases` holds every variant a reader might type.
+        // notice. `canonical_entities.canonical` holds the spelling the instance
+        // chose; `entity_aliases` holds every variant a reader might type.
         // Matching only the canonical form means a reader who types the variant
         // gets an empty page and concludes nobody writes in that fandom.
         //
@@ -147,11 +147,11 @@ fn render_fielded(field: QueryField, value: &str) -> Result<SqlFragment, QueryEr
         QueryField::UserFandom => Ok(SqlFragment::new(
             "EXISTS (SELECT 1 FROM works uf_w \
                JOIN work_tags uf_t ON uf_t.work_id = uf_w.id \
-               JOIN taxonomy_nodes uf_n ON uf_n.id = uf_t.node_id \
+               JOIN canonical_entities uf_n ON uf_n.id = uf_t.node_id \
               WHERE uf_w.owner_pseud_id = pseuds.id \
                 AND uf_w.deleted_at IS NULL \
                 AND (LOWER(uf_n.norm) = LOWER(?) \
-                     OR EXISTS (SELECT 1 FROM taxonomy_aliases uf_a \
+                     OR EXISTS (SELECT 1 FROM entity_aliases uf_a \
                                  WHERE uf_a.node_id = uf_n.id \
                                    AND LOWER(uf_a.norm) = LOWER(?))))",
         )

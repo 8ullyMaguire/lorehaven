@@ -151,12 +151,12 @@ pub async fn tags_with_confirmation(db: &Database, work_id: &str) -> Result<Vec<
     let sql = db.sql(
         "SELECT wt.node_id, tn.canonical, wt.confirmation
            FROM work_tags wt
-           JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+           JOIN canonical_entities tn ON tn.id = wt.node_id
           WHERE wt.work_id = ? AND tn.kind = 'tag'
           ORDER BY wt.node_id ASC",
         "SELECT wt.node_id, tn.canonical, wt.confirmation
            FROM work_tags wt
-           JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+           JOIN canonical_entities tn ON tn.id = wt.node_id
           WHERE wt.work_id = $1::uuid AND tn.kind = 'tag'
           ORDER BY wt.node_id ASC",
     );

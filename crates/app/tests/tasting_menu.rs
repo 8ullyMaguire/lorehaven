@@ -156,7 +156,7 @@ impl Harness {
         }
 
         if let Some((tag_name, confirmation)) = tag {
-            // `taxonomy_nodes.norm` is NOT NULL and (kind, norm) is UNIQUE, so a
+            // `canonical_entities.norm` is NOT NULL and (kind, norm) is UNIQUE, so a
             // node carries its own lowercase form and a second work tagged the
             // same way reuses the node rather than colliding. `work_tags.added_at`
             // is NOT NULL too, and is TEXT on **both** engines (verified in
@@ -171,7 +171,7 @@ impl Harness {
             let norm = tag_name.to_lowercase();
             match self.db.backend() {
                 Backend::Sqlite => {
-                    sqlx::query("INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, 'tag', ?, ?, ?) ON CONFLICT (kind, norm) DO NOTHING")
+                    sqlx::query("INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES (?, 'tag', ?, ?, ?) ON CONFLICT (kind, norm) DO NOTHING")
                         .bind(&node)
                         .bind(tag_name)
                         .bind(&norm)
@@ -182,7 +182,7 @@ impl Harness {
                     // The node id is looked up rather than reused from `node`,
                     // because on a conflict the insert was a no-op and `node` is
                     // an id that does not exist.
-                    sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at, confirmation) VALUES (?, (SELECT id FROM taxonomy_nodes WHERE kind = 'tag' AND norm = ?), 10, ?, ?)")
+                    sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at, confirmation) VALUES (?, (SELECT id FROM canonical_entities WHERE kind = 'tag' AND norm = ?), 10, ?, ?)")
                         .bind(&work)
                         .bind(&norm)
                         .bind(&stamp)
@@ -192,7 +192,7 @@ impl Harness {
                         .expect("work_tag");
                 }
                 Backend::Postgres => {
-                    sqlx::query("INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1, 'tag', $2, $3, $4) ON CONFLICT (kind, norm) DO NOTHING")
+                    sqlx::query("INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1, 'tag', $2, $3, $4) ON CONFLICT (kind, norm) DO NOTHING")
                         .bind(&node)
                         .bind(tag_name)
                         .bind(&norm)
@@ -200,7 +200,7 @@ impl Harness {
                         .execute(self.db.postgres_pool().expect("postgres"))
                         .await
                         .expect("node");
-                    sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at, confirmation) VALUES ($1::uuid, (SELECT id FROM taxonomy_nodes WHERE kind = 'tag' AND norm = $2), 10, $3, $4)")
+                    sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at, confirmation) VALUES ($1::uuid, (SELECT id FROM canonical_entities WHERE kind = 'tag' AND norm = $2), 10, $3, $4)")
                         .bind(&work)
                         .bind(&norm)
                         .bind(&stamp)

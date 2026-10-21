@@ -492,7 +492,7 @@ async fn computing_is_total_on_a_fresh_instance() {
 ///
 /// but **there is no `tags` table in any migration, and `work_tags` has no
 /// `tag_id` column** — it is `(work_id UUID, node_id TEXT, weight BIGINT,
-/// added_at TEXT)` keyed on `taxonomy_nodes(id)`. So the statement fails on
+/// added_at TEXT)` keyed on `canonical_entities(id)`. So the statement fails on
 /// both engines, and `.unwrap_or_default()` turns the error into an empty
 /// vector. The function has always returned `{}`.
 ///
@@ -500,8 +500,8 @@ async fn computing_is_total_on_a_fresh_instance() {
 /// `routes/federation.rs` takes the theme vector from the operator's POST body
 /// and calls `upsert_theme` directly.
 ///
-/// The query is fixed to join `work_tags.node_id` to `taxonomy_nodes.id` and
-/// read `taxonomy_nodes.canonical` as the tag name, and the missing
+/// The query is fixed to join `work_tags.node_id` to `canonical_entities.id` and
+/// read `canonical_entities.canonical` as the tag name, and the missing
 /// `is_public = FALSE` on the PostgreSQL arm is restored. Both changes are
 /// verified by this test failing before the fix.
 #[tokio::test]
@@ -532,7 +532,7 @@ async fn compute_reads_the_real_taxonomy() {
     // A taxonomy node named "slowburn", applied to the work.
     let node = format!("node-{}", Uuid::new_v4());
     h.exec(&format!(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
          VALUES ('{node}', 'tag', 'slowburn', 'slowburn', '2026-01-01T00:00:00Z')"
     ))
     .await;
@@ -567,7 +567,7 @@ async fn compute_reads_the_real_taxonomy() {
     );
     assert!(
         weights.contains_key("slowburn"),
-        "and it is named by taxonomy_nodes.canonical, got {weights:?}"
+        "and it is named by canonical_entities.canonical, got {weights:?}"
     );
     assert!(
         (weights["slowburn"] - 1.0).abs() < f64::EPSILON,
@@ -613,7 +613,7 @@ async fn compute_ignores_public_bookmarks() {
             .id;
         let node = format!("node-{}", Uuid::new_v4());
         h.exec(&format!(
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
              VALUES ('{node}', 'tag', '{canonical}', '{canonical}', '2026-01-01T00:00:00Z')"
         ))
         .await;
@@ -690,7 +690,7 @@ async fn compute_ignores_tags_on_unbookmarked_works() {
         .id;
     let node = format!("node-{}", Uuid::new_v4());
     h.exec(&format!(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
          VALUES ('{node}', 'tag', 'never-bookmarked', 'never-bookmarked', '2026-01-01T00:00:00Z')"
     ))
     .await;

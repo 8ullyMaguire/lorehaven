@@ -147,7 +147,7 @@ impl Harness {
         let kind = kind.to_string();
         let canonical = canonical.to_string();
         self.exec(
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
              VALUES (?1, ?2, ?3, ?3, ?4)",
             &[&id, &kind, &canonical, T0],
         )

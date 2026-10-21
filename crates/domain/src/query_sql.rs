@@ -146,7 +146,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
 /// Alias `wc` is fixed and short because it appears inside a nested `EXISTS`
 /// three times; a generated alias would be unreadable in a log line.
 ///
-/// `taxonomy_nodes` is joined for attributes and roles because those are node ids
+/// `canonical_entities` is joined for attributes and roles because those are node ids
 /// and a reader searching by name must find the node. `norm` is matched rather
 /// than `canonical` for the same reason every other taxonomy predicate in this
 /// file uses `norm`: the user types lowercase.
@@ -170,7 +170,7 @@ fn render_exists_character(a: &CharacterAssertion) -> Result<SqlFragment, QueryE
         let list = placeholders(a.roles.len());
         clauses.push(format!(
             "EXISTS (SELECT 1 FROM work_character_attributes ra \
-             JOIN taxonomy_nodes rt ON rt.id = ra.attribute_node_id \
+             JOIN canonical_entities rt ON rt.id = ra.attribute_node_id \
              WHERE ra.work_id = wc.work_id AND ra.character_node_id = wc.character_node_id \
                AND rt.norm IN ({list}))"
         ));
@@ -186,7 +186,7 @@ fn render_exists_character(a: &CharacterAssertion) -> Result<SqlFragment, QueryE
     for attribute in &a.attributes_all {
         clauses.push(
             "EXISTS (SELECT 1 FROM work_character_attributes aa \
-             JOIN taxonomy_nodes at ON at.id = aa.attribute_node_id \
+             JOIN canonical_entities at ON at.id = aa.attribute_node_id \
              WHERE aa.work_id = wc.work_id AND aa.character_node_id = wc.character_node_id \
                AND at.norm = ?)"
                 .to_owned(),
@@ -198,7 +198,7 @@ fn render_exists_character(a: &CharacterAssertion) -> Result<SqlFragment, QueryE
         let list = placeholders(a.attributes_any.len());
         clauses.push(format!(
             "EXISTS (SELECT 1 FROM work_character_attributes ay \
-             JOIN taxonomy_nodes aty ON aty.id = ay.attribute_node_id \
+             JOIN canonical_entities aty ON aty.id = ay.attribute_node_id \
              WHERE ay.work_id = wc.work_id AND ay.character_node_id = wc.character_node_id \
                AND aty.norm IN ({list}))"
         ));
@@ -419,7 +419,7 @@ fn render_min_match(needed: usize, terms: &[QueryAst]) -> Result<SqlFragment, Qu
 /// supplies the descendants. Both the name and the descendant set are matched
 /// against `work_tags`, so a work carrying the parent OR any descendant matches.
 ///
-/// `rel = 'parent'` is in the predicate, not implied: `taxonomy_closure` also holds
+/// `rel = 'parent'` is in the predicate, not implied: `entity_closure` also holds
 /// `implies` rows, and following those would silently widen every expansion. §9's
 /// risk list says implication edges are curator-only and default off, and this is
 /// where "off" is enforced.
@@ -443,8 +443,8 @@ fn render_expand(
     };
 
     let sql = format!(
-        "({base_sql} OR EXISTS (SELECT 1 FROM taxonomy_closure tc \
-         WHERE tc.ancestor_id = (SELECT tn.id FROM taxonomy_nodes tn WHERE tn.norm = ? AND tn.kind = ?) \
+        "({base_sql} OR EXISTS (SELECT 1 FROM entity_closure tc \
+         WHERE tc.ancestor_id = (SELECT tn.id FROM canonical_entities tn WHERE tn.norm = ? AND tn.kind = ?) \
            AND tc.rel = 'parent'{depth_bound} \
            AND EXISTS (SELECT 1 FROM work_tags wt WHERE wt.work_id = works.id \
              AND wt.node_id = tc.descendant_id)))",
@@ -459,7 +459,7 @@ fn render_expand(
     Ok(SqlFragment { sql, binds })
 }
 
-/// The `taxonomy_nodes.kind` a taxonomy field's values live under.
+/// The `canonical_entities.kind` a taxonomy field's values live under.
 fn field_taxonomy_kind(field: QueryField) -> &'static str {
     match field {
         QueryField::Fandom => "fandom",
@@ -806,7 +806,7 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Fandom => {
-            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN taxonomy_nodes tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'fandom' AND tn.norm = ?))";
+            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN canonical_entities tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'fandom' AND tn.norm = ?))";
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
         // `character:` reads `work_characters`, NOT `work_tags` with
@@ -820,12 +820,12 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
         // flat equality).
         //
         // The reader types a *name*; the store keys on a *node id*. Resolving
-        // `norm = ?` against `taxonomy_nodes` inside the subquery keeps the parser
+        // `norm = ?` against `canonical_entities` inside the subquery keeps the parser
         // pure — §15.4 requires "the same typed AST as the visual filter builder",
         // and a parser that had to look ids up would need I/O.
         QueryField::Character => {
             let sql = "(EXISTS (SELECT 1 FROM work_characters wc \
-                       JOIN taxonomy_nodes tn ON tn.id = wc.character_node_id \
+                       JOIN canonical_entities tn ON tn.id = wc.character_node_id \
                        WHERE wc.work_id = works.id AND tn.kind = 'character' \
                          AND tn.norm = ?))";
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
@@ -929,11 +929,11 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             Ok(fragment)
         }
         QueryField::Tag => {
-            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN taxonomy_nodes tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'tag' AND tn.norm = ?))";
+            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN canonical_entities tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'tag' AND tn.norm = ?))";
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
         QueryField::Mood => {
-            let sql = "(EXISTS (SELECT 1 FROM work_moods wm JOIN taxonomy_nodes tn ON tn.id = wm.node_id WHERE wm.work_id = works.id AND tn.kind = 'mood' AND tn.norm = ?))";
+            let sql = "(EXISTS (SELECT 1 FROM work_moods wm JOIN canonical_entities tn ON tn.id = wm.node_id WHERE wm.work_id = works.id AND tn.kind = 'mood' AND tn.norm = ?))";
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
         QueryField::Summary => {

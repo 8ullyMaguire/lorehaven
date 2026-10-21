@@ -139,6 +139,54 @@ pub async fn apply(database: &Database) -> Result<MigrationReport> {
     Ok(report)
 }
 
+/// Apply the migrations **up to and including** one version, and stop.
+///
+/// The ordinary [`apply`] takes every migration, and a test that needs the
+/// schema *between* two migrations has no way to say so. This is that way: a
+/// migration that merges two tables has to be tested against the state it
+/// merges, and the state it merges is a schema no instance has any more.
+///
+/// The stop is by **version**, and it is a prefix: every migration up to and
+/// including that version is applied, and none after it. A version that is not
+/// in the catalogue is an error and not a silent no-op — a test that asked for
+/// a migration that does not exist would otherwise measure the wrong schema
+/// and say so with a number.
+pub async fn apply_to(database: &Database, version: &str) -> Result<MigrationReport> {
+    ensure_ledger(database).await?;
+    let known = catalogue(database.backend());
+    let last = known
+        .iter()
+        .position(|migration| migration.id() == version)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no migration {version} in the {:?} catalogue",
+                database.backend()
+            )
+        })?;
+    let prefix = &known[..=last];
+
+    let recorded = applied(database).await?;
+    let mut report = MigrationReport {
+        backend: database.backend(),
+        applied: Vec::new(),
+        already_applied: recorded.iter().map(|m| m.id.clone()).collect(),
+    };
+
+    for migration in prefix {
+        let id = migration.id();
+        if recorded.iter().any(|m| m.id == id) {
+            continue;
+        }
+        tracing::info!(migration = %id, "applying migration");
+        apply_one(database, migration)
+            .await
+            .with_context(|| format!("applying migration {id}"))?;
+        report.applied.push(id);
+    }
+
+    Ok(report)
+}
+
 /// Migrations recorded in `_migrations`, oldest first.
 pub async fn applied(database: &Database) -> Result<Vec<AppliedMigration>> {
     let sql = database.sql(

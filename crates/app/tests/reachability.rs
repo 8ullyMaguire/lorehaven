@@ -96,7 +96,19 @@ fn known_gap_tables(path: &Path) -> BTreeMap<String, Side> {
     claimed
 }
 
-/// Every table the migrations create.
+/// Every table the migrations create, **as the instance ends up with them**.
+///
+/// **The migrations are a sequence.** A table is created, then possibly
+/// renamed, then possibly dropped, and the name the instance uses *now* is the
+/// last of those. Reading only the `CREATE TABLE` statements leaves a set of
+/// names that never coexisted — and a scan against it reports the live tables
+/// as unknown, which is what happened when migration 0124 renamed
+/// `taxonomy_nodes` to `canonical_entities`: the Python probe followed the
+/// rename and this scan did not, and **the two copies of the scan disagreed**,
+/// which is the one thing the duplication was for.
+///
+/// The copy in `scripts/reachability.py` already follows the sequence. This one
+/// now does too, and the cross-check is a cross-check again.
 fn schema_tables(migrations: &Path) -> BTreeSet<String> {
     let mut tables = BTreeSet::new();
     for dialect in ["sqlite", "postgres"] {
@@ -104,29 +116,66 @@ fn schema_tables(migrations: &Path) -> BTreeSet<String> {
         let Ok(entries) = std::fs::read_dir(&directory) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_none_or(|e| e != "sql") {
-                continue;
-            }
+        // **In order.** The migrations are numbered, and a rename in a later
+        // file is applied after a create in an earlier one.
+        let mut files: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|e| e == "sql"))
+            .collect();
+        files.sort();
+        for path in files {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
             for line in text.lines() {
-                let upper = line.trim_start().to_ascii_uppercase();
-                let Some(rest) = upper.strip_prefix("CREATE TABLE ") else {
+                let trimmed = line.trim_start();
+                let upper = trimmed.to_ascii_uppercase();
+                if let Some(rest) = upper.strip_prefix("CREATE TABLE ") {
+                    let rest = rest
+                        .strip_prefix("IF NOT EXISTS ")
+                        .unwrap_or(rest)
+                        .trim_start_matches(['"', '`', '[']);
+                    let name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    if !name.is_empty() {
+                        tables.insert(name.to_ascii_lowercase());
+                    }
                     continue;
-                };
-                let rest = rest
-                    .strip_prefix("IF NOT EXISTS ")
-                    .unwrap_or(rest)
-                    .trim_start_matches(['"', '`', '[']);
-                let name: String = rest
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                if !name.is_empty() {
-                    tables.insert(name.to_ascii_lowercase());
+                }
+                if let Some(rest) = upper.strip_prefix("ALTER TABLE ") {
+                    // `ALTER TABLE <old> RENAME TO <new>`
+                    let rest = rest.trim_start_matches(['"', '`', '[']);
+                    let (old, new) = match rest.split_once(" RENAME TO ") {
+                        Some(pair) => pair,
+                        None => continue,
+                    };
+                    let old = old
+                        .trim()
+                        .trim_end_matches(['"', '`', ']'])
+                        .to_ascii_lowercase();
+                    let new = new
+                        .trim()
+                        .trim_end_matches(['"', '`', ']', ';', ' '])
+                        .to_ascii_lowercase();
+                    tables.remove(&old);
+                    if !new.is_empty() {
+                        tables.insert(new);
+                    }
+                    continue;
+                }
+                if let Some(rest) = upper.strip_prefix("DROP TABLE ") {
+                    let rest = rest
+                        .strip_prefix("IF EXISTS ")
+                        .unwrap_or(rest)
+                        .trim_start_matches(['"', '`', '[']);
+                    let name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    tables.remove(&name.to_ascii_lowercase());
                 }
             }
         }

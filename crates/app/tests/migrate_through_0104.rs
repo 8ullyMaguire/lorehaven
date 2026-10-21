@@ -25,7 +25,7 @@ use test_support::{scratch_dir, TestDb};
 /// `TestDb::sql` is exactly the class of bug this file is about.
 async fn node(db: &TestDb, id: &str) {
     let sql = db.sql(&format!(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
          VALUES ('{id}', 'character', '{id}', '{}', '2026-01-01T00:00:00Z')",
         id.to_lowercase()
     ));
@@ -126,7 +126,7 @@ async fn an_existing_node_defaults_to_active() {
     let db = TestDb::connect_with_dir("migrate_0104_default", &dir).await;
     node(&db, "n1").await;
     assert_eq!(
-        text(&db, "SELECT status FROM taxonomy_nodes WHERE id = 'n1'").await,
+        text(&db, "SELECT status FROM canonical_entities WHERE id = 'n1'").await,
         "active",
         "a node created after the migration must default to active, not NULL"
     );
@@ -143,7 +143,7 @@ async fn the_alter_able_constraints_bite() {
     assert!(
         refused(
             &db,
-            "UPDATE taxonomy_nodes SET status = 'bogus' WHERE id = 'n1'"
+            "UPDATE canonical_entities SET status = 'bogus' WHERE id = 'n1'"
         )
         .await,
         "an unrecognised lifecycle status must be refused"
@@ -151,7 +151,7 @@ async fn the_alter_able_constraints_bite() {
     assert!(
         refused(
             &db,
-            "UPDATE taxonomy_nodes SET status = 'merged' WHERE id = 'n1'"
+            "UPDATE canonical_entities SET status = 'merged' WHERE id = 'n1'"
         )
         .await,
         "status='merged' with merged_into NULL must be refused -- a merge that \
@@ -160,7 +160,7 @@ async fn the_alter_able_constraints_bite() {
     assert!(
         refused(
             &db,
-            "UPDATE taxonomy_nodes SET status = 'active', merged_into = 'n2' WHERE id = 'n1'"
+            "UPDATE canonical_entities SET status = 'active', merged_into = 'n2' WHERE id = 'n1'"
         )
         .await,
         "merged_into set on a node that is not merged must be refused"
@@ -168,7 +168,7 @@ async fn the_alter_able_constraints_bite() {
     assert!(
         refused(
             &db,
-            "UPDATE taxonomy_nodes SET status = 'merged', merged_into = 'nope' WHERE id = 'n1'"
+            "UPDATE canonical_entities SET status = 'merged', merged_into = 'nope' WHERE id = 'n1'"
         )
         .await,
         "a merge must not point at a node that does not exist"
@@ -177,13 +177,13 @@ async fn the_alter_able_constraints_bite() {
     // The positive case, so the checks are not simply refusing everything.
     exec(
         &db,
-        "UPDATE taxonomy_nodes SET status = 'merged', merged_into = 'n2' WHERE id = 'n1'",
+        "UPDATE canonical_entities SET status = 'merged', merged_into = 'n2' WHERE id = 'n1'",
     )
     .await
     .expect("a well-formed merge is accepted");
     exec(
         &db,
-        "UPDATE taxonomy_nodes SET status = 'active', merged_into = NULL WHERE id = 'n1'",
+        "UPDATE canonical_entities SET status = 'active', merged_into = NULL WHERE id = 'n1'",
     )
     .await
     .expect("unmerging is accepted");
@@ -193,7 +193,7 @@ async fn the_alter_able_constraints_bite() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, status) \
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, status) \
              VALUES ('n3', 'character', 'n3', 'n3', '2026-01-01T00:00:00Z', 'bogus')"
         )
         .await,
@@ -202,7 +202,7 @@ async fn the_alter_able_constraints_bite() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, status, merged_into) \
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, status, merged_into) \
              VALUES ('n4', 'character', 'n4', 'n4', '2026-01-01T00:00:00Z', 'merged', NULL)"
         )
         .await,
@@ -224,7 +224,7 @@ async fn the_new_tables_refuse_impossible_shapes() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_node_scope VALUES ('n1','n1','2026-01-01T00:00:00Z')"
+            "INSERT INTO entity_scope VALUES ('n1','n1','2026-01-01T00:00:00Z')"
         )
         .await,
         "a node scoped to itself must be refused"
@@ -232,7 +232,7 @@ async fn the_new_tables_refuse_impossible_shapes() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_edges VALUES ('n1','n1','parent',NULL,'2026-01-01T00:00:00Z')"
+            "INSERT INTO entity_edges VALUES ('n1','n1','parent',NULL,'2026-01-01T00:00:00Z')"
         )
         .await,
         "a self edge must be refused: it makes the closure computation non-terminating"
@@ -240,7 +240,7 @@ async fn the_new_tables_refuse_impossible_shapes() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_edges VALUES ('n1','n2','hates',NULL,'2026-01-01T00:00:00Z')"
+            "INSERT INTO entity_edges VALUES ('n1','n2','hates',NULL,'2026-01-01T00:00:00Z')"
         )
         .await,
         "an unrecognised relation must be refused rather than stored and ignored"
@@ -248,7 +248,7 @@ async fn the_new_tables_refuse_impossible_shapes() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_closure VALUES ('n1','n2','parent',-1,'2026-01-01T00:00:00Z')"
+            "INSERT INTO entity_closure VALUES ('n1','n2','parent',-1,'2026-01-01T00:00:00Z')"
         )
         .await,
         "a negative depth must be refused"
@@ -256,7 +256,7 @@ async fn the_new_tables_refuse_impossible_shapes() {
     assert!(
         refused(
             &db,
-            "INSERT INTO taxonomy_edges VALUES ('n1','nope','parent',NULL,'2026-01-01T00:00:00Z')"
+            "INSERT INTO entity_edges VALUES ('n1','nope','parent',NULL,'2026-01-01T00:00:00Z')"
         )
         .await,
         "an edge to a node that does not exist must be refused"
@@ -264,9 +264,9 @@ async fn the_new_tables_refuse_impossible_shapes() {
 
     // And the shapes the plan depends on must be accepted.
     for sql in [
-        "INSERT INTO taxonomy_node_scope VALUES ('n1','n2','2026-01-01T00:00:00Z')",
-        "INSERT INTO taxonomy_edges VALUES ('n1','n2','parent',NULL,'2026-01-01T00:00:00Z')",
-        "INSERT INTO taxonomy_closure VALUES ('n1','n1','parent',0,'2026-01-01T00:00:00Z')",
+        "INSERT INTO entity_scope VALUES ('n1','n2','2026-01-01T00:00:00Z')",
+        "INSERT INTO entity_edges VALUES ('n1','n2','parent',NULL,'2026-01-01T00:00:00Z')",
+        "INSERT INTO entity_closure VALUES ('n1','n1','parent',0,'2026-01-01T00:00:00Z')",
     ] {
         exec(&db, sql)
             .await
@@ -276,7 +276,7 @@ async fn the_new_tables_refuse_impossible_shapes() {
     assert_eq!(
         number(
             &db,
-            "SELECT COUNT(*) FROM taxonomy_closure WHERE ancestor_id = 'n1' AND rel = 'parent'"
+            "SELECT COUNT(*) FROM entity_closure WHERE ancestor_id = 'n1' AND rel = 'parent'"
         )
         .await,
         1,
@@ -333,7 +333,7 @@ async fn work(db: &TestDb, id: &str) {
 /// A taxonomy node of kind 'warning', which is what work_warnings references.
 async fn warning_node(db: &TestDb, id: &str) {
     let sql = format!(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
          VALUES ('{id}', 'warning', '{id}', '{}', '2026-01-01T00:00:00Z')",
         id.to_lowercase()
     );

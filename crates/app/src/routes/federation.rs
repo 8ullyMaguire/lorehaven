@@ -161,7 +161,7 @@ async fn compute_theme_from_engagement(db: &darkhold_db::Database) -> anyhow::Re
             "SELECT tn.canonical
              FROM bookmarks b
              JOIN work_tags wt ON wt.work_id = CAST(b.subject_id AS INTEGER)
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id",
+             JOIN canonical_entities tn ON tn.id = wt.node_id",
         )
         .fetch_all(db.sqlite_pool().expect("sqlite"))
         .await
@@ -170,7 +170,7 @@ async fn compute_theme_from_engagement(db: &darkhold_db::Database) -> anyhow::Re
             "SELECT tn.canonical
              FROM bookmarks b
              JOIN work_tags wt ON wt.work_id = b.subject_id
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id",
+             JOIN canonical_entities tn ON tn.id = wt.node_id",
         )
         .fetch_all(db.postgres_pool().expect("postgres"))
         .await
@@ -186,7 +186,7 @@ async fn compute_theme_from_engagement(db: &darkhold_db::Database) -> anyhow::Re
             "SELECT tn.canonical
              FROM private_tags pt
              JOIN work_tags wt ON wt.work_id = CAST(pt.subject_id AS INTEGER)
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id",
+             JOIN canonical_entities tn ON tn.id = wt.node_id",
         )
         .fetch_all(db.sqlite_pool().expect("sqlite"))
         .await
@@ -195,7 +195,7 @@ async fn compute_theme_from_engagement(db: &darkhold_db::Database) -> anyhow::Re
             "SELECT tn.canonical
              FROM private_tags pt
              JOIN work_tags wt ON wt.work_id = pt.subject_id
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id",
+             JOIN canonical_entities tn ON tn.id = wt.node_id",
         )
         .fetch_all(db.postgres_pool().expect("postgres"))
         .await
@@ -211,7 +211,7 @@ async fn compute_theme_from_engagement(db: &darkhold_db::Database) -> anyhow::Re
             "SELECT tn.canonical
              FROM reading_status rs
              JOIN work_tags wt ON wt.work_id = CAST(rs.subject_id AS INTEGER)
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE rs.status = 'complete' AND rs.subject_type = 'work'",
         )
         .fetch_all(db.sqlite_pool().expect("sqlite"))
@@ -221,7 +221,7 @@ async fn compute_theme_from_engagement(db: &darkhold_db::Database) -> anyhow::Re
             "SELECT tn.canonical
              FROM reading_status rs
              JOIN work_tags wt ON wt.work_id = rs.subject_id
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE rs.status = 'complete' AND rs.subject_type = 'work'",
         )
         .fetch_all(db.postgres_pool().expect("postgres"))

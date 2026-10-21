@@ -7,7 +7,7 @@
 //!
 //! `fandoms:"Good Omens"` is the interesting one. It means "a pseudonym
 //! who has written *in* this fandom", and nothing denormalises that — it is a
-//! correlated EXISTS over `works` → `work_tags` → `taxonomy_nodes`. The alias
+//! correlated EXISTS over `works` → `work_tags` → `canonical_entities`. The alias
 //! table matters: a reader who types a variant spelling must still find the
 //! same author, and matching only `canonical` would make the filter silently
 //! miss every pseudonym whose fandom is spelled as an alias.
@@ -68,12 +68,12 @@ fn a_fandom_is_resolved_through_aliases_as_well_as_the_canonical_spelling() {
         sql.contains("work_tags"),
         "the link from a work to its tags: {sql}"
     );
-    assert!(sql.contains("taxonomy_nodes"), "{sql}");
+    assert!(sql.contains("canonical_entities"), "{sql}");
     // The alias arm is the part that is easy to forget and impossible to
     // notice: without it a reader who types the variant spelling gets an empty
     // page and concludes nobody writes in that fandom.
     assert!(
-        sql.contains("taxonomy_aliases"),
+        sql.contains("entity_aliases"),
         "a fandom spelled as an alias must still match: {sql}"
     );
     // Bound twice: the canonical arm and the alias arm each need the value,

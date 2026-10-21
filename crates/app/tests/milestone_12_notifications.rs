@@ -142,7 +142,7 @@ impl Harness {
     }
 
     /// A work owned by a fresh pseud, tagged with the taxonomy node named by
-    /// `node`. Tagging is a `work_tags` row plus a `taxonomy_nodes` row, because
+    /// `node`. Tagging is a `work_tags` row plus a `canonical_entities` row, because
     /// that is what `content_filter_sql::build_for` correlates on.
     async fn work(&self, node: Option<&str>) -> String {
         let id = uuid::Uuid::new_v4().to_string();
@@ -177,7 +177,7 @@ impl Harness {
             darkhold_db::Backend::Sqlite => {
                 for stmt in [
                     format!(
-                        "INSERT OR IGNORE INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+                        "INSERT OR IGNORE INTO canonical_entities (id, kind, canonical, norm, created_at) \
                          VALUES ('{node}', '{kind}', '{canonical}', '{canonical}', '2026-01-01T00:00:00Z')"
                     ),
                     format!(
@@ -196,7 +196,7 @@ impl Harness {
             darkhold_db::Backend::Postgres => {
                 for stmt in [
                     format!(
-                        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+                        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
                          VALUES ('{node}', '{kind}', '{canonical}', '{canonical}', '2026-01-01T00:00:00Z') \
                          ON CONFLICT (id) DO NOTHING"
                     ),

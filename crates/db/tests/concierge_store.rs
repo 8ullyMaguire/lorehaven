@@ -168,7 +168,7 @@ async fn insert_work_with_lifecycle(db: &Database, id: &str, completion: &str, l
 /// Tag a work with a mood node, returning the node id.
 async fn tag_mood(db: &Database, work_id: &str, canonical: &str) -> String {
     let node_id = uuid::Uuid::new_v4().to_string();
-    exec(db, "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+    exec(db, "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
               VALUES (?1#u, 'mood', ?2, ?3, ?4, 'pending', 0)",
          &[&node_id, canonical, &canonical.to_lowercase(), T0]).await;
     exec(
@@ -364,7 +364,7 @@ async fn moods_in_use_lists_only_moods_a_published_work_carries() {
     // A mood node nobody has used is not a mood a reader can ask for and be
     // satisfied by, so it must not be offered.
     let unused = uuid::Uuid::new_v4().to_string();
-    exec(&db, "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+    exec(&db, "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
               VALUES (?1#u, 'mood', 'solitude', 'solitude', ?2, 'pending', 0)",
          &[&unused, T0]).await;
     // And a non-mood kind on a published work is not a mood either. The work is
@@ -374,7 +374,7 @@ async fn moods_in_use_lists_only_moods_a_published_work_carries() {
     // passes on one engine and fails on the other.
     insert_work(&db, &other_kind, "complete").await;
     let tag_node = uuid::Uuid::new_v4().to_string();
-    exec(&db, "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+    exec(&db, "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
               VALUES (?1#u, 'tag', 'angst', 'angst', ?2, 'pending', 0)",
          &[&tag_node, T0]).await;
     exec(

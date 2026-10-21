@@ -22,7 +22,7 @@ pub struct InstanceTheme {
 /// Compute theme vector from user bookmarks and tags.
 /// Reads works a user has bookmarked/liked and aggregates their tags.
 pub async fn compute_theme_from_bookmarks(db: &Database, _instance_id: &str) -> Result<JsonValue> {
-    // The tag taxonomy is `taxonomy_nodes` joined through `work_tags.node_id` --
+    // The tag taxonomy is `canonical_entities` joined through `work_tags.node_id` --
     // there is no `tags` table and no `work_tags.tag_id`, so the previous
     // statement referenced two things that do not exist and failed on both
     // engines. `.unwrap_or_default()` then turned that failure into an empty
@@ -36,7 +36,7 @@ pub async fn compute_theme_from_bookmarks(db: &Database, _instance_id: &str) -> 
             "SELECT tn.canonical
              FROM bookmarks b
              JOIN work_tags wt ON wt.work_id = b.subject_id
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE b.is_public = FALSE
              GROUP BY tn.canonical
              ORDER BY COUNT(*) DESC
@@ -52,7 +52,7 @@ pub async fn compute_theme_from_bookmarks(db: &Database, _instance_id: &str) -> 
             "SELECT tn.canonical
              FROM bookmarks b
              JOIN work_tags wt ON wt.work_id = b.subject_id
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE b.is_public = FALSE
              GROUP BY tn.canonical
              ORDER BY COUNT(*) DESC

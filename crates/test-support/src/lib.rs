@@ -534,6 +534,34 @@ pub async fn cached_postgres(admin_url: &str, name: &str) -> Option<Database> {
     Database::connect(&DatabaseConfig::new(url)).await.ok()
 }
 
+/// An **empty** PostgreSQL database, for a test that needs the schema
+/// *between* two migrations.
+///
+/// The clone path above is the fast one and it is the wrong one here: the
+/// template is fully migrated, and a test that wants the state migration 0124
+/// merges -- two tables of vocabulary -- has to start from the state it
+/// merges, which is a schema no instance has any more.
+///
+/// So this creates the database empty and migrates nothing. It is the slow
+/// path, and it is the honest one for a test that is about a migration.
+pub async fn empty_postgres(admin_url: &str, name: &str) -> Option<Database> {
+    let admin = Database::connect(&DatabaseConfig::new(admin_url.to_owned()))
+        .await
+        .ok()?;
+    let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+        .execute(admin.postgres_pool()?)
+        .await;
+    sqlx::query(&format!("CREATE DATABASE {name}"))
+        .execute(admin.postgres_pool()?)
+        .await
+        .ok()?;
+    let url = admin_url
+        .rsplit_once('/')
+        .map(|(prefix, _)| format!("{prefix}/{name}"))
+        .unwrap_or_else(|| admin_url.to_owned());
+    Database::connect(&DatabaseConfig::new(url)).await.ok()
+}
+
 /// Build the PostgreSQL template once, and keep it for the rest of the process.
 ///
 /// The template is NOT dropped: `CREATE DATABASE ... TEMPLATE` refuses while any

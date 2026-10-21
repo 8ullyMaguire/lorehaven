@@ -189,7 +189,7 @@ async fn drop_schema(schema: &str) {
 ///
 /// `#t` exists because the two engines disagree on which columns are native types.
 /// `work_tags.work_id` is uuid on PostgreSQL and TEXT on SQLite, while
-/// `taxonomy_nodes.id` and `work_tags.node_id` are text on BOTH. Casting the latter to
+/// `canonical_entities.id` and `work_tags.node_id` are text on BOTH. Casting the latter to
 /// uuid fails with "cannot cast type text to uuid" -- and it passes on SQLite, so this is
 /// invisible until the PostgreSQL run.
 async fn exec(db: &Database, tmpl: &str, args: &[&str]) {

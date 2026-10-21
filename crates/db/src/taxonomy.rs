@@ -8,7 +8,7 @@ use serde::Serialize;
 
 /// A taxonomy node.
 #[derive(Debug, Clone, Serialize)]
-pub struct TaxonomyNode {
+pub struct CanonicalEntity {
     pub id: String,
     pub kind: String,
     pub canonical: String,
@@ -32,7 +32,7 @@ pub struct TaxonomyNode {
 
 /// A taxonomy alias.
 #[derive(Debug, Clone, Serialize)]
-pub struct TaxonomyAlias {
+pub struct EntityAlias {
     pub alias: String,
     pub norm: String,
     pub node_id: String,
@@ -71,12 +71,12 @@ pub async fn search_nodes(
     kind: Option<&str>,
     prefix: &str,
     limit: i64,
-) -> Result<Vec<TaxonomyNode>> {
+) -> Result<Vec<CanonicalEntity>> {
     let sql = db.sql(
-        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes
+        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities
          WHERE (?1 IS NULL OR kind = ?1) AND norm LIKE ?2 || '%'
          ORDER BY norm ASC LIMIT ?3",
-        "SELECT id::text, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes
+        "SELECT id::text, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities
          WHERE ($1 IS NULL OR kind = $1) AND norm LIKE $2 || '%'
          ORDER BY norm ASC LIMIT $3",
     );
@@ -101,14 +101,16 @@ pub async fn search_nodes(
     Ok(rows
         .into_iter()
         .map(
-            |(id, kind, canonical, norm, created_at, review_status, signal_count)| TaxonomyNode {
-                id,
-                kind,
-                canonical,
-                norm,
-                created_at,
-                review_status,
-                signal_count,
+            |(id, kind, canonical, norm, created_at, review_status, signal_count)| {
+                CanonicalEntity {
+                    id,
+                    kind,
+                    canonical,
+                    norm,
+                    created_at,
+                    review_status,
+                    signal_count,
+                }
             },
         )
         .collect())
@@ -124,7 +126,7 @@ pub async fn search_nodes_fuzzy(
     kind: Option<&str>,
     query: &str,
     limit: i64,
-) -> Result<Vec<TaxonomyNode>> {
+) -> Result<Vec<CanonicalEntity>> {
     use darkhold_domain::taxonomy::{canonical_form, fuzzy_match};
     use std::collections::HashMap;
 
@@ -133,10 +135,10 @@ pub async fn search_nodes_fuzzy(
 
     // 1. Exact prefix matches (normalized so LIKE is case-consistent).
     let sql_prefix = db.sql(
-        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes
+        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities
          WHERE (?1 IS NULL OR kind = ?1) AND norm LIKE ?2 || '%'
          ORDER BY norm ASC",
-        "SELECT id::text, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes
+        "SELECT id::text, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities
          WHERE ($1 IS NULL OR kind = $1) AND norm LIKE $2 || '%'
          ORDER BY norm ASC",
     );
@@ -157,17 +159,19 @@ pub async fn search_nodes_fuzzy(
                 .await?
         }
     };
-    let prefix_nodes: Vec<TaxonomyNode> = prefix_rows
+    let prefix_nodes: Vec<CanonicalEntity> = prefix_rows
         .iter()
         .map(
-            |(id, kind, canonical, norm, created_at, review_status, signal_count)| TaxonomyNode {
-                id: id.clone(),
-                kind: kind.clone(),
-                canonical: canonical.clone(),
-                norm: norm.clone(),
-                created_at: created_at.clone(),
-                review_status: review_status.clone(),
-                signal_count: *signal_count,
+            |(id, kind, canonical, norm, created_at, review_status, signal_count)| {
+                CanonicalEntity {
+                    id: id.clone(),
+                    kind: kind.clone(),
+                    canonical: canonical.clone(),
+                    norm: norm.clone(),
+                    created_at: created_at.clone(),
+                    review_status: review_status.clone(),
+                    signal_count: *signal_count,
+                }
             },
         )
         .collect();
@@ -180,10 +184,10 @@ pub async fn search_nodes_fuzzy(
     // 2. Fuzzy fallback: query non-prefix nodes and rank by similarity.
     let remaining = (limit - exact_count as i64) as usize;
     let sql_rest = db.sql(
-        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes
+        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities
          WHERE (?1 IS NULL OR kind = ?1) AND norm NOT LIKE ?2 || '%'
          ORDER BY norm ASC",
-        "SELECT id::text, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes
+        "SELECT id::text, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities
          WHERE ($1 IS NULL OR kind = $1) AND norm NOT LIKE $2 || '%'
          ORDER BY norm ASC",
     );
@@ -210,14 +214,14 @@ pub async fn search_nodes_fuzzy(
         .collect();
     let fuzzy = fuzzy_match(&normalized, candidates, remaining);
 
-    // Map fuzzy match ids back to full TaxonomyNode records.
-    let lookup: HashMap<String, TaxonomyNode> = rest_rows
+    // Map fuzzy match ids back to full CanonicalEntity records.
+    let lookup: HashMap<String, CanonicalEntity> = rest_rows
         .into_iter()
         .map(
             |(id, kind, canonical, norm, created_at, review_status, signal_count)| {
                 (
                     id.clone(),
-                    TaxonomyNode {
+                    CanonicalEntity {
                         id,
                         kind,
                         canonical,
@@ -241,10 +245,10 @@ pub async fn search_nodes_fuzzy(
 }
 
 /// Get a node by id.
-pub async fn node_by_id(db: &Database, id: &str) -> Result<Option<TaxonomyNode>> {
+pub async fn node_by_id(db: &Database, id: &str) -> Result<Option<CanonicalEntity>> {
     let sql = db.sql(
-        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes WHERE id = ?",
-        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM taxonomy_nodes WHERE id = $1",
+        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities WHERE id = ?",
+        "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT) FROM canonical_entities WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -261,7 +265,7 @@ pub async fn node_by_id(db: &Database, id: &str) -> Result<Option<TaxonomyNode>>
         }
     };
     Ok(row.map(
-        |(id, kind, canonical, norm, created_at, review_status, signal_count)| TaxonomyNode {
+        |(id, kind, canonical, norm, created_at, review_status, signal_count)| CanonicalEntity {
             id,
             kind,
             canonical,
@@ -274,13 +278,13 @@ pub async fn node_by_id(db: &Database, id: &str) -> Result<Option<TaxonomyNode>>
 }
 
 /// Create a taxonomy node.
-pub async fn create_node(db: &Database, kind: &str, canonical: &str) -> Result<TaxonomyNode> {
+pub async fn create_node(db: &Database, kind: &str, canonical: &str) -> Result<CanonicalEntity> {
     let id = uuid::Uuid::new_v4().to_string();
     let norm = canonical_form(canonical);
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5)",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -304,7 +308,7 @@ pub async fn create_node(db: &Database, kind: &str, canonical: &str) -> Result<T
                 .await?;
         }
     }
-    Ok(TaxonomyNode {
+    Ok(CanonicalEntity {
         id,
         kind: kind.to_owned(),
         canonical: canonical.to_owned(),
@@ -344,7 +348,7 @@ pub async fn ensure_node_from_signal(
     db: &Database,
     kind: &str,
     canonical: &str,
-) -> Result<TaxonomyNode> {
+) -> Result<CanonicalEntity> {
     let norm = canonical_form(canonical);
     let now = crate::identity::now_rfc3339();
     let id = uuid::Uuid::new_v4().to_string();
@@ -352,12 +356,12 @@ pub async fn ensure_node_from_signal(
     // Reinforcing a node must not rewrite a curator's chosen display form, and
     // agreement is not curation.
     let sql = db.sql(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
          VALUES (?, ?, ?, ?, ?, 'unverified', 1)
-         ON CONFLICT (kind, norm) DO UPDATE SET signal_count = taxonomy_nodes.signal_count + 1",
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+         ON CONFLICT (kind, norm) DO UPDATE SET signal_count = canonical_entities.signal_count + 1",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
          VALUES ($1::uuid, $2, $3, $4, $5, 'unverified', 1)
-         ON CONFLICT (kind, norm) DO UPDATE SET signal_count = taxonomy_nodes.signal_count + 1",
+         ON CONFLICT (kind, norm) DO UPDATE SET signal_count = canonical_entities.signal_count + 1",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -383,9 +387,9 @@ pub async fn ensure_node_from_signal(
     }
     let sql = db.sql(
         "SELECT id, kind, canonical, norm, created_at, review_status, signal_count
-         FROM taxonomy_nodes WHERE kind = ? AND norm = ?",
+         FROM canonical_entities WHERE kind = ? AND norm = ?",
         "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT)
-         FROM taxonomy_nodes WHERE kind = $1 AND norm = $2",
+         FROM canonical_entities WHERE kind = $1 AND norm = $2",
     );
     #[derive(sqlx::FromRow)]
     struct Row {
@@ -413,7 +417,7 @@ pub async fn ensure_node_from_signal(
                 .await?
         }
     };
-    Ok(TaxonomyNode {
+    Ok(CanonicalEntity {
         id: row.id,
         kind: row.kind,
         canonical: row.canonical,
@@ -436,9 +440,9 @@ pub async fn curate_node(
     canonical_form: &str,
 ) -> Result<bool> {
     let sql = db.sql(
-        "UPDATE taxonomy_nodes SET canonical = ?, review_status = 'curated'
+        "UPDATE canonical_entities SET canonical = ?, review_status = 'curated'
          WHERE kind = ? AND norm = ?",
-        "UPDATE taxonomy_nodes SET canonical = $1, review_status = 'curated'
+        "UPDATE canonical_entities SET canonical = $1, review_status = 'curated'
          WHERE kind = $2 AND norm = $3",
     );
     let affected = match db.backend() {
@@ -462,7 +466,7 @@ pub async fn curate_node(
 
 /// Curate a name in **both** vocabularies, atomically.
 ///
-/// §15.17 keeps two tables describing one state: `taxonomy_nodes` (what a tag
+/// §15.17 keeps two tables describing one state: `canonical_entities` (what a tag
 /// browser reads, what `search_nodes` searches, what `work_tags` references) and
 /// `canonical_entities` (the exchange's own view, carrying the curator's account and
 /// timestamps). Migration 0082 states the rule this function exists to enforce:
@@ -503,11 +507,11 @@ pub async fn curate_name(
     let now = crate::identity::now_rfc3339();
     // Two statements rather than one: the tables have no shared key (one is keyed
     // (kind, norm), the other by a uuid `id`), so there is no single statement that
-    // writes both. `taxonomy_nodes` also keeps its own `created_at`.
+    // writes both. `canonical_entities` also keeps its own `created_at`.
     let node_sql = db.sql(
-        "UPDATE taxonomy_nodes SET canonical = ?, review_status = 'curated'
+        "UPDATE canonical_entities SET canonical = ?, review_status = 'curated'
          WHERE kind = ? AND norm = ?",
-        "UPDATE taxonomy_nodes SET canonical = $1, review_status = 'curated'
+        "UPDATE canonical_entities SET canonical = $1, review_status = 'curated'
          WHERE kind = $2 AND norm = $3",
     );
     let entity_sql = db.sql(
@@ -578,10 +582,10 @@ pub async fn curate_name(
 /// The nodes awaiting review, most-reinforced first (§15.17's queue).
 ///
 /// `ORDER BY signal_count DESC` is the whole point of the function, so it is in
-/// the ORDER BY rather than a Rust sort — the `taxonomy_nodes_review` index is
+/// the ORDER BY rather than a Rust sort — the `canonical_entities_review` index is
 /// built for it, and sorting a full table read in Rust is both slower and
 /// ignores it.
-pub async fn list_unverified_nodes(db: &Database, limit: i64) -> Result<Vec<TaxonomyNode>> {
+pub async fn list_unverified_nodes(db: &Database, limit: i64) -> Result<Vec<CanonicalEntity>> {
     #[derive(sqlx::FromRow)]
     struct Row {
         id: String,
@@ -598,10 +602,10 @@ pub async fn list_unverified_nodes(db: &Database, limit: i64) -> Result<Vec<Taxo
         // column INT4. Carrying it on both arms is harmless SQL that hides which
         // one actually needs it.
         "SELECT id, kind, canonical, norm, created_at, review_status, signal_count
-         FROM taxonomy_nodes WHERE review_status = 'unverified'
+         FROM canonical_entities WHERE review_status = 'unverified'
          ORDER BY signal_count DESC, norm ASC LIMIT ?",
         "SELECT id, kind, canonical, norm, created_at, review_status, CAST(signal_count AS BIGINT)
-         FROM taxonomy_nodes WHERE review_status = 'unverified'
+         FROM canonical_entities WHERE review_status = 'unverified'
          ORDER BY signal_count DESC, norm ASC LIMIT $1",
     );
     let rows: Vec<Row> = match db.backend() {
@@ -620,7 +624,7 @@ pub async fn list_unverified_nodes(db: &Database, limit: i64) -> Result<Vec<Taxo
     };
     Ok(rows
         .into_iter()
-        .map(|r| TaxonomyNode {
+        .map(|r| CanonicalEntity {
             id: r.id,
             kind: r.kind,
             canonical: r.canonical,
@@ -638,11 +642,11 @@ pub async fn create_alias(
     alias: &str,
     node_id: &str,
     source: &str,
-) -> Result<TaxonomyAlias> {
+) -> Result<EntityAlias> {
     let norm = canonical_form(alias);
     let sql = db.sql(
-        "INSERT INTO taxonomy_aliases (alias, norm, node_id, source) VALUES (?, ?, ?, ?)",
-        "INSERT INTO taxonomy_aliases (alias, norm, node_id, source) VALUES ($1, $2, $3::uuid, $4)",
+        "INSERT INTO entity_aliases (alias, norm, node_id, source) VALUES (?, ?, ?, ?)",
+        "INSERT INTO entity_aliases (alias, norm, node_id, source) VALUES ($1, $2, $3::uuid, $4)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -664,7 +668,7 @@ pub async fn create_alias(
                 .await?;
         }
     }
-    Ok(TaxonomyAlias {
+    Ok(EntityAlias {
         alias: alias.to_owned(),
         norm,
         node_id: node_id.to_owned(),
@@ -715,16 +719,16 @@ pub async fn list_tags(
 ) -> Result<Vec<(String, String, String, i64)>> {
     let sql = db.sql(
         "SELECT id, canonical, kind, (
-            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = canonical_entities.id
         ) AS work_count
-         FROM taxonomy_nodes
+         FROM canonical_entities
          WHERE kind = 'tag'
          ORDER BY canonical ASC
          LIMIT ? OFFSET ?",
         "SELECT id::text, canonical, kind, (
-            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = canonical_entities.id
         ) AS work_count
-         FROM taxonomy_nodes
+         FROM canonical_entities
          WHERE kind = 'tag'
          ORDER BY canonical ASC
          LIMIT $1 OFFSET $2",
@@ -754,7 +758,7 @@ pub async fn tag_names_for_work(db: &Database, work_id: &str) -> Result<Vec<Stri
         Backend::Sqlite => sqlx::query_as(
             "SELECT tn.canonical
              FROM work_tags wt
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE wt.work_id = ? AND tn.kind = 'tag'",
         )
         .bind(work_id)
@@ -764,7 +768,7 @@ pub async fn tag_names_for_work(db: &Database, work_id: &str) -> Result<Vec<Stri
         Backend::Postgres => sqlx::query_as(
             "SELECT tn.canonical
              FROM work_tags wt
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE wt.work_id = $1::uuid AND tn.kind = 'tag'",
         )
         .bind(work_id)
@@ -783,12 +787,12 @@ pub async fn tag_weights_for_work(
     let sql = db.sql(
         "SELECT tn.canonical, wt.weight
          FROM work_tags wt
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = ? AND tn.kind = 'tag'
          ORDER BY tn.canonical ASC",
         "SELECT tn.canonical, wt.weight::bigint
          FROM work_tags wt
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = $1::uuid AND tn.kind = 'tag'
          ORDER BY tn.canonical ASC",
     );
@@ -817,16 +821,16 @@ pub async fn list_fandoms(
 ) -> Result<Vec<(String, String, i64)>> {
     let sql = db.sql(
         "SELECT id, canonical, (
-            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = canonical_entities.id
         ) AS work_count
-         FROM taxonomy_nodes
+         FROM canonical_entities
          WHERE kind = 'fandom'
          ORDER BY canonical ASC
          LIMIT ? OFFSET ?",
         "SELECT id::text, canonical, (
-            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = canonical_entities.id
         ) AS work_count
-         FROM taxonomy_nodes
+         FROM canonical_entities
          WHERE kind = 'fandom'
          ORDER BY canonical ASC
          LIMIT $1 OFFSET $2",
@@ -969,14 +973,14 @@ pub async fn list_work_warnings(db: &Database, work_id: &str) -> Result<Vec<Work
         "SELECT w.work_id, w.unit_id, w.warning_node_id, tn.canonical, w.severity,
                 w.depiction, w.declaration, w.spoiler_safe_note
            FROM work_warnings w
-           JOIN taxonomy_nodes tn ON tn.id = w.warning_node_id
+           JOIN canonical_entities tn ON tn.id = w.warning_node_id
           WHERE w.work_id = ?
           ORDER BY w.severity DESC, tn.canonical ASC",
         "SELECT w.work_id::text, w.unit_id, w.warning_node_id, tn.canonical,
                 CAST(w.severity AS BIGINT) AS severity,
                 w.depiction, w.declaration, w.spoiler_safe_note
            FROM work_warnings w
-           JOIN taxonomy_nodes tn ON tn.id = w.warning_node_id
+           JOIN canonical_entities tn ON tn.id = w.warning_node_id
           WHERE w.work_id::text = $1
           ORDER BY w.severity DESC, tn.canonical ASC",
     );
@@ -1095,13 +1099,13 @@ pub async fn works_by_tag_filtered(
             "tag" | "fandom" => {
                 sqlite_clauses.push(
                     "NOT EXISTS (SELECT 1 FROM work_tags fwt \
-                       JOIN taxonomy_nodes ftn ON ftn.id = fwt.node_id \
+                       JOIN canonical_entities ftn ON ftn.id = fwt.node_id \
                       WHERE fwt.work_id = w.id AND ftn.kind = ? AND ftn.norm = ?)"
                         .to_owned(),
                 );
                 postgres_clauses.push(format!(
                     "NOT EXISTS (SELECT 1 FROM work_tags fwt \
-                       JOIN taxonomy_nodes ftn ON ftn.id = fwt.node_id \
+                       JOIN canonical_entities ftn ON ftn.id = fwt.node_id \
                       WHERE fwt.work_id = w.id AND ftn.kind = ${pg_index} AND ftn.norm = ${})",
                     pg_index + 1
                 ));
@@ -1112,13 +1116,13 @@ pub async fn works_by_tag_filtered(
             "warning" => {
                 sqlite_clauses.push(
                     "NOT EXISTS (SELECT 1 FROM work_warnings fww \
-                       JOIN taxonomy_nodes ftn ON ftn.id = fww.warning_node_id \
+                       JOIN canonical_entities ftn ON ftn.id = fww.warning_node_id \
                       WHERE fww.work_id = w.id AND ftn.kind = 'warning' AND ftn.norm = ?)"
                         .to_owned(),
                 );
                 postgres_clauses.push(format!(
                     "NOT EXISTS (SELECT 1 FROM work_warnings fww \
-                       JOIN taxonomy_nodes ftn ON ftn.id = fww.warning_node_id \
+                       JOIN canonical_entities ftn ON ftn.id = fww.warning_node_id \
                       WHERE fww.work_id = w.id AND ftn.kind = 'warning' AND ftn.norm = ${pg_index})"
                 ));
                 pg_index += 1;
@@ -1148,7 +1152,7 @@ pub async fn works_by_tag_filtered(
         "SELECT w.id, w.title, p.handle, w.updated_at, COUNT(*) OVER () AS total
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = ? AND w.lifecycle = 'published' AND w.visibility = 'public'{sqlite_clause_text}
          ORDER BY w.updated_at DESC
@@ -1158,7 +1162,7 @@ pub async fn works_by_tag_filtered(
         "SELECT w.id::text, w.title, p.handle, w.updated_at, COUNT(*) OVER () AS total
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'{postgres_clause_text}
          ORDER BY w.updated_at DESC
@@ -1230,7 +1234,7 @@ pub async fn works_by_tag(
         "SELECT w.id, w.title, p.handle, w.updated_at
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = ? AND w.lifecycle = 'published' AND w.visibility = 'public'
          ORDER BY w.updated_at DESC
@@ -1238,7 +1242,7 @@ pub async fn works_by_tag(
         "SELECT w.id::text, w.title, p.handle, w.updated_at
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'
          ORDER BY w.updated_at DESC
@@ -1276,7 +1280,7 @@ pub async fn works_by_fandom(
         "SELECT w.id, w.title, p.handle, w.updated_at
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = ? AND w.lifecycle = 'published' AND w.visibility = 'public'
          ORDER BY w.updated_at DESC
@@ -1284,7 +1288,7 @@ pub async fn works_by_fandom(
         "SELECT w.id::text, w.title, p.handle, w.updated_at
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'
          ORDER BY w.updated_at DESC

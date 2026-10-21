@@ -56,7 +56,7 @@ pub struct CanonicalEntity {
     /// seen while unverified. Always populated.
     pub canonical: String,
     /// `unverified` or `curated` (§15.17). One vocabulary with
-    /// `taxonomy_nodes.review_status`; the wire type's `ReviewStatus::Verified`
+    /// `canonical_entities.review_status`; the wire type's `ReviewStatus::Verified`
     /// is the same state under the name the exchange protocol uses.
     pub review_status: String,
     /// Review priority only. Never a demand weight, never a count of readers.
@@ -291,13 +291,19 @@ pub async fn store_signal(
     Ok(inserted)
 }
 
-/// Record which entities a signal named, and reinforce each one's count.
+/// Record **which entities a signal named** — the provenance.
 ///
-/// The upsert is the load-bearing part. On a fresh instance the common case is
-/// two submitters filing the same new tag at the same moment; a
-/// read-then-write loses one of the two increments, and the count is the review
-/// queue's ordering, so a lost increment means a tag looks less urgent than it
-/// is. The `excluded` form is the one that works on both dialects.
+/// **THE COUNT IS NOT WRITTEN HERE.** It used to be: the exchange had its own
+/// entity table, this function wrote that table's row and counted the signal,
+/// and `taxonomy::ensure_node_from_signal` wrote the taxonomy's row and
+/// counted it as well. Two tables, two counts, each counting the same signal
+/// once.
+///
+/// The merge onto one table (migration 0124) is what made the doubling
+/// visible: **one signal, two counts**, and the review queue's ordering *is*
+/// that count. So the counting has one owner — `ensure_node_from_signal`,
+/// which the caller already asks for the node — and this function writes the
+/// **provenance**: which signal named what.
 ///
 /// An existing entity is left at its `review_status` — reinforcing an unverified
 /// entity does not curate it, and curating does not happen as a side effect of
@@ -307,7 +313,6 @@ pub async fn reinforce_entities(
     content_hash: &str,
     entities: &[(String, String, String)],
 ) -> Result<()> {
-    let now = crate::identity::now_rfc3339();
     let link_sql = db.sql(
         "INSERT INTO exchange_signal_entities (content_hash, kind, value, norm)
          VALUES (?, ?, ?, ?)
@@ -315,23 +320,6 @@ pub async fn reinforce_entities(
         "INSERT INTO exchange_signal_entities (content_hash, kind, value, norm)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (content_hash, kind, norm) DO NOTHING",
-    );
-    // The canonical form is `COALESCE(NULLIF(canonical, ''), excluded.canonical)`
-    // rather than a bare overwrite: the first spelling seen is the display form
-    // for an unverified entity (§15.17), and a second submitter writing
-    // `Horror` over `Horror` would otherwise replace a curator's chosen
-    // canonical form the moment the same name was signalled again.
-    let entity_sql = db.sql(
-        "INSERT INTO canonical_entities (kind, norm, canonical, review_status, signal_count, created_at, updated_at)
-         VALUES (?, ?, ?, 'unverified', 1, ?, ?)
-         ON CONFLICT (kind, norm) DO UPDATE SET
-             signal_count = canonical_entities.signal_count + 1,
-             updated_at = excluded.updated_at",
-        "INSERT INTO canonical_entities (kind, norm, canonical, review_status, signal_count, created_at, updated_at)
-         VALUES ($1, $2, $3, 'unverified', 1, $4, $5)
-         ON CONFLICT (kind, norm) DO UPDATE SET
-             signal_count = canonical_entities.signal_count + 1,
-             updated_at = EXCLUDED.updated_at",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -342,14 +330,6 @@ pub async fn reinforce_entities(
                     .bind(kind)
                     .bind(value)
                     .bind(norm)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query(&entity_sql)
-                    .bind(kind)
-                    .bind(norm)
-                    .bind(value)
-                    .bind(&now)
-                    .bind(&now)
                     .execute(&mut *tx)
                     .await?;
             }
@@ -363,14 +343,6 @@ pub async fn reinforce_entities(
                     .bind(kind)
                     .bind(value)
                     .bind(norm)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query(&entity_sql)
-                    .bind(kind)
-                    .bind(norm)
-                    .bind(value)
-                    .bind(&now)
-                    .bind(&now)
                     .execute(&mut *tx)
                     .await?;
             }

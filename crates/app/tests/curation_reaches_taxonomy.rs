@@ -5,7 +5,7 @@
 //! > Two tables describing one state must not spell it two ways, or a query
 //! > joining them silently drops every curated row.
 //!
-//! §15.17 keeps two such tables: `taxonomy_nodes` (what a tag browser reads, what
+//! §15.17 keeps two such tables: `canonical_entities` (what a tag browser reads, what
 //! `search_nodes` searches, what `work_tags` references) and `canonical_entities`
 //! (the exchange's view, carrying the curator's account and timestamps). A curated
 //! name has to agree across both.
@@ -42,7 +42,7 @@ async fn signal_created_node(db: &TestDb) -> (String, String) {
         .await
         .expect("a signal may create a usable node (§15.17)");
     // A real signal populates BOTH vocabularies: `record_entity_signal` writes
-    // `canonical_entities` and `ensure_node_from_signal` writes `taxonomy_nodes`.
+    // `canonical_entities` and `ensure_node_from_signal` writes `canonical_entities`.
     // Reproduced here so the curation path has a row to update in each — without
     // the second table the "both tables agree" test would pass vacuously.
     let hash = test_support::id("hash");
@@ -72,13 +72,13 @@ async fn signal_created_node(db: &TestDb) -> (String, String) {
 
 #[tokio::test]
 async fn curating_a_name_updates_the_table_search_reads() {
-    let db = scratch("curate_reaches_taxonomy_nodes").await;
+    let db = scratch("curate_reaches_canonical_entities").await;
 
     let (node_id, norm) = signal_created_node(&db).await;
     let before = taxonomy::node_by_id(db.db(), &node_id)
         .await
         .expect("node lookup runs")
-        .expect("the node exists in taxonomy_nodes");
+        .expect("the node exists in canonical_entities");
     assert_eq!(
         before.review_status, "unverified",
         "a node created from a signal is usable but never presented as curated \
@@ -100,7 +100,7 @@ async fn curating_a_name_updates_the_table_search_reads() {
         .expect("the node still exists");
     assert_eq!(
         after.review_status, "curated",
-        "curation must be visible in taxonomy_nodes: that is the table a tag \
+        "curation must be visible in canonical_entities: that is the table a tag \
          browser reads and search_nodes searches, so this is the assertion that \
          distinguishes 'the curator's action was recorded' from 'the curator's \
          action took effect'"
@@ -126,10 +126,10 @@ async fn the_two_tables_agree_about_one_name() {
     // rows. If curation still wrote only one of them, this returns zero and the
     // name reads as unverified everywhere at once.
     let sql = db.db().sql(
-        "SELECT COUNT(*) FROM taxonomy_nodes t
+        "SELECT COUNT(*) FROM canonical_entities t
          JOIN canonical_entities c ON c.kind = t.kind AND c.norm = t.norm
          WHERE t.id = ? AND t.review_status = c.review_status",
-        "SELECT COUNT(*) FROM taxonomy_nodes t
+        "SELECT COUNT(*) FROM canonical_entities t
          JOIN canonical_entities c ON c.kind = t.kind AND c.norm = t.norm
          WHERE t.id = $1 AND t.review_status = c.review_status",
     );

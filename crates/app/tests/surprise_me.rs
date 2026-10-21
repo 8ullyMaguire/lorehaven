@@ -71,7 +71,7 @@ impl Fixture {
         let norm = canonical.to_lowercase();
         exec_with(
             &self.tdb,
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
              VALUES (?1#u, ?2, ?3, ?4, '2026-01-01T00:00:00Z')",
             &[&id, &kind.to_string(), &canonical.to_string(), &norm],
         )

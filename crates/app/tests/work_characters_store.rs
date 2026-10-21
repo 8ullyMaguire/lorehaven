@@ -44,13 +44,13 @@ async fn scratch(tag: &str) -> TestDb {
 
 /// Create the taxonomy nodes the substrate references.
 ///
-/// Characters and ships are `taxonomy_nodes` rows with `kind = 'character'` /
+/// Characters and ships are `canonical_entities` rows with `kind = 'character'` /
 /// `'ship'`; attributes are `kind = 'trait'`. §15.17 owns their lifecycle, so these
 /// tests only insert the rows the foreign keys require.
 async fn fixture_nodes(db: &TestDb, tag: &str) {
-    let sqlite = "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+    let sqlite = "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
                   VALUES (?1, 'character', ?1, ?1, '2026-01-01T00:00:00Z')";
-    let postgres = "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+    let postgres = "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
                     VALUES ($1, 'character', $1, $1, '2026-01-01T00:00:00Z')";
     for node in ["alice", "bob", "carol"] {
         exec_with_text(db, sqlite, postgres, &[node.to_string()])
@@ -59,9 +59,9 @@ async fn fixture_nodes(db: &TestDb, tag: &str) {
     }
     exec_with_text(
         db,
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
          VALUES (?1, 'trait', 'Vampire', 'vampire', '2026-01-01T00:00:00Z')",
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
          VALUES ($1, 'trait', 'Vampire', 'vampire', '2026-01-01T00:00:00Z')",
         &["vampire".to_string()],
     )
@@ -69,9 +69,9 @@ async fn fixture_nodes(db: &TestDb, tag: &str) {
     .expect("fixture statement");
     exec_with_text(
         db,
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
          VALUES (?1, 'trait', 'BAMF', 'bamf', '2026-01-01T00:00:00Z')",
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
          VALUES ($1, 'trait', 'BAMF', 'bamf', '2026-01-01T00:00:00Z')",
         &["bamf".to_string()],
     )
@@ -81,9 +81,9 @@ async fn fixture_nodes(db: &TestDb, tag: &str) {
     let ship = format!("{tag}-ship-ab");
     exec_with_text(
         db,
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
          VALUES (?1, 'ship', 'Alice/Bob', 'alice/bob', '2026-01-01T00:00:00Z')",
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
          VALUES ($1, 'ship', 'Alice/Bob', 'alice/bob', '2026-01-01T00:00:00Z')",
         &[ship],
     )
@@ -370,7 +370,7 @@ async fn one_character_does_not_satisfy_another_characters_attributes() {
            AND wc.character_node_id = ?2
            AND wc.prominence = ?3
            AND EXISTS (SELECT 1 FROM work_character_attributes aa
-                       JOIN taxonomy_nodes at ON at.id = aa.attribute_node_id
+                       JOIN canonical_entities at ON at.id = aa.attribute_node_id
                        WHERE aa.work_id = wc.work_id
                          AND aa.character_node_id = wc.character_node_id
                          AND at.norm = ?4)",
@@ -379,7 +379,7 @@ async fn one_character_does_not_satisfy_another_characters_attributes() {
            AND wc.character_node_id = $2
            AND wc.prominence = $3
            AND EXISTS (SELECT 1 FROM work_character_attributes aa
-                       JOIN taxonomy_nodes at ON at.id = aa.attribute_node_id
+                       JOIN canonical_entities at ON at.id = aa.attribute_node_id
                        WHERE aa.work_id = wc.work_id
                          AND aa.character_node_id = wc.character_node_id
                          AND at.norm = $4)",
@@ -402,14 +402,14 @@ async fn one_character_does_not_satisfy_another_characters_attributes() {
            AND EXISTS (SELECT 1 FROM work_characters wcy
                        WHERE wcy.work_id = wcx.work_id AND wcy.prominence = ?3)
            AND EXISTS (SELECT 1 FROM work_character_attributes aax
-                       JOIN taxonomy_nodes atx ON atx.id = aax.attribute_node_id
+                       JOIN canonical_entities atx ON atx.id = aax.attribute_node_id
                        WHERE aax.work_id = wcx.work_id AND atx.norm = ?4)",
         "SELECT count(*) FROM work_characters wcx
          WHERE wcx.work_id = $1::uuid AND wcx.character_node_id = $2
            AND EXISTS (SELECT 1 FROM work_characters wcy
                        WHERE wcy.work_id = wcx.work_id AND wcy.prominence = $3)
            AND EXISTS (SELECT 1 FROM work_character_attributes aax
-                       JOIN taxonomy_nodes atx ON atx.id = aax.attribute_node_id
+                       JOIN canonical_entities atx ON atx.id = aax.attribute_node_id
                        WHERE aax.work_id = wcx.work_id AND atx.norm = $4)",
         &[
             work.clone(),
@@ -896,7 +896,7 @@ async fn the_query_language_finds_characters_and_pairings() {
 
     let duo_ship = format!("{tag}-ship-duo");
     let poly_ship = format!("{tag}-ship-poly");
-    // The norms must be UNIQUE across ship nodes: `taxonomy_nodes_kind_norm` is a
+    // The norms must be UNIQUE across ship nodes: `canonical_entities_kind_norm` is a
     // unique index on (kind, norm), and `fixture_nodes` has already inserted a ship
     // with norm 'alice/bob'. The norm is only used to satisfy that constraint here --
     // the pairing query matches on participants, not on the ship's name -- so any
@@ -907,9 +907,9 @@ async fn the_query_language_finds_characters_and_pairings() {
     ] {
         exec_with_text(
             &db,
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
              VALUES (?1, 'ship', ?2, ?3, '2026-01-01T00:00:00Z')",
-            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) \
              VALUES ($1, 'ship', $2, $3, '2026-01-01T00:00:00Z')",
             &[node.to_string(), format!("Ship {norm}"), norm.to_string()],
         )

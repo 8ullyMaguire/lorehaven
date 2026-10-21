@@ -151,7 +151,7 @@ impl Harness {
         // gets its OWN database per test.
         //
         // Connecting straight to the admin URL put every test in this file into
-        // one shared database, where `taxonomy_nodes` has a UNIQUE(kind, norm):
+        // one shared database, where `canonical_entities` has a UNIQUE(kind, norm):
         // the first test to create "star trek" won, and the next one failed on a
         // duplicate key that had nothing to do with what it was testing. On
         // SQLite every test had its own file, so this never showed. Test
@@ -489,8 +489,8 @@ async fn make_node(db: &Database, canonical: &str) -> String {
     // merge meaningful rather than a rename.
     let norm = canonical.to_lowercase();
     let sql = db.sql(
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?::uuid, ?, ?, ?, ?::timestamptz)",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES (?::uuid, ?, ?, ?, ?::timestamptz)",
     );
     match db.backend() {
         darkhold_db::Backend::Sqlite => {

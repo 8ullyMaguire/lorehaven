@@ -932,18 +932,18 @@ async fn apply_merge(
     // The same rule as the tags: an alias that already points at the target is
     // left alone, so a merge cannot create a second row for one spelling.
     let alias_sql = db.sql(
-        "UPDATE taxonomy_aliases
+        "UPDATE entity_aliases
                         SET node_id = ?
                       WHERE node_id = ?
-                        AND NOT EXISTS (SELECT 1 FROM taxonomy_aliases existing
-                                         WHERE existing.alias = taxonomy_aliases.alias
+                        AND NOT EXISTS (SELECT 1 FROM entity_aliases existing
+                                         WHERE existing.alias = entity_aliases.alias
                                            AND existing.node_id = ?)",
         // node_id is TEXT here too, per 0011.
-        "UPDATE taxonomy_aliases
+        "UPDATE entity_aliases
                         SET node_id = $1
                       WHERE node_id = $2
-                        AND NOT EXISTS (SELECT 1 FROM taxonomy_aliases existing
-                                         WHERE existing.alias = taxonomy_aliases.alias
+                        AND NOT EXISTS (SELECT 1 FROM entity_aliases existing
+                                         WHERE existing.alias = entity_aliases.alias
                                            AND existing.node_id = $3)",
     );
     match db.backend() {

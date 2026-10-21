@@ -32,6 +32,9 @@ darkhold-domain = { path = "../domain" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# The scoped-database harness, for a test that needs the schema *between* two
+# migrations (crates/db/tests/canonical_entities.rs).
+test-support = { path = "../test-support" }
 
 [lints]
 workspace = true

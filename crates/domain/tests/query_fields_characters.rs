@@ -57,7 +57,7 @@ fn character_reads_work_characters_not_work_tags() {
     // The reader types a name; the store keys on a node id. Resolving `norm`
     // inside the subquery keeps the parser pure, which §15.4 requires.
     assert!(
-        sql.contains("taxonomy_nodes"),
+        sql.contains("canonical_entities"),
         "the name must be resolved to a node id in SQL. Got:\n{sql}"
     );
     assert!(

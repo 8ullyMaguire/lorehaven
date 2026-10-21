@@ -342,7 +342,7 @@ pub async fn moods_in_use(db: &Database) -> Result<Vec<String>, sqlx::Error> {
     let sql = sql_owned(
         db,
         "SELECT DISTINCT tn.norm
-           FROM taxonomy_nodes tn
+           FROM canonical_entities tn
            JOIN work_tags wt ON wt.node_id = tn.id
            JOIN works w ON w.id = wt.work_id
           WHERE tn.kind = 'mood'
@@ -358,7 +358,7 @@ pub async fn moods_in_use(db: &Database) -> Result<Vec<String>, sqlx::Error> {
         // than an error. `taxonomy::tags_with_confirmation` joins the same two
         // tables and writes no cast, which is the cross-check.
         "SELECT DISTINCT tn.norm
-           FROM taxonomy_nodes tn
+           FROM canonical_entities tn
            JOIN work_tags wt ON wt.node_id = tn.id
            JOIN works w ON w.id = wt.work_id
           WHERE tn.kind = 'mood'
@@ -635,13 +635,13 @@ pub async fn filter_by_mood(
         db,
         format!(
             "SELECT wt.work_id FROM work_tags wt
-               JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+               JOIN canonical_entities tn ON tn.id = wt.node_id
               WHERE wt.work_id IN ({ids}) AND tn.kind = 'mood' AND tn.norm = ?{n}",
             n = ranked.len() + 1
         ),
         format!(
             "SELECT wt.work_id::text FROM work_tags wt
-               JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+               JOIN canonical_entities tn ON tn.id = wt.node_id
               WHERE wt.work_id IN ({ids}) AND tn.kind = 'mood' AND tn.norm = ${n}",
             n = ranked.len() + 1
         ),

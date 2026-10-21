@@ -128,6 +128,14 @@ with no author at all.**
   `review_status` (unverified · verified), `signal_count` (review priority only — never a demand
   weight, never a rank, never a count of readers).
 
+**One entity, one table.** An earlier draft of the instance had *two* tables describing
+one thing: the taxonomy's node — what the tag browser reads, what search searches, what
+`work_tags` references — and the exchange's own record of the same names. Two tables
+describing one state is how a "curated" label ends up meaning "exists in the new table" rather
+than "was reviewed", and it is how a signal's count fails to reach the node the review queue
+reads. **The two are one table**, the counts add, and a curator's word is the one that
+counts.
+
 **The entity floor, and why it is not optional.** A canonical entity is created only when its tag
 clears a **work-count floor**; below the floor the assertion is still stored, still searchable and
 still countable, but it is not a node in the tree. Measured against the AO3 mirror:

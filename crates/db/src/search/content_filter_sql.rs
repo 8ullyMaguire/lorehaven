@@ -160,7 +160,7 @@ fn render(rules: &[FilterRule], work_id_expr: &str) -> String {
         .join(" OR ");
     // The declared types (migrations/postgres/0070 + the taxonomy migrations):
     // `work_tags.work_id` is UUID, `work_tags.node_id` is TEXT, and
-    // `taxonomy_nodes.id` is TEXT. So the node join is TEXT = TEXT and the work
+    // `canonical_entities.id` is TEXT. So the node join is TEXT = TEXT and the work
     // correlation is UUID = UUID -- neither needs a cast in either dialect.
     //
     // An earlier version cast `cf_wt.work_id::text` on the assumption that
@@ -171,7 +171,7 @@ fn render(rules: &[FilterRule], work_id_expr: &str) -> String {
     let correlation = format!("{}.work_id = {}", WORK_TAG_ALIAS, work_id_expr);
     format!(
         "NOT EXISTS (SELECT 1 FROM work_tags {wt} \
-         JOIN taxonomy_nodes {tn} ON {tn}.id = {wt}.node_id \
+         JOIN canonical_entities {tn} ON {tn}.id = {wt}.node_id \
          WHERE {correlation} AND ({ors}))",
         wt = WORK_TAG_ALIAS,
         tn = TAXONOMY_ALIAS,

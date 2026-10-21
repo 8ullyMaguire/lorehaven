@@ -275,7 +275,7 @@ fn min_matches_is_not_min_match() {
 fn plus_children_becomes_a_closure_lookup() {
     let s = sql(r#"tag:"Fake Dating"+children"#);
     assert!(
-        s.contains("taxonomy_closure"),
+        s.contains("entity_closure"),
         "expansion reads the closure: {s}"
     );
     assert!(

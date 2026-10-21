@@ -11,7 +11,7 @@
 //! ## A ship is a participant SET; the type belongs to the work
 //!
 //! The same pair of characters can be romantic in one fic and platonic in another,
-//! sometimes in the same fic. So a `taxonomy_nodes` row with `kind = 'ship'` is
+//! sometimes in the same fic. So a `canonical_entities` row with `kind = 'ship'` is
 //! the *identity* of a pairing, and `work_relationships.rel_type` is the *claim* a
 //! particular work makes about it.
 //!
@@ -48,7 +48,7 @@
 //! `work_id::text`.** Both are load-bearing: without the projection, decoding a UUID
 //! column into a `String` fails even when the bind was correct.
 //!
-//! The node columns are **TEXT on both engines** — `taxonomy_nodes.id` is TEXT in
+//! The node columns are **TEXT on both engines** — `canonical_entities.id` is TEXT in
 //! both arms of 0011 — so `character_node_id`, `ship_node_id` and
 //! `attribute_node_id` take no cast anywhere. Worth stating because the instinct is
 //! the opposite: an id that looks like a UUID usually is one, and here it is not.

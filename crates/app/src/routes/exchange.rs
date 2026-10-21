@@ -447,7 +447,7 @@ pub async fn get_canonical(
             // total rather than a clamp-and-hope.
             signal_count: r.signal_count.max(0) as u64,
             curated_at: r.curated_at,
-            // Stored as `curated`, matching `taxonomy_nodes`; the wire type
+            // Stored as `curated`, matching `canonical_entities`; the wire type
             // calls the same state `Verified`. One vocabulary in storage, the
             // protocol's own on the wire — and a third spelling here would be a
             // third way for the two tables to disagree.
@@ -551,7 +551,7 @@ pub async fn curate_entity(
     }
     // One call, one transaction, both vocabularies. This used to be two separate
     // `UPDATE`s made here in the handler, which meant the pairing was a property of
-    // this route: a second caller would curate `taxonomy_nodes` or
+    // this route: a second caller would curate `canonical_entities` or
     // `canonical_entities` alone and no compiler would object, and a failure
     // between the two writes left a name curated in one table and unverified in the
     // other — the state migration 0082 says a join silently drops.

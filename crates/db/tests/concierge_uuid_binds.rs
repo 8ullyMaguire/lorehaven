@@ -184,7 +184,7 @@ async fn seed_one(db: &Database) -> String {
     .await;
     exec(
         db,
-        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
          VALUES (?1#u, 'mood', 'Comfort', 'comfort', ?2#t, 'pending', 0)",
         &[&node, T0],
     )

@@ -191,9 +191,9 @@ async fn seed_published_works(tdb: &TestDb, count: usize, fandom: &str) {
             .await
             .expect("seed pseud");
             // The fandom node, and one tag per work pointing at it, so
-            // `get_arena_pool`'s `taxonomy_nodes`/`work_tags` subquery finds it.
+            // `get_arena_pool`'s `canonical_entities`/`work_tags` subquery finds it.
             sqlx::query(
-                "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+                "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
                  VALUES ($1::uuid, 'fandom', $2, $3, $4::timestamptz, 'confirmed', 0)",
             )
             .bind(uuid::Uuid::parse_str(&node).expect("uuid"))
@@ -231,7 +231,7 @@ async fn seed_published_works(tdb: &TestDb, count: usize, fandom: &str) {
             .await
             .expect("seed pseud");
             sqlx::query(
-                "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at, review_status, signal_count)
+                "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at, review_status, signal_count)
                  VALUES (?, 'fandom', ?, ?, ?, 'confirmed', 0)",
             )
             .bind(&node)

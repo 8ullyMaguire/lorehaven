@@ -346,7 +346,7 @@ async fn reader_fandom_nodes(db: &Database, account_id: &str) -> Result<Vec<Stri
         "SELECT DISTINCT tn.id
          FROM bookmarks b
          JOIN work_tags wt ON wt.work_id = b.subject_id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE b.account_id = ?1
            AND b.subject_type = 'work'
            AND b.is_public = 1
@@ -354,7 +354,7 @@ async fn reader_fandom_nodes(db: &Database, account_id: &str) -> Result<Vec<Stri
         "SELECT DISTINCT tn.id::text
          FROM bookmarks b
          JOIN work_tags wt ON wt.work_id = b.subject_id
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE b.account_id = $1::uuid
            AND b.subject_type = 'work'
            AND b.is_public = TRUE
@@ -643,11 +643,11 @@ async fn load_tag_sets(
         let sql = db.sql(
             "SELECT wt.work_id, wt.node_id, tn.kind
              FROM work_tags wt
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE wt.work_id = ?1",
             "SELECT wt.work_id::text, wt.node_id::text, tn.kind
              FROM work_tags wt
-             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             JOIN canonical_entities tn ON tn.id = wt.node_id
              WHERE wt.work_id = $1::uuid",
         );
         let rows: Vec<(String, String, String)> = match db.backend() {
@@ -715,7 +715,7 @@ async fn load_tag_sets(
     }
     // The ids are BOUND, not interpolated. An earlier version built the IN-list with
     // `format!("'{}'", id)` plus single-quote escaping -- a hand-rolled SQL literal for
-    // values that have a parameter syntax. The candidates come from taxonomy_nodes, so
+    // values that have a parameter syntax. The candidates come from canonical_entities, so
     // they are not attacker-controlled today, but the escaping was load-bearing anyway,
     // and the day one of them is derived from anything a reader typed, "not today" is
     // the whole security argument.
@@ -723,7 +723,7 @@ async fn load_tag_sets(
     let full_sqlite = format!(
         "SELECT wt.work_id, wt.node_id, tn.kind
          FROM work_tags wt
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id IN ({placeholders})"
     );
     let pg_placeholders = (1..=candidates.len())
@@ -733,7 +733,7 @@ async fn load_tag_sets(
     let full_postgres = format!(
         "SELECT wt.work_id::text, wt.node_id::text, tn.kind
          FROM work_tags wt
-         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id IN ({pg_placeholders})"
     );
     // Both arms are bound to locals, not inline `&format!(...)`: `db.sql` borrows them, so

@@ -306,7 +306,7 @@ pub async fn surprise_me_work(db: &Database, account: &str, today: &str) -> Resu
     //   bookmarks.subject_id    TEXT     UUID      0004_reading.sql:17
     //   bookmarks.account_id    TEXT     UUID      0004_reading.sql:14
     //   work_tags.work_id       TEXT     UUID      0011_taxonomy.sql:25
-    //   taxonomy_nodes.id       TEXT     TEXT      0011_taxonomy.sql:5
+    //   canonical_entities.id       TEXT     TEXT      0011_taxonomy.sql:5
     //   taste_profiles.account  TEXT     TEXT      0012_discovery.sql:2
     //
     // The consequence is small and worth stating: on PostgreSQL every id except the

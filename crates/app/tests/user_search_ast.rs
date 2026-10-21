@@ -88,7 +88,7 @@ async fn seed_tagged_work(db: &darkhold_db::Database, slug: &str, owner: &str, f
     let node_id = id(&format!("{slug}-node"));
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, 'fandom', ?, ?, ?)")
+            sqlx::query("INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES (?, 'fandom', ?, ?, ?)")
                 .bind(&node_id).bind(fandom).bind(fandom.to_lowercase()).bind("2026-01-01T00:00:00Z")
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             sqlx::query(
@@ -102,7 +102,7 @@ async fn seed_tagged_work(db: &darkhold_db::Database, slug: &str, owner: &str, f
             .unwrap();
         }
         Backend::Postgres => {
-            sqlx::query("INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, 'fandom', $2, $3, $4)")
+            sqlx::query("INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1::uuid, 'fandom', $2, $3, $4)")
                 .bind(&node_id).bind(fandom).bind(fandom.to_lowercase()).bind("2026-01-01T00:00:00Z")
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2::uuid, 1, $3)")
@@ -122,12 +122,12 @@ async fn seed_fandom_alias(
     let node_id = id(&format!("{work_slug}-node"));
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("INSERT INTO taxonomy_aliases (alias, norm, node_id, source) VALUES (?, ?, ?, 'import')")
+            sqlx::query("INSERT INTO entity_aliases (alias, norm, node_id, source) VALUES (?, ?, ?, 'import')")
                 .bind(alias).bind(alias.to_lowercase()).bind(&node_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
         }
         Backend::Postgres => {
-            sqlx::query("INSERT INTO taxonomy_aliases (alias, norm, node_id, source) VALUES ($1, $2, $3::uuid, 'import')")
+            sqlx::query("INSERT INTO entity_aliases (alias, norm, node_id, source) VALUES ($1, $2, $3::uuid, 'import')")
                 .bind(alias).bind(alias.to_lowercase()).bind(&node_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
         }

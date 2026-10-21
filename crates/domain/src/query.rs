@@ -202,7 +202,7 @@ impl QueryField {
     /// Whether this field names a taxonomy term, and so has a closure to expand
     /// through.
     ///
-    /// §15.4.1.3. `+children` walks `parent` edges in `taxonomy_closure` (migration
+    /// §15.4.1.3. `+children` walks `parent` edges in `entity_closure` (migration
     /// 0104), which only taxonomy nodes have. Allowing it on `words` or `title`
     /// would put the suffix in a value where it matches nothing, so the check is
     /// here instead: an allowlist of the fields that resolve to a node, which makes

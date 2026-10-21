@@ -559,7 +559,7 @@ pub async fn run(
 
     // §32.7.10: carry the source's own tags into the taxonomy. `SourceWork::tags`
     // was carried un-mapped through the scraper layer for want of a place to put
-    // it; `taxonomy_nodes` and `work_tags` are that place, and without this an
+    // it; `canonical_entities` and `work_tags` are that place, and without this an
     // imported Pawchive post arrives with no fandom, no pairing and no themes at
     // all. Author-supplied labels are taken as written — a source's own tag is
     // evidence, not a guess to be filtered.
