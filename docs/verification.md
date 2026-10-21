@@ -87,8 +87,8 @@ declared-AI attribute is **still indexed and still recommended**: a statement ab
 
 | gate | result |
 |---|---|
-| `cargo test --workspace --no-fail-fast` (SQLite) | **4,278 tests · 236 suites · 0 failed · exit 0** |
-| `cargo test --workspace --no-fail-fast` (PostgreSQL 18.6) | **4,278 tests · 236 suites · 0 failed · exit 0** |
+| `cargo test --workspace --no-fail-fast` (SQLite) | **4,279 tests · 236 suites · 0 failed · exit 0** |
+| `cargo test --workspace --no-fail-fast` (PostgreSQL 18.6) | **4,279 tests · 236 suites · 0 failed · exit 0** |
 | `node ./node_modules/vitest/vitest.mjs run` | **564 tests · 77 files · exit 0** |
 | `node ./node_modules/svelte-check/bin/svelte-check` | **0 errors** |
 | `python3 scripts/reachability.py` | exit 0 — every one of the 306 tables has a reader and a writer |
