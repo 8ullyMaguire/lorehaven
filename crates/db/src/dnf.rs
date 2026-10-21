@@ -131,7 +131,7 @@ pub async fn delete_dnf(
 /// Read a single DNF record (the pseud's own record for a work).
 pub async fn read_dnf(db: &Database, pseud_id: PseudId, work_id: WorkId) -> Result<Option<DnfRow>> {
     let sql = db.sql(
-        "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+        "SELECT id, account_id, pseud_id, work_id,
                 reason, note, is_public, created_at, updated_at
          FROM did_not_finish
          WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
@@ -212,7 +212,7 @@ pub async fn list_dnf_for_work(
 ) -> Result<Vec<DnfRow>> {
     let sql = if include_private {
         db.sql(
-            "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+            "SELECT id, account_id, pseud_id, work_id,
                     reason, note, is_public, created_at, updated_at
              FROM did_not_finish
              WHERE work_id = ? AND deleted_at IS NULL
@@ -225,7 +225,7 @@ pub async fn list_dnf_for_work(
         )
     } else {
         db.sql(
-            "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+            "SELECT id, account_id, pseud_id, work_id,
                     reason, note, is_public, created_at, updated_at
              FROM did_not_finish
              WHERE work_id = ? AND is_public = TRUE AND deleted_at IS NULL
@@ -372,7 +372,7 @@ pub async fn work_allows_dnf_feedback(db: &Database, work_id: WorkId) -> Result<
 /// List all DNF records by a pseud (for their personal reading history).
 pub async fn list_dnf_by_pseud(db: &Database, pseud_id: PseudId) -> Result<Vec<DnfRow>> {
     let sql = db.sql(
-        "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+        "SELECT id, account_id, pseud_id, work_id,
                 reason, note, is_public, created_at, updated_at
          FROM did_not_finish
          WHERE pseud_id = ? AND deleted_at IS NULL
