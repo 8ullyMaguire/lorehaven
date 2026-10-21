@@ -738,7 +738,7 @@ export function withdrawWork(
 
 /** Append a unit. */
 export function addUnit(workId: string, title: string): Promise<UnitSummary> {
-  return apiFetch<UnitSummary>(`/works/${encodeURIComponent(workId)}/units`, {
+  return apiFetch<UnitSummary>(`/works/${encodeURIComponent(workId)}/chapters`, {
     method: 'POST',
     body: JSON.stringify({ title }),
   });
@@ -762,7 +762,7 @@ export function updateUnit(
   id: string,
   patch: { expected_version: number; title?: string; document?: unknown; note?: string },
 ): Promise<UnitSummary> {
-  return apiFetch<UnitSummary>(`/units/${encodeURIComponent(id)}`, {
+  return apiFetch<UnitSummary>(`/chapters/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });
@@ -775,7 +775,7 @@ export function fetchUnit(
   signal?: AbortSignal,
 ): Promise<UnitContent> {
   return apiFetch<UnitContent>(
-    `/works/${encodeURIComponent(workId)}/units/${encodeURIComponent(unitId)}`,
+    `/works/${encodeURIComponent(workId)}/chapters/${encodeURIComponent(unitId)}`,
     { signal },
   );
 }
@@ -785,7 +785,7 @@ export function fetchRevisions(
   unitId: string,
   signal?: AbortSignal,
 ): Promise<RevisionEntry[]> {
-  return apiFetch<RevisionEntry[]>(`/units/${encodeURIComponent(unitId)}/revisions`, {
+  return apiFetch<RevisionEntry[]>(`/chapters/${encodeURIComponent(unitId)}/revisions`, {
     signal,
   });
 }
@@ -793,7 +793,7 @@ export function fetchRevisions(
 /** Bring an old revision back, as a new revision. */
 export function restoreRevision(unitId: string, revisionId: string): Promise<UnitSummary> {
   return apiFetch<UnitSummary>(
-    `/units/${encodeURIComponent(unitId)}/restore-revision`,
+    `/chapters/${encodeURIComponent(unitId)}/restore-revision`,
     { method: 'POST', body: JSON.stringify({ revision_id: revisionId }) },
   );
 }
