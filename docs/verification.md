@@ -1,3 +1,60 @@
+## 2026-10-21 — M6-01: two tables describing one thing become one
+
+**Milestone:** M6 · **Requirements:** `DM6-01`
+
+The vocabulary: `taxonomy_nodes` becomes `canonical_entities`, and the two tables that
+described one state become one.
+
+### The card's rename would have collided, and the collision was the point
+
+`canonical_entities` **already existed** — migration 0081 created it as the **exchange's own
+table**. So "rename `taxonomy_nodes` to `canonical_entities`" had nowhere to go.
+
+> **And the estate already knew.** Migration 0081's own comment says *"two tables describing
+> one state must not spell it two ways"*, and 0082 put `review_status` and `signal_count` on
+> the taxonomy's node and **could not fix the split** — because the exchange kept writing to
+> its own table. So the counts a signal reinforced never reached the node the review queue
+> reads, and the two tables described one state in two shapes.
+
+So the **merge** is the card's substance and the rename follows it: the exchange's rows fold
+into the taxonomy's, the signal counts **add** (a name the exchange has seen five times and
+the taxonomy knows about is a name with eight signals), a curated exchange row curates the
+node, and the exchange's table is dropped. The aliases, the edges, the closure and the scope
+take the entity vocabulary too.
+
+**The data is not rewritten.** A rename is a change of vocabulary and not of content.
+
+### Two writers, one count
+
+The exchange's `reinforce_entities` wrote the entity row and counted the signal, and the
+taxonomy's `ensure_node_from_signal` did the same — **two tables, two counts, each counting
+the same signal once**. The merge made the doubling visible: *one signal, two counts*, and the
+review queue's ordering **is** that count.
+
+So the counting has **one owner** — `ensure_node_from_signal` — and the exchange's function
+writes the **provenance**: which signal named what.
+
+### The two copies of the reachability scan disagreed
+
+The scan is written twice — once in `scripts/reachability.py` and once in
+`crates/app/tests/reachability.rs` — and that is deliberate: two scans that must agree are a
+cross-check. When migration 0124 renamed the table, the **Python probe followed the rename
+and the test's copy did not**, and the two disagreed.
+
+That is the one thing the duplication is for, and it worked: the test failed and said which
+copy was wrong. The test's copy now follows the sequence, and the cross-check is a
+cross-check again.
+
+### The measurement
+
+| gate | result |
+|---|---|
+| `cargo test -p darkhold-db --test canonical_entities --no-fail-fast` | **3 passed · exit 0 on both engines** |
+| `cargo test --workspace --no-fail-fast` | **4,311 tests · 243 suites · 0 failed · exit 0** |
+| `python3 scripts/reachability.py` | exit 0 — every one of the 304 tables has a reader and a writer |
+
+---
+
 ## 2026-10-21 — M5: the reader is a document, and it does not need a script
 
 **Milestone:** M5 · **Requirements:** `DM5-01` … `DM5-07`
