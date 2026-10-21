@@ -1,3 +1,105 @@
+## 2026-10-21 — M5: the reader is a document, and it does not need a script
+
+**Milestone:** M5 · **Requirements:** `DM5-01` … `DM5-07`
+
+The reading surface: server-rendered HTML, the reader's own appearance, the position save,
+content warnings, the spoiler gate, the progress indicator, and the "did not finish" mark.
+
+### The reader is a document, and the SPA's reader is gone
+
+Spec §8.5: *"The reader is server-rendered HTML — no JavaScript required to read."* Spec
+§21.1: *"Accessibility is a floor: the reader works without JavaScript."*
+
+> **A single-page application cannot be that surface.** Its content arrives *after* the
+> document loads, so with JavaScript off the reader gets an empty page and a spinner that
+> never resolves — **and every test in the repository would still be green**, because the
+> tests run in a browser with JavaScript.
+
+So the reader is rendered **by the server**, at the URL the SPA already used
+(`/works/{id}/units/{unit_id}`), and the site's links to it are **real links**.
+`Reader.svelte` and the SPA's `unit-read` route are removed: **one reader, not two.**
+
+**The escaping is decided by the API.** `crates/app/src/html.rs` escapes everything by
+default and has exactly one way to emit markup — `raw` — so the trust decision is visible at
+the call site. The single raw insertion is the unit's `sanitized_html`, which the **server**
+produced from the validated editor document (spec §8.3, ADR 0002). A client-side renderer
+would be a second set of escaping rules to get wrong, and the reader would then have two
+sanitisers — the same class of mistake as two numbering schemes in one statement.
+
+**The session middleware, and the fault it hid.** The reader's routes are merged at the
+**root**, not under `/api/v1`, so they need their own session loading — and the first
+version did not have it. Every signed-in reader was answered as an anonymous one, so the
+position save silently did nothing: the page rendered, the form posted, the redirect came
+back, and nothing was recorded. **That is the kind of fault that looks like a working
+feature.**
+
+### The proof is in two places, and they ask different questions
+
+`crates/app/tests/reader_page.rs` asks about the **response** — the text is in the body,
+the navigation is links, the position save degrades to a form post, a signed-out reader is
+not a login wall, and a title carrying `<script>` comes out as text.
+`frontend/e2e/reader-no-js.spec.ts` asks in a **browser with JavaScript switched off**, in a
+new `no-js` Playwright project. The CSRF token is read from the **cookie jar** and not from
+`document.cookie`, because `document.cookie` needs JavaScript.
+
+### The warnings had no writer, and the reachability probe found it
+
+T-M5-04's first item — *"the archive warnings from the source are stored as declared
+attributes"* — was **not true** when the card was written. `work_warnings` had a reader and
+**no writer**: nothing in the instance could ever record a warning, so there was nothing for
+a filter to filter and nothing for a reader to see. The known-gaps file claimed the table as
+"neither", and the claim was true.
+
+So there is now a store writer, a reader, a **contributor** door, and the reader's page
+carries the warnings — above the text, in **words** rather than a severity number.
+
+**And the filter is applied inside the pool query, with the count from the same query.**
+That is the only assertion that can tell "filtered in SQL" from "filtered afterwards": a
+query that filters afterwards reports the count it had before filtering, because the count
+and the list came from different queries. A reader told there are forty works and shown
+twelve, with nothing saying which twelve, has been told a lie.
+
+### The gate omits the text, and the test asserts the absence
+
+T-M5-05's fourth item is the one that matters: *"a hidden element with the text in it is
+not a gate."* The reader's page **omits the body** until the reader asks, and the test
+asserts the **absence** of the text in the raw body — not the presence of a hidden element,
+which is what a screenshot would show.
+
+**And a fault in three test clients was hiding all of it.** They sent **one Cookie header
+per cookie** instead of one header with every cookie in it. The server reads the *first*,
+so the session cookie arrived and the rest did not — which is why the reveal appeared not to
+work: the cookie was set, stored by the client, and never sent. A browser joins them, and
+so do the clients now.
+
+### The store was already right, and the reading surface was not
+
+`progress_for` reads **every** device's position for the account — that is what makes
+§9.3's "two devices disagree, so the reader is asked" work. What was missing was the
+**server-rendered page**: it did not read the position at all, so a reader who had saved
+their place arrived at the top of the unit every time.
+
+**And a position against an older revision is not applied silently.** The unit has been
+revised under the reader — the revisions are append-only (ADR 0002), so the old one still
+exists — and the text in between may have been rewritten. The page says the place is
+**stale** and does not apply it.
+
+### The indicator is honest, and the mark is the reader's own
+
+The progress indicator is the reader's real position in the **current unit**, and it is a
+`progressbar` with the value in the accessibility tree. **When the position is unknown it
+says so — it does not show 0 %.** A reader told they are at the beginning of a unit they
+have read is told something false, and **a false 0 % is worse than no number**.
+
+"Did not finish" is the reader's own note to themselves: private to their own face, never
+sent to the author, and reversible with the **same form**. And a reader's own payload
+carries **no warmth, no streak and no engagement score** — the warmth band is for the
+*author*, and a warmth meter on your own reading is a streak-shaped dark pattern. That was
+already true, and **nothing proved it**; the absence of a field is true until somebody
+adds the field.
+
+---
+
 ## 2026-10-20 — M4: the vocabulary is normative, and a work is not hidden for saying no
 
 **Milestone:** M4 · **Requirements:** `DM4-01` … `DM4-07`
