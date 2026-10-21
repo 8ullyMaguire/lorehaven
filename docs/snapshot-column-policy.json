@@ -202,6 +202,11 @@
       "why": "Operational or content metadata; carries no personal data.",
       "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
     },
+    "units.spoiler_gated": {
+      "treatment": "keep",
+      "why": "Whether the unit is behind a spoiler gate. It is a flag the author sets about their own work -- operational and content metadata, and it carries no personal data. It is the same shape as the rest of the work's own columns, and a snapshot that drops it would show a gated section ungated.",
+      "reviewed_by": "alvaro, 2026-10-21, spec 11.16 and 10.1"
+    },
     "units.title": {
       "treatment": "keep_gated",
       "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
