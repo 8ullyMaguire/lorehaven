@@ -47,6 +47,37 @@ position save silently did nothing: the page rendered, the form posted, the redi
 back, and nothing was recorded. **That is the kind of fault that looks like a working
 feature.**
 
+### The e2e suites were the ones that noticed
+
+The M4 rename had left the frontend calling doors the API does not have — `/units`
+where the API's door is `/chapters` — and **the e2e suites are the only thing in the
+repository that runs the frontend against the real API**. The frontend's unit tests
+mock the API; the Rust tests call the API directly; and **the e2e suites are not part
+of the gate** — `gate.sh e2e` needs a suite name, so they are run by hand. Nobody had
+run them since the rename.
+
+The specs were renamed too, and thirteen places across ten spec files waited for a
+response that never came. They also drove the SPA reader — `.prose`, the "Reading
+settings" panel, the scroll-driven position save — and the reader is server-rendered
+HTML now.
+
+> **So there is a gate for it** — `scripts/check-frontend-routes.py` compares the
+> **route table** against the paths the frontend builds, and it is verified against the
+> defect it exists for: with the M4 spelling put back, it reports it.
+
+**And arriving in a unit is a reading.** The SPA's reader recorded the arrival on every
+load, and that is what puts an opened work in `/library/history` — the acceptance tests
+had found the repository's `touch_history` with **no caller at all**, so the history was
+empty for every real reader while the tests were green. The server-rendered page does it
+too, and it touches the **history** and not the **position**: the arrival is not a
+position, and writing one would put the reader at the top of the unit every time they
+came back — and would overwrite the position they had just saved, because the form post
+redirects back to the page.
+
+**A GET that writes, so the prefetch guard is not optional.** A browser that prefetches
+the link would put a work in the reader's history that they never opened, and the
+history is a list of what somebody read.
+
 ### The proof is in two places, and they ask different questions
 
 `crates/app/tests/reader_page.rs` asks about the **response** — the text is in the body,
