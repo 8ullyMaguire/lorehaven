@@ -117,9 +117,18 @@ async function findWork(page: Page): Promise<string> {
   return page.url().match(/works\/([0-9a-f-]{36})/)![1];
 }
 
-async function openUnit(page: Page): Promise<void> {
+/**
+ * Open the first unit of a work.
+ *
+ * The reader is **server-rendered HTML** (spec §8.5), so the text is in the
+ * document when it arrives: the assertion is on the *server-rendered* body,
+ * not on the SPA's `.prose`. A reader with JavaScript off gets the same
+ * page, and the `reader-no-js` suite proves it.
+ */
+async function openUnit(page: Page): Promise<string> {
   await page.locator('ol.units li a').first().click();
-  await expect(page.locator('.prose').first()).toBeVisible();
+  await expect(page.locator('.reader-surface__body').first()).toBeVisible();
+  return page.url().match(/works\/([0-9a-f-]{36})/)![1];
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +226,7 @@ test('6. the author writes a unit and saves it', async ({ page }) => {
   await page.keyboard.type(UNIT_TEXT);
 
   const saved = page.waitForResponse(
-    (response) => response.url().includes('/api/v1/units/') && response.request().method() !== 'GET',
+    (response) => response.url().includes('/api/v1/chapters/') && response.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   expect((await saved).status()).toBeLessThan(400);
@@ -249,19 +258,35 @@ test('9. a signed-out visitor is told that writing needs an account', async ({ p
 test('10. a signed-out visitor reads a published work', async ({ page }) => {
   await findWork(page);
   await openUnit(page);
-  await expect(page.locator('.prose').first()).toContainText('The kettle had other plans');
+  await expect(page.locator('.reader-surface__body').first()).toContainText(
+    'The kettle had other plans',
+  );
 });
 
 test('11. a reader opens a unit and the reader records where they got to', async ({ page }) => {
   await ensureAccount(page, reader);
   await findWork(page);
-  await openUnit(page);
+  const workId = await openUnit(page);
 
-  const progress = page.waitForResponse(
-    (response) => response.url().includes('/reading/progress') && response.request().method() === 'PUT',
+  // **The position is saved by the form**, which is the no-JavaScript path
+  // and the one every reader has. The slider says where they stopped, and
+  // the form posts it.
+  await page.locator('#reader-position').fill('350');
+  const saved = page.waitForResponse(
+    (response) => response.url().includes('/position') && response.request().method() === 'POST',
   );
-  await page.mouse.wheel(0, 1200);
-  expect((await progress).status()).toBeLessThan(400);
+  await page.click('.reader-surface__position button[type=submit]');
+  expect((await saved).status()).toBeLessThan(400);
+
+  // And the position is on the account, which is what makes it follow the
+  // reader to another device (spec §10.3).
+  const stored = await page.request.get(
+    `/api/v1/reading/progress?subject_type=work&subject_id=${workId}`,
+  );
+  expect(stored.ok(), `reading the position back failed: ${stored.status()}`).toBeTruthy();
+  const body = await stored.json();
+  expect(body.resolution.kind).toBe('use_stored');
+  expect(body.resolution.position.position_permille).toBe(350);
 });
 
 test('12. the work the reader opened appears in their history', async ({ page }) => {
@@ -420,22 +445,22 @@ test('17. a reader changes their reader settings and they survive a reload', asy
   await ensureAccount(page, reader);
   await findWork(page);
   await openUnit(page);
-  await page.click('button:text-is("Reading settings")');
 
+  // **The typography control is on the reader's page** (spec §10.1), and it
+  // is a form: the reader's appearance is the reader's own, and a reader
+  // without JavaScript must be able to change it as well as read.
   const saved = page.waitForResponse(
-    (response) => response.url().includes('/settings/typography') && response.request().method() !== 'GET',
+    (response) => response.url().includes('/typography') && response.request().method() === 'POST',
   );
-  const theme = page.getByLabel('Reader theme');
-  await theme.selectOption('dark');
-  // The panel renders before its own load lands; if that load overwrites the
-  // choice, the save would quietly write the old value back. Say so here.
-  await expect(theme, 'the choice survives until Save').toHaveValue('dark');
-  await page.click('button:text-is("Save settings")');
+  await page.selectOption('#reader-theme', 'dark');
+  await page.click('.reader-surface__typography button[type=submit]');
   expect((await saved).status()).toBeLessThan(400);
 
+  // **And it survives a reload** -- because the preference is on the
+  // *account* and not in the browser (spec §10.3).
   await page.reload();
-  await page.click('button:text-is("Reading settings")');
-  await expect(page.getByLabel('Reader theme')).toHaveValue('dark');
+  await expect(page.locator('html')).toHaveAttribute('data-reader', 'dark');
+  await expect(page.selectOption('#reader-theme', 'dark')).toBeTruthy();
 });
 
 test('18. an account keeps its content ceiling', async ({ page }) => {

@@ -64,7 +64,7 @@ async function publish(page: Page, title: string): Promise<string> {
   await page.locator('.tiptap.ProseMirror').click();
   await page.keyboard.type(`A unit for ${title}. It has enough words to be a unit.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

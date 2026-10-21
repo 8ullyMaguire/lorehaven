@@ -81,7 +81,7 @@ test('author publishes and prices, buyer buys and reads, the author is notified,
   // in the unit list renders its label across a whitespace break, so text
   // matching is unreliable there.
   const unitSaved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await unitSaved;

@@ -74,7 +74,7 @@ async function publishWork(page: Page, title: string): Promise<string> {
   await editor.click();
   await page.keyboard.type('A short unit for the extended test suite.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -244,7 +244,9 @@ test('reader: the reader page renders without error', async ({ page }) => {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`/works/${workId}`);
   await page.locator('ol.units li a').first().click();
-  await expect(page.locator('.prose').first()).toBeVisible();
+  // The reader is server-rendered HTML (spec §8.5), so the body is the
+  // server's class and not the SPA's.
+  await expect(page.locator('.reader-surface__body').first()).toBeVisible();
   await page.waitForLoadState('networkidle');
   expect(errors).toEqual([]);
 });

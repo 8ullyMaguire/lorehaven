@@ -148,6 +148,11 @@ impl Client {
         self.request("POST", uri, Some(body)).await
     }
 
+    /// A GET that returns JSON, for the API's own answers.
+    async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
+        self.request("GET", uri, None).await
+    }
+
     async fn patch(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("PATCH", uri, Some(body)).await
     }
@@ -318,6 +323,31 @@ async fn the_position_follows_the_reader_to_another_device() {
     assert!(
         page.contains("42%"),
         "and the page says so in words: {page}"
+    );
+}
+
+#[tokio::test]
+async fn arriving_in_a_unit_puts_the_work_in_the_readers_history() {
+    let harness = Harness::new("arrival").await;
+    let mut client = harness.client();
+    let (work_id, unit_id, _) = published_work(&mut client).await;
+
+    // **Arriving is a reading.** The reader's page records the arrival, and it
+    // is what puts an opened work in the reader's history.
+    let (status, page) = client
+        .get_html(&format!("/works/{work_id}/units/{unit_id}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+
+    let (status, body) = client.get("/api/v1/library/history").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert!(
+        items.iter().any(|item| {
+            item["subject_id"].as_str() == Some(work_id.as_str())
+                || item["work_id"].as_str() == Some(work_id.as_str())
+        }),
+        "the work the reader opened is in their history: {body}"
     );
 }
 

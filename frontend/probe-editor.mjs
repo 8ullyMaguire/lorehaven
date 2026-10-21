@@ -1,0 +1,25 @@
+import { chromium } from '@playwright/test';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE:', m.text().slice(0, 300)); });
+page.on('pageerror', (e) => console.log('PAGEERROR:', String(e).slice(0, 500)));
+page.on('requestfailed', (r) => console.log('REQFAILED:', r.url(), r.failure()?.errorText));
+page.on('response', (r) => { if (r.status() >= 400) console.log('HTTP', r.status(), r.url()); });
+
+const uniq = Date.now().toString(36);
+await page.goto('http://127.0.0.1:8173/register');
+await page.fill('#register-email', `probe-${uniq}@example.test`);
+await page.fill('#register-password', 'probe-passphrase-1234');
+await page.fill('#register-handle', `probe${uniq.slice(-5)}`);
+await page.fill('#register-display-name', 'Probe');
+await page.selectOption('#register-age-band', 'adult');
+await page.click('button[type=submit]');
+await page.waitForURL(/\/account/);
+await page.goto('http://127.0.0.1:8173/write');
+await page.fill('input[id^=field-]', 'Probe Work');
+await page.click('button:text-is("Start a draft")');
+await page.waitForTimeout(3000);
+await page.click('button:text-is("Add unit")');
+await page.waitForTimeout(5000);
+console.log('HAS EDITOR:', await page.locator('.tiptap.ProseMirror').count());
+await browser.close();

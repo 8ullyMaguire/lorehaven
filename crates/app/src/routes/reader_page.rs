@@ -114,6 +114,22 @@ impl Reveals {
     }
 }
 
+/// Whether the request is a prefetch rather than a navigation.
+///
+/// A prefetch is a request the browser makes **on the reader's behalf without
+/// the reader asking** — and the reader's history is a list of what somebody
+/// read, so a prefetch must not write to it.
+fn is_prefetch(headers: &axum::http::HeaderMap) -> bool {
+    for name in ["sec-purpose", "purpose"] {
+        if let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) {
+            if value.to_ascii_lowercase().contains("prefetch") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// The reveal cookie's value, out of the request's cookies.
 fn reveal_cookie(headers: &axum::http::HeaderMap) -> Option<&str> {
     let cookies = headers.get(header::COOKIE)?.to_str().ok()?;
@@ -306,6 +322,37 @@ async fn read_unit_page(
         }
         None => (None, false),
     };
+
+    // **Arriving in a unit is itself a reading.** It is what puts an opened
+    // work in the reader's history, and the SPA's reader did it on every load
+    // (the acceptance tests found the repository's `touch_history` with no
+    // caller at all, so `/library/history` was empty for every real reader
+    // while the tests were green).
+    //
+    // **A GET that writes, so the prefetch guard is not optional.** A browser
+    // that prefetches the link would put a work in the reader's history that
+    // they never opened, and the history is a list of what somebody read.
+    // The `Sec-Purpose` and `Purpose` headers are how a prefetch says so.
+    if let Some(user) = session.as_ref() {
+        if !is_prefetch(&headers) {
+            if let Some(pseud) = user.pseud_id {
+                // **The history, and not the position.** The position is the
+                // reader's own, and the arrival is not a position: writing one
+                // would put the reader at the top of the unit every time they
+                // came back -- and, worse, would overwrite the position they
+                // had just saved, because the form post redirects back here.
+                let _ = reading::touch_history(
+                    state.db(),
+                    user.account_id,
+                    pseud,
+                    "work",
+                    &work_id.to_string(),
+                    unit.current_revision_id,
+                )
+                .await;
+            }
+        }
+    }
 
     // **The reader's own mark.** Private to their own face, and never a
     // judgement (spec §10.1, §10.3).

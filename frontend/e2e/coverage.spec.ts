@@ -80,7 +80,7 @@ async function publish(page: Page, title: string): Promise<string> {
   await editor.click();
   await page.keyboard.type(`A unit written for ${title}. It has enough words to export.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -306,7 +306,7 @@ test('write: a draft stays private until published', async ({ page }) => {
   await editor.click();
   await page.keyboard.type('Draft text nobody else can see yet.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

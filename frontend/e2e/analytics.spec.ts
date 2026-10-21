@@ -172,7 +172,7 @@ test('a reader marks a locally published work finished, and the count moves', as
   await editor.click();
   await page.keyboard.type('One unit, read by a test so the count moves.');
   const unitSaved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await unitSaved;
@@ -241,7 +241,7 @@ test('the library status door refuses a work id', async ({ page }) => {
   await page.locator('.tiptap.ProseMirror').click();
   await page.keyboard.type('A unit, so the work can be published.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
@@ -360,7 +360,7 @@ test('a reader records where they got to, and the dashboard counts it', async ({
   await page.locator('.tiptap.ProseMirror').click();
   await page.keyboard.type('A unit, read so the work can be published.');
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;

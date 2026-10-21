@@ -58,7 +58,7 @@ async function publish(page: import('@playwright/test').Page, title: string): Pr
   await editor.click();
   await page.keyboard.type(`A unit written for ${title}, so the feed has something to explain.`);
   const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/units/') && r.request().method() !== 'GET',
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
   );
   await page.click('button:text-is("Save now")');
   await saved;
