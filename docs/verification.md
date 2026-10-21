@@ -83,6 +83,60 @@ asserts the wording **never contains "protect"**. A work with `ai_training = den
 declared-AI attribute is **still indexed and still recommended**: a statement about
 *training* says nothing about whether the work is in the archive.
 
+### The measurement
+
+| gate | result |
+|---|---|
+| `cargo test --workspace --no-fail-fast` (SQLite) | **4,278 tests · 236 suites · 0 failed · exit 0** |
+| `cargo test --workspace --no-fail-fast` (PostgreSQL 18.6) | **4,278 tests · 236 suites · 0 failed · exit 0** |
+| `node ./node_modules/vitest/vitest.mjs run` | **564 tests · 77 files · exit 0** |
+| `node ./node_modules/svelte-check/bin/svelte-check` | **0 errors** |
+| `python3 scripts/reachability.py` | exit 0 — every one of the 306 tables has a reader and a writer |
+| `python3 scripts/check-vocabulary.py` | exit 0 — **new gate** |
+| `python3 scripts/check-pg-placeholder-mixing.py` | exit 0 — **new gate** |
+| `python3 scripts/check-split-spec.py` | exit 0 — 41 files, slots 00-40 |
+
+### And the PostgreSQL arm found a fault that no SQLite test could
+
+`Database::sql` hands the PostgreSQL half of a statement to `rewrite_placeholders`, which
+renumbers **every** `?` to `$1`, `$2`, ... and leaves a hand-written `$n` exactly where it
+is. The `create_work` insert carried four `?`s and three hand-written `$n`s, so the rewrite
+made `$4` name two different columns — and the work's `discussion_mode` came back as
+`comments_only` instead of the instance's `thread_only`.
+
+> **Every SQLite test passed.** SQLite never sees the PostgreSQL half of a statement, so a
+> fault in that half is invisible on the default engine by construction. This is the second
+> time in this milestone that only the PostgreSQL arm could see something, and the reason
+> the arm is a gate rather than a convenience.
+
+**The rule is now a gate** — `scripts/check-pg-placeholder-mixing.py` — and it is stated as
+the estate's own convention rather than as a prohibition: the PostgreSQL half carries **one**
+numbering scheme, either every bind a `?` (the rewrite numbers them) or every bind a `$n`
+(the rewrite leaves them alone). A half that mixes the two has two numbering systems in it,
+and whether they agree is a count a reader cannot check by eye.
+
+**It found two faults in the estate's own tree**, both in a PostgreSQL arm no test could
+reach — the `m57_metadata_exchange` fixture, whose harness is SQLite-only. One used
+SQLite's numbered `?1` form, which the rewrite turns into `$11`; the other read a `UUID`
+column into a `String`. That is exactly the kind of code that is wrong and stays wrong.
+
+### And two schema-reading gates did not follow the rename
+
+`check-pg-uuid-casts.py` and `check-uncast-pg-placeholders.py` read the migrations'
+`CREATE TABLE` statements and stopped there, so after migration 0122 renamed `chapters` to
+`units` they described a schema that never existed.
+
+> **The two failures look opposite and are the same mistake.** The uuid-cast gate reported
+> four **correct** casts as mismatches — a gate that cries wolf on correct code is a gate
+> nobody reads. The uncast-placeholder gate **skipped** every statement against `units`
+> without a word, which is worse: a skipped statement looks like a clean one.
+
+Both now read the migrations as a **sequence**, the way the reachability probe learned to in
+this same milestone: a create, a rename, a column rename and a drop, in order. A rebuild is
+followed too, so the table created later under the same name is the one whose definition
+counts — and the uncast gate's table count fell from 312 to 311, because `export_jobs_old`
+is genuinely gone.
+
 ## 2026-10-20 — M3: the trust ladder, and the four gates that did not exist
 
 **Milestone:** M3 · **Requirements:** `DM3-01` … `DM3-06`
