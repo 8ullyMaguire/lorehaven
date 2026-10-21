@@ -95,6 +95,7 @@ declared-AI attribute is **still indexed and still recommended**: a statement ab
 | `python3 scripts/check-vocabulary.py` | exit 0 — **new gate** |
 | `python3 scripts/check-pg-placeholder-mixing.py` | exit 0 — **new gate** |
 | `python3 scripts/check-split-spec.py` | exit 0 — 41 files, slots 00-40 |
+| `the migration parity tests` | exit 0 — **one new test**: the two dialects must end up with the same schema |
 
 ### And the PostgreSQL arm found a fault that no SQLite test could
 
@@ -119,6 +120,44 @@ and whether they agree is a count a reader cannot check by eye.
 reach — the `m57_metadata_exchange` fixture, whose harness is SQLite-only. One used
 SQLite's numbered `?1` form, which the rewrite turns into `$11`; the other read a `UUID`
 column into a `String`. That is exactly the kind of code that is wrong and stays wrong.
+
+### And the PostgreSQL arm found three more, and all three were the same mistake
+
+The arm found three failing suites, and they were three faces of one fault: **the two
+dialects did not end up with the same schema, and nothing checked that they did.**
+
+**The rename migration was missing a rename.** Migration 0122 renamed
+`work_coordinates.chapter_length_spread` to `unit_length_spread` on SQLite and **not** on
+PostgreSQL, so every PostgreSQL test that measured a work failed with *"column
+\"unit_length_spread\" of relation \"work_coordinates\" does not exist"*. SQLite was green
+throughout, because SQLite was the dialect that got the rename.
+
+> **The parity test could not see it.** It compares the columns a migration *declares*, and a
+> rename declares nothing — it moves a column an earlier migration created. The new test
+> compares the **resulting schema**, which is what the invariant actually is, and which
+> allows the two dialects to reach it by different routes: migration 0075 renames a broken
+> table away and recreates it on SQLite while PostgreSQL simply creates it. A test that
+> demanded the same *statements* would fail on a divergence the specification permits.
+
+**A sort that did not sort the same way.** `ORDER BY MAX(event) DESC` puts a row with no
+event **first** on PostgreSQL and **last** on SQLite, because PostgreSQL treats NULL as the
+largest value and SQLite as the smallest. A work that had never been edited sorted ahead of
+one edited a moment ago — on one engine only. The estate's convention for this is
+`(x IS NULL) ASC`, and the direction matters: a work with no update event is the **least**
+recently updated, not the most.
+
+**And the snapshot policy still carried the old table names.** `check-snapshot-pii.py`
+derives its inventory from the `CREATE TABLE` statements and stopped there, so after 0122 it
+watched `chapters` — a table the instance no longer has — and did **not** watch `units`,
+which is the table that now holds the body. The gate's covered-table list had the same name.
+Both are fixed, and the policy file's keys are re-keyed: no treatment changed, only the
+names.
+
+> **The gate that watches a table must follow the migrations as a sequence.** This is now
+> the third gate in this milestone to learn it — the reachability probe, the two
+> schema-reading gates, and this one — and the third time the failure was *silent*: the
+> gate reported OK while watching a table that was not there. A gate that watches the wrong
+> table is worse than a gate that watches none, because it looks like coverage.
 
 ### And two schema-reading gates did not follow the rename
 

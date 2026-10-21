@@ -130,6 +130,19 @@ of those. A checker that reads only the `CREATE TABLE` statements describes a sc
 existed, and the two failures look opposite and are the same mistake: one reports **correct**
 statements as faults, and the other **skips** the statements it cannot place and looks clean.
 
+**The invariant is the RESULTING schema, not the statements.** The two dialects may reach the
+same schema by different routes — one may rename a broken table out of the way and recreate
+it while the other simply creates it — so a check that demands the same *statements* fails on
+a divergence the specification permits. What must match is the schema both engines end up
+with.
+
+**A NULL sorts differently in the two engines, so say where it goes.** PostgreSQL treats NULL
+as the largest value and SQLite as the smallest, so `ORDER BY x DESC` puts the NULL rows
+**first** on PostgreSQL and **last** on SQLite. A row with no event must not float to the top
+on one engine only. The portable form is `(x IS NULL) ASC`, which is valid on both and does
+not depend on the SQLite build's version — and the direction is a decision, not a default: a
+work with no update event is the *least* recently updated, not the most.
+
 **The bundled SQLite version matters.** The sqlx build bundles SQLite 3.46.0, not the system
 library. A script reads the version from `Cargo.lock` and the vendored header, so a lockfile bump
 retires the rules itself — and **exits non-zero if it cannot read the version**.
