@@ -4550,6 +4550,13 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "reader_page.rs",
+        handler: "set_did_not_finish",
+        method: "POST",
+        path: "/works/{work_id}/units/{unit_id}/dnf",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_page.rs",
         handler: "save_note",
         method: "POST",
         path: "/works/{work_id}/units/{unit_id}/notes",

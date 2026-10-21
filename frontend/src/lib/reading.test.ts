@@ -148,6 +148,22 @@ describe('applying typography', () => {
     expect(style.getPropertyValue('--reader-measure')).toBe('60ch');
   });
 
+  it('does not alter a site token, because the two scales are independent', () => {
+    // Spec §10.1 and §21.1: the reader's appearance is **the reader's alone**,
+    // and the site theme is the site's. So a reader preset must not touch a
+    // site token -- and the way to prove that is to put a site token there
+    // first and see whether it survives.
+    //
+    // A test that only checked "the reader tokens are set" would pass even if
+    // `applyTypography` also wrote `--color-bg`, because the reader tokens
+    // would still be right.
+    document.documentElement.style.setProperty('--color-bg', '#123456');
+    applyTypography(createPrefs({ reader_theme: 'dark' }) as never, document.documentElement);
+    expect(document.documentElement.style.getPropertyValue('--color-bg')).toBe('#123456');
+    expect(document.documentElement.style.getPropertyValue('--color-text')).toBe('');
+    document.documentElement.style.removeProperty('--color-bg');
+  });
+
   it('marks distraction-free on the document element, which is what hides the chrome', () => {
     applyTypography(createPrefs({ distraction_free: true }) as never, document.documentElement);
     expect(document.documentElement.dataset.distractionFree).toBe('true');

@@ -140,6 +140,90 @@
 }
 
 /*
+ * The progress indicator.
+ *
+ * **The reader's real position in the current unit** (spec §10.1). The bar is
+ * a `progressbar` with a value, so a screen reader announces the number
+ * rather than the reader having to read a percentage off a picture.
+ */
+.reader-surface__progress {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2, 0.5rem);
+  margin: 0 auto var(--space-4, 1rem);
+  max-width: calc(var(--reader-measure, 66ch) + 2 * var(--space-5, 1.5rem));
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--reader-muted);
+}
+
+.reader-surface__progress-bar {
+  position: relative;
+  flex: 0 0 8rem;
+  height: 0.35rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  background: color-mix(in srgb, var(--reader-text) 12%, transparent);
+  overflow: hidden;
+}
+
+.reader-surface__progress-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--reader-progress, 0) * 1%);
+  background: var(--reader-link);
+}
+
+.reader-surface__progress-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--reader-text);
+}
+
+/*
+ * "Did not finish". The reader's own note to themselves: private, reversible,
+ * and never a judgement.
+ */
+.reader-surface__dnf {
+  margin: 0 auto var(--space-4, 1rem);
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  max-width: calc(var(--reader-measure, 66ch) + 2 * var(--space-5, 1.5rem));
+  border: 1px dashed var(--reader-rule);
+  border-radius: var(--radius-md, 0.5rem);
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.reader-surface__dnf-note {
+  margin: 0 0 var(--space-2, 0.5rem);
+  color: var(--reader-muted);
+}
+
+.reader-surface__dnf-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}
+
+/*
+ * The reader's place: what was saved, and whether it can be trusted.
+ *
+ * The stale notice is **not** styled as an error. A stale position is not a
+ * failure the reader caused -- the unit was revised under them -- and an
+ * alarming style would make an honest note look like a broken page.
+ */
+.reader-surface__position-saved,
+.reader-surface__position-stale {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--reader-muted);
+}
+
+.reader-surface__position-stale {
+  font-style: italic;
+}
+
+/*
  * The spoiler gate.
  *
  * **The text is not in the page until the reader asks** -- so there is nothing

@@ -143,6 +143,10 @@ pub fn router() -> Router<AppState> {
             "/works/{work_id}/units/{unit_id}/reveal",
             post(reveal_section),
         )
+        .route(
+            "/works/{work_id}/units/{unit_id}/dnf",
+            post(set_did_not_finish),
+        )
         .route("/works/{work_id}/units/{unit_id}/notes", post(save_note))
         .route(
             "/works/{work_id}/units/{unit_id}/notes/{note_id}/delete",
@@ -270,6 +274,46 @@ async fn read_unit_page(
     let warnings =
         darkhold_db::taxonomy::list_work_warnings(state.db(), &work_id.to_string()).await?;
 
+    // **The reader's place** (spec §10.3). The position lives on the
+    // *account* and not in the browser, so it follows the reader to another
+    // device -- which is the whole of "the position survives a device change".
+    //
+    // And a position recorded against an **older revision** is not applied
+    // silently: the text in between may have been rewritten, so the page says
+    // the place is stale rather than putting the reader at a fraction of a
+    // text that is no longer there.
+    let (position, stale_position) = match session.as_ref() {
+        Some(user) => {
+            let positions =
+                reading::progress_for(state.db(), user.account_id, "work", &work_id.to_string())
+                    .await?;
+            let current = unit.current_revision_id;
+            // A unit with no revision has no text to be lost in, so any stored
+            // position is as good as another.
+            let reliable = |position: &darkhold_domain::reading::ReadingPosition| match current {
+                Some(current) => darkhold_domain::reading::position_is_reliable(position, current),
+                None => true,
+            };
+            let position = positions
+                .iter()
+                .find(|position| reliable(position))
+                .cloned();
+            // **Stale** means: there is a stored position, and none of them can
+            // be trusted against the unit's current revision.
+            let stale =
+                current.is_some() && !positions.is_empty() && !positions.iter().any(reliable);
+            (position, stale)
+        }
+        None => (None, false),
+    };
+
+    // **The reader's own mark.** Private to their own face, and never a
+    // judgement (spec §10.1, §10.3).
+    let did_not_finish = match session.as_ref().and_then(|user| user.pseud_id) {
+        Some(pseud) => darkhold_db::dnf::read_dnf(state.db(), pseud, work_id).await?,
+        None => None,
+    };
+
     // **The gate.** A work can require a gate on a section (spec §10.1), and
     // until the reader asks, **the text is not in the response** -- a hidden
     // element with the text in it is not a gate.
@@ -293,6 +337,9 @@ async fn read_unit_page(
         &warnings,
         session.is_some(),
         gated,
+        position.as_ref(),
+        stale_position,
+        did_not_finish.as_ref(),
     );
 
     Ok((
@@ -512,6 +559,87 @@ async fn reveal_section(
         .into_response())
 }
 
+/// What the reader said about why they did not finish.
+#[derive(Debug, Default, Deserialize)]
+pub struct DnfForm {
+    /// The reason, as the domain spells it.
+    #[serde(default)]
+    pub reason: String,
+    /// A free-text note for themselves.
+    #[serde(default)]
+    pub note: String,
+}
+
+/// Mark the work as "did not finish", or take the mark back (spec §10.1).
+///
+/// **It is the reader's own note to themselves.** It is private, it is
+/// reversible, and it is **never a judgement**: nothing here is sent to the
+/// author, and the reader is not asked to justify themselves to anybody.
+///
+/// The mark is per **work**, not per unit: a reader who did not finish a work
+/// did not finish the work, and marking half of it would be a distinction
+/// nobody asked for.
+async fn set_did_not_finish(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((work_id, unit_id)): Path<(String, String)>,
+    Form(form): Form<DnfForm>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+    let back = format!("/works/{work_id}/units/{unit_id}");
+
+    let Some(user) = session else {
+        return Ok(Redirect::to(&back).into_response());
+    };
+    let Some(pseud) = user.pseud_id else {
+        return Ok(Redirect::to(&back).into_response());
+    };
+
+    // **Reversible.** An empty reason means "take the mark back", because the
+    // reader's way of undoing it should not be a second button that says so.
+    let reason = form.reason.trim();
+    if reason.is_empty() {
+        let _ = darkhold_db::dnf::delete_dnf(
+            state.db(),
+            pseud,
+            work_id,
+            &darkhold_db::identity::now_rfc3339(),
+        )
+        .await;
+        return Ok(Redirect::to(&back).into_response());
+    }
+
+    // The reason is one of the domain's, or the reader's own words. An
+    // unknown reason is **not** stored as an unknown reason: it is stored as
+    // "other", because the reader said something and the vocabulary did not
+    // have a word for it.
+    let reason = match reason.parse::<darkhold_domain::dnf::DnfReason>() {
+        Ok(reason) => reason.as_str().to_owned(),
+        Err(_) => darkhold_domain::dnf::DnfReason::Other.as_str().to_owned(),
+    };
+
+    let _ = darkhold_db::dnf::upsert_dnf(
+        state.db(),
+        user.account_id,
+        pseud,
+        work_id,
+        &reason,
+        if form.note.trim().is_empty() {
+            None
+        } else {
+            Some(form.note.trim())
+        },
+        // **Private.** The mark is the reader's own; the author is told about
+        // the *aggregate*, never about the reader.
+        false,
+        &darkhold_db::identity::now_rfc3339(),
+    )
+    .await;
+
+    Ok(Redirect::to(&back).into_response())
+}
+
 /// Save a reader's note, and return them to the page.
 async fn save_note(
     State(state): State<AppState>,
@@ -582,6 +710,9 @@ fn render_page(
     warnings: &[darkhold_db::taxonomy::WorkWarning],
     signed_in: bool,
     gated: bool,
+    position: Option<&darkhold_domain::reading::ReadingPosition>,
+    stale_position: bool,
+    did_not_finish: Option<&darkhold_db::dnf::DnfRow>,
 ) -> String {
     let mut page = Html::new();
 
@@ -851,6 +982,99 @@ fn render_page(
         page.close("section");
     }
 
+    // ── "did not finish" ──────────────────────────────────────────────────
+    //
+    // **The reader's own note to themselves** (spec §10.1). It is private,
+    // it is reversible, and it is never a judgement: the page says what it
+    // is, and it offers the way to take it back.
+    if signed_in {
+        page.open("section", &[("class", "reader-surface__dnf")]);
+        match did_not_finish {
+            Some(mark) => {
+                page.open("p", &[("class", "reader-surface__dnf-note")]);
+                // The reason is shown to the reader, because a note they cannot
+                // read back is not a note. It is **private**: only they see it.
+                let label = mark
+                    .reason
+                    .parse::<darkhold_domain::dnf::DnfReason>()
+                    .map(|reason| reason.label())
+                    .unwrap_or("For a reason of your own");
+                page.text(&format!(
+                    "You marked this as did not finish ({label}). Only you can see that."
+                ));
+                page.close("p");
+                page.open(
+                    "form",
+                    &[
+                        ("class", "reader-surface__dnf-form"),
+                        ("method", "post"),
+                        (
+                            "action",
+                            &format!("/works/{}/units/{}/dnf", work.id, unit.id),
+                        ),
+                    ],
+                );
+                page.void(
+                    "input",
+                    &[("type", "hidden"), ("name", "reason"), ("value", "")],
+                );
+                page.open("button", &[("type", "submit")]);
+                page.text("Take that back");
+                page.close("button");
+                page.close("form");
+            }
+            None => {
+                page.open("p", &[("class", "reader-surface__dnf-note")]);
+                page.text("Did not finish it? That is between you and the work.");
+                page.close("p");
+                page.open(
+                    "form",
+                    &[
+                        ("class", "reader-surface__dnf-form"),
+                        ("method", "post"),
+                        (
+                            "action",
+                            &format!("/works/{}/units/{}/dnf", work.id, unit.id),
+                        ),
+                    ],
+                );
+                page.open("label", &[("for", "reader-dnf-reason")]);
+                page.text("Why not?");
+                page.close("label");
+                page.open("select", &[("id", "reader-dnf-reason"), ("name", "reason")]);
+                for reason in [
+                    darkhold_domain::dnf::DnfReason::NotMyTaste,
+                    darkhold_domain::dnf::DnfReason::Triggering,
+                    darkhold_domain::dnf::DnfReason::SlowPacing,
+                    darkhold_domain::dnf::DnfReason::AbandonedByAuthor,
+                    darkhold_domain::dnf::DnfReason::DroppedOther,
+                ] {
+                    page.open("option", &[("value", reason.as_str())]);
+                    page.text(reason.label());
+                    page.close("option");
+                }
+                page.close("select");
+                page.open("label", &[("for", "reader-dnf-note")]);
+                page.text("Anything to add? (nobody else sees this)");
+                page.close("label");
+                page.open(
+                    "input",
+                    &[
+                        ("type", "text"),
+                        ("id", "reader-dnf-note"),
+                        ("name", "note"),
+                    ],
+                );
+                page.close("input");
+                page.open("button", &[("type", "submit")]);
+                page.text("Mark it");
+                page.close("button");
+                page.close("form");
+            }
+        }
+        page.close("section");
+    }
+
     // ── the reader's notes ────────────────────────────────────────────────
     //
     // Private to the reader's own face (spec §10.3), and a **form**: a note
@@ -1008,6 +1232,50 @@ fn render_page(
         page.close("section");
     }
 
+    // ── the progress indicator ────────────────────────────────────────────
+    //
+    // **The reader's real position in the CURRENT UNIT** (spec §10.1) -- not
+    // an estimate, and not a percentage of the whole work presented as a
+    // position.
+    //
+    // And when the position is unknown the indicator **says so**. It does not
+    // show 0 %: a reader told they are at the beginning of a unit they have
+    // read is told something false, and a false 0 % is worse than no number.
+    page.open("div", &[("class", "reader-surface__progress")]);
+    match position {
+        Some(position) => {
+            let percent = position.fraction / 10;
+            page.open(
+                "div",
+                &[
+                    ("class", "reader-surface__progress-bar"),
+                    ("role", "progressbar"),
+                    ("aria-valuenow", &percent.to_string()),
+                    ("aria-valuemin", "0"),
+                    ("aria-valuemax", "100"),
+                    ("aria-label", "Your place in this unit"),
+                    // The bar's width, as a custom property. The number is
+                    // also in `aria-valuenow`, so the value is in the
+                    // accessibility tree and not only in the picture.
+                    ("style", &format!("--reader-progress: {percent}")),
+                ],
+            );
+            page.open("span", &[("class", "reader-surface__progress-value")]);
+            page.text(&format!("{percent}%"));
+            page.close("span");
+            page.close("div");
+            page.open("span", &[("class", "reader-surface__progress-note")]);
+            page.text("of this unit");
+            page.close("span");
+        }
+        None => {
+            page.open("span", &[("class", "reader-surface__progress-unknown")]);
+            page.text("Your place in this unit is not known yet.");
+            page.close("span");
+        }
+    }
+    page.close("div");
+
     // ── the position form ─────────────────────────────────────────────────
     //
     // The form is the **no-JavaScript path**, and it is always present: with
@@ -1028,6 +1296,10 @@ fn render_page(
     page.open("label", &[("for", "reader-position")]);
     page.text("Where did you stop?");
     page.close("label");
+    // The saved position, when there is one that can be trusted. The reader's
+    // place follows them across devices (spec §10.3), so the form opens where
+    // they left off and not at the top.
+    let saved = position.map(|position| position.fraction.to_string());
     page.open(
         "input",
         &[
@@ -1036,11 +1308,32 @@ fn render_page(
             ("name", "position_permille"),
             ("min", "0"),
             ("max", "1000"),
-            ("value", "0"),
+            ("value", saved.as_deref().unwrap_or("0")),
             ("step", "10"),
         ],
     );
     page.close("input");
+    if let Some(position) = position {
+        let percent = position.fraction / 10;
+        page.open("p", &[("class", "reader-surface__position-saved")]);
+        page.text(&format!(
+            "You were {percent}% of the way through this unit last time."
+        ));
+        page.close("p");
+    }
+    if stale_position {
+        // **A stale position is said to be stale.** The unit has been revised
+        // since the reader's place was recorded, so the fraction would point at
+        // text that is no longer there. Silently applying it would put a
+        // reader at a place in a text they have not read.
+        page.open("p", &[("class", "reader-surface__position-stale")]);
+        page.text(
+            "Your saved place was recorded against an earlier version of this \
+             unit, so it has not been applied. The text may have changed since \
+             you were there.",
+        );
+        page.close("p");
+    }
     page.void(
         "input",
         &[
