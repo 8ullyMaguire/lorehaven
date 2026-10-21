@@ -190,6 +190,13 @@ async fn read_unit_page(
         .find(|edition| edition.edition_kind == "narration" && edition.published_at.is_some())
         .map(|edition| edition.id);
 
+    // **The warnings are attached to the work** (spec §10.2). A warning is
+    // information and never a gate on the archive: a reader who filters
+    // nothing sees everything, with the warnings attached -- so they are on
+    // the page, not behind a filter.
+    let warnings =
+        darkhold_db::taxonomy::list_work_warnings(state.db(), &work_id.to_string()).await?;
+
     let stylesheet = crate::assets::app_stylesheet(&state).await;
     let body = render_page(
         &work,
@@ -204,6 +211,7 @@ async fn read_unit_page(
         stylesheet.as_deref(),
         &notes,
         narration.as_deref(),
+        &warnings,
         session.is_some(),
     );
 
@@ -433,6 +441,7 @@ fn render_page(
     stylesheet: Option<&str>,
     notes: &[reading::Note],
     narration: Option<&str>,
+    warnings: &[darkhold_db::taxonomy::WorkWarning],
     signed_in: bool,
 ) -> String {
     let mut page = Html::new();
@@ -525,6 +534,40 @@ fn render_page(
         }
         page.close("ol");
         page.close("nav");
+    }
+
+    // ── the warnings ──────────────────────────────────────────────────────
+    //
+    // **Above the text, and visible without asking.** A warning is
+    // information (spec §10.2): a reader who filters nothing sees everything,
+    // *with the warnings attached*. A warning that a reader has to go looking
+    // for is a warning that protects nobody.
+    if !warnings.is_empty() {
+        page.open("section", &[("class", "reader-surface__warnings")]);
+        page.open("h2", &[("class", "reader-surface__warnings-title")]);
+        page.text("Content warnings");
+        page.close("h2");
+        page.open("ul", &[]);
+        for warning in warnings {
+            page.open("li", &[("class", "reader-surface__warning")]);
+            page.open("span", &[("class", "reader-surface__warning-name")]);
+            page.text(&warning.canonical);
+            page.close("span");
+            // The severity, in words. A number is a scale nobody can read.
+            page.text(if warning.severity >= 2 {
+                " (heavy)"
+            } else {
+                " (light)"
+            });
+            if let Some(note) = warning.spoiler_safe_note.as_deref() {
+                page.open("span", &[("class", "reader-surface__warning-note")]);
+                page.text(note);
+                page.close("span");
+            }
+            page.close("li");
+        }
+        page.close("ul");
+        page.close("section");
     }
 
     // ── the unit ──────────────────────────────────────────────────────────

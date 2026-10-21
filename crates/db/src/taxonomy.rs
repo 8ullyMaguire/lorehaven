@@ -2,7 +2,7 @@
 //!
 //! Spec §15.1–15.3. Both dialects.
 
-use crate::{Backend, Database};
+use crate::{rewrite_placeholders, Backend, Database};
 use anyhow::Result;
 use serde::Serialize;
 
@@ -848,6 +848,374 @@ pub async fn list_fandoms(
         }
     };
     Ok(rows)
+}
+
+/// A warning declared on a work (spec §10.2).
+///
+/// **A declared attribute and never a detection.** The archive does not
+/// detect generated content, and it does not detect warnings either: it
+/// records what the author said about their own work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkWarning {
+    /// The work the warning is on.
+    pub work_id: String,
+    /// The unit it is scoped to, when it is scoped to one.
+    pub unit_id: Option<String>,
+    /// The taxonomy node naming the warning.
+    pub warning_node_id: String,
+    /// The node's canonical name, so a reader sees "graphic violence" and not
+    /// an opaque identifier.
+    pub canonical: String,
+    /// 1 = light, 2 = heavy.
+    pub severity: i64,
+    /// `on_page`, `referenced` or `implied`.
+    pub depiction: String,
+    /// Who said so, and in what capacity.
+    pub declaration: String,
+    /// The author's note for a reader who wants to avoid the detail.
+    pub spoiler_safe_note: Option<String>,
+}
+
+/// What to declare on a work.
+pub struct WorkWarningInput<'a> {
+    /// The work.
+    pub work_id: &'a str,
+    /// The unit it is scoped to, when it is scoped to one.
+    pub unit_id: Option<&'a str>,
+    /// The taxonomy node naming the warning.
+    pub warning_node_id: &'a str,
+    /// 1 = light, 2 = heavy.
+    pub severity: i64,
+    /// `on_page`, `referenced` or `implied`.
+    pub depiction: &'a str,
+    /// Who said so, and in what capacity.
+    pub declaration: &'a str,
+    /// The author's note for a reader who wants to avoid the detail.
+    pub spoiler_safe_note: Option<&'a str>,
+}
+
+/// Declare a warning on a work.
+///
+/// The warning is **taxonomy-typed**: the node named is an ordinary taxonomy
+/// node of kind `warning`, so a warning is searchable with the rest of a
+/// work's metadata rather than living in free text that no query can reach.
+///
+/// `declaration` is kept as the author said it. `none_apply` and
+/// `creator_chose_not_to_say` are **different statements** and must not be
+/// collapsed: the second is deliberate silence, and collapsing them would let
+/// a creator's silence read as a clean bill of health.
+pub async fn declare_work_warning(db: &Database, input: WorkWarningInput<'_>) -> Result<()> {
+    let WorkWarningInput {
+        work_id,
+        unit_id,
+        warning_node_id,
+        severity,
+        depiction,
+        declaration,
+        spoiler_safe_note,
+    } = input;
+    let now = crate::identity::now_rfc3339();
+    let sql = db.sql(
+        "INSERT INTO work_warnings
+             (work_id, unit_id, warning_node_id, severity, depiction, declaration,
+              spoiler_safe_note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO work_warnings
+             (work_id::uuid, unit_id, warning_node_id, severity, depiction, declaration,
+              spoiler_safe_note, created_at, updated_at)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(work_id)
+                .bind(unit_id)
+                .bind(warning_node_id)
+                .bind(severity)
+                .bind(depiction)
+                .bind(declaration)
+                .bind(spoiler_safe_note)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(work_id)
+                .bind(unit_id)
+                .bind(warning_node_id)
+                .bind(severity)
+                .bind(depiction)
+                .bind(declaration)
+                .bind(spoiler_safe_note)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// The warnings declared on a work, with the node's name.
+///
+/// **The warnings are attached to the work, not to the filter.** A reader who
+/// filters nothing sees everything, *with the warnings attached* (spec §10.2) --
+/// so the listing is what every reader sees, and the filter is what some
+/// readers choose to do about it.
+pub async fn list_work_warnings(db: &Database, work_id: &str) -> Result<Vec<WorkWarning>> {
+    let sql = db.sql(
+        "SELECT w.work_id, w.unit_id, w.warning_node_id, tn.canonical, w.severity,
+                w.depiction, w.declaration, w.spoiler_safe_note
+           FROM work_warnings w
+           JOIN taxonomy_nodes tn ON tn.id = w.warning_node_id
+          WHERE w.work_id = ?
+          ORDER BY w.severity DESC, tn.canonical ASC",
+        "SELECT w.work_id::text, w.unit_id, w.warning_node_id, tn.canonical, w.severity,
+                w.depiction, w.declaration, w.spoiler_safe_note
+           FROM work_warnings w
+           JOIN taxonomy_nodes tn ON tn.id = w.warning_node_id
+          WHERE w.work_id::text = $1
+          ORDER BY w.severity DESC, tn.canonical ASC",
+    );
+    // The row is read through a named struct rather than a tuple of eight:
+    // clippy's type-complexity rule is right that a tuple of eight elements
+    // is not readable, and the alternative -- eight positional binds at the
+    // call site -- is where a swapped pair would hide.
+    #[derive(sqlx::FromRow)]
+    struct WarningRow {
+        work_id: String,
+        unit_id: Option<String>,
+        warning_node_id: String,
+        canonical: String,
+        severity: i64,
+        depiction: String,
+        declaration: String,
+        spoiler_safe_note: Option<String>,
+    }
+
+    let rows: Vec<WarningRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .map(|row| WorkWarning {
+            work_id: row.work_id,
+            unit_id: row.unit_id,
+            warning_node_id: row.warning_node_id,
+            canonical: row.canonical,
+            severity: row.severity,
+            depiction: row.depiction,
+            declaration: row.declaration,
+            spoiler_safe_note: row.spoiler_safe_note,
+        })
+        .collect())
+}
+
+/// A reader's content filter, as the pool query needs it.
+///
+/// **`(kind, norm)` and not a bare value.** The taxonomy's unique key is
+/// `(kind, norm)` -- the same name is a tag under one kind and a fandom
+/// under another -- so a filter that carried only its value could not say
+/// which of them it meant, and would exclude the wrong works.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentFilter {
+    /// The taxonomy kind: `tag`, `fandom` or `warning`.
+    pub kind: String,
+    /// The node's normalised name.
+    pub norm: String,
+}
+
+/// The works a tag listing shows a reader, and how many there are in total.
+///
+/// The **total** is the count *after* the filter, not before it: a reader
+/// who filters "graphic violence" sees a filtered list, and the count has to
+/// agree with the list or the reader is told there are forty works and shown
+/// twelve with no way to tell which twelve.
+pub struct FilteredWorks {
+    /// The page of works.
+    pub works: Vec<(String, String, String, String)>,
+    /// How many works match, before the page is cut.
+    pub total: i64,
+}
+
+/// List works tagged with a specific tag node, for the /tags/:tag surface (spec §43.1).
+///
+/// **The reader's filters are applied INSIDE the query** (spec §12.7): *"Filters
+/// apply inside the pool query, before scoring. Filtering a finished result
+/// list returns a subset of a *ranking*, which is not the same as a ranking
+/// over a smaller pool."*
+///
+/// That is not a performance argument, it is a correctness one. A filter
+/// applied after the list is built removes works from a *ranking* -- and the
+/// ranking was computed over a pool that included them, so the order the
+/// reader sees is the order of a pool they did not ask for. Filtering first
+/// changes what is ranked.
+///
+/// Every filter becomes its own `NOT EXISTS`, so the exclusion is expressed
+/// against the work rather than against a list of ids, and the count the
+/// query reports is the count of what survived.
+pub async fn works_by_tag_filtered(
+    db: &Database,
+    tag_canonical: &str,
+    limit: i64,
+    offset: i64,
+    filters: &[ContentFilter],
+) -> Result<FilteredWorks> {
+    // The two kinds of exclusion are different tables: a tag or a fandom is a
+    // `work_tags` row, and a warning is a `work_warnings` row.
+    //
+    // **The clauses and the binds are built together, in one order.** A
+    // statement's placeholders are bound by position, so a list of clauses
+    // and a list of values that are not in the same order bind each clause to
+    // the wrong value -- and the query still runs, and filters the wrong
+    // works. Building them together is what makes that impossible.
+    let mut sqlite_clauses: Vec<String> = Vec::new();
+    let mut postgres_clauses: Vec<String> = Vec::new();
+    let mut binds: Vec<String> = Vec::new();
+    // The PostgreSQL numbering starts at 2: `$1` is the tag the listing is
+    // for. It is written out here rather than rewritten later, because the
+    // two dialects' clauses are different statements -- see the note below.
+    let mut pg_index = 2usize;
+    for filter in filters {
+        match filter.kind.as_str() {
+            "tag" | "fandom" => {
+                sqlite_clauses.push(
+                    "NOT EXISTS (SELECT 1 FROM work_tags fwt \
+                       JOIN taxonomy_nodes ftn ON ftn.id = fwt.node_id \
+                      WHERE fwt.work_id = w.id AND ftn.kind = ? AND ftn.norm = ?)"
+                        .to_owned(),
+                );
+                postgres_clauses.push(format!(
+                    "NOT EXISTS (SELECT 1 FROM work_tags fwt \
+                       JOIN taxonomy_nodes ftn ON ftn.id = fwt.node_id \
+                      WHERE fwt.work_id = w.id AND ftn.kind = ${pg_index} AND ftn.norm = ${})",
+                    pg_index + 1
+                ));
+                pg_index += 2;
+                binds.push(filter.kind.clone());
+                binds.push(filter.norm.clone());
+            }
+            "warning" => {
+                sqlite_clauses.push(
+                    "NOT EXISTS (SELECT 1 FROM work_warnings fww \
+                       JOIN taxonomy_nodes ftn ON ftn.id = fww.warning_node_id \
+                      WHERE fww.work_id = w.id AND ftn.kind = 'warning' AND ftn.norm = ?)"
+                        .to_owned(),
+                );
+                postgres_clauses.push(format!(
+                    "NOT EXISTS (SELECT 1 FROM work_warnings fww \
+                       JOIN taxonomy_nodes ftn ON ftn.id = fww.warning_node_id \
+                      WHERE fww.work_id = w.id AND ftn.kind = 'warning' AND ftn.norm = ${pg_index})"
+                ));
+                pg_index += 1;
+                binds.push(filter.norm.clone());
+            }
+            // An unknown filter type is a **no-op**, not an error and not a
+            // blanket exclusion. The table's CHECK keeps the set closed, so
+            // this arm is unreachable in practice; and if it were reached, the
+            // honest reading of "a filter I do not understand" is "I do not
+            // know how to apply it", not "hide everything".
+            _ => {}
+        }
+    }
+
+    let sqlite_clause_text = if sqlite_clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", sqlite_clauses.join(" AND "))
+    };
+    let postgres_clause_text = if postgres_clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", postgres_clauses.join(" AND "))
+    };
+
+    let sqlite = format!(
+        "SELECT w.id, w.title, p.handle, w.updated_at, COUNT(*) OVER () AS total
+         FROM works w
+         JOIN work_tags wt ON wt.work_id = w.id
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN pseuds p ON p.id = w.owner_pseud_id
+         WHERE tn.norm = ? AND w.lifecycle = 'published' AND w.visibility = 'public'{sqlite_clause_text}
+         ORDER BY w.updated_at DESC
+         LIMIT ? OFFSET ?"
+    );
+    let postgres = format!(
+        "SELECT w.id::text, w.title, p.handle, w.updated_at, COUNT(*) OVER () AS total
+         FROM works w
+         JOIN work_tags wt ON wt.work_id = w.id
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN pseuds p ON p.id = w.owner_pseud_id::text
+         WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'{postgres_clause_text}
+         ORDER BY w.updated_at DESC
+         LIMIT ${} OFFSET ${}",
+        binds.len() + 2,
+        binds.len() + 3
+    );
+
+    // The `?` in the SQLite arm and the `$n` in the PostgreSQL arm are
+    // **different statements**: the filter clauses are built with `?`, and
+    // the PostgreSQL arm's own numbering is written out. So the PostgreSQL
+    // arm cannot go through `rewrite_placeholders` -- it would renumber the
+    // `?`s and collide with the `$n`s already there, which is the fault
+    // `scripts/check-pg-placeholder-mixing.py` exists to catch. The
+    // PostgreSQL statement is therefore built with explicit numbers from the
+    // start, and the SQLite one is rewritten as usual.
+    let sql = match db.backend() {
+        Backend::Sqlite => rewrite_placeholders(&sqlite),
+        Backend::Postgres => postgres,
+    };
+
+    // The query is built **inside** each arm: the two statements differ, and
+    // `sqlx`'s query type is tied to the executor it will run on.
+    let rows: Vec<(String, String, String, String, i64)> = match db.backend() {
+        Backend::Sqlite => {
+            let mut query = sqlx::query_as::<_, (String, String, String, String, i64)>(&sql)
+                .bind(tag_canonical);
+            for bind in &binds {
+                query = query.bind(bind);
+            }
+            query
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            let mut query = sqlx::query_as::<_, (String, String, String, String, i64)>(&sql)
+                .bind(tag_canonical);
+            for bind in &binds {
+                query = query.bind(bind);
+            }
+            query
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+
+    let total = rows.first().map(|row| row.4).unwrap_or(0);
+    Ok(FilteredWorks {
+        works: rows
+            .into_iter()
+            .map(|row| (row.0, row.1, row.2, row.3))
+            .collect(),
+        total,
+    })
 }
 
 /// List works tagged with a specific tag node, for the /tags/:tag surface (spec §43.1).

@@ -92,6 +92,7 @@ pub fn router() -> Router<AppState> {
         .route("/works/{id}/more-like-this", get(more_like_this))
         // The author's explicit relations (spec §6.2).
         .route("/works/{id}/relations", post(relate_work))
+        .route("/works/{id}/warnings", post(declare_warning))
         // The author's series membership (spec §6.2).
         .route("/works/{id}/series", post(put_work_in_series))
         // The author's own declaration that the work contains generated content
@@ -823,6 +824,93 @@ struct RelateWorkRequest {
 /// **The author's own statement**, like the AI declaration: the instance does
 /// not infer "this is the sequel" from a shared tag or a similar title, because
 /// an inferred sequel that is wrong is a reader sent to the wrong book.
+/// The request that declares a warning on a work.
+#[derive(Debug, Deserialize)]
+struct DeclareWarningRequest {
+    /// The taxonomy node naming the warning. It must be a node of kind
+    /// `warning`.
+    warning_node_id: String,
+    /// The unit it is scoped to, when it is scoped to one.
+    #[serde(default)]
+    unit_id: Option<String>,
+    /// 1 = light, 2 = heavy.
+    #[serde(default)]
+    severity: Option<i64>,
+    /// `on_page`, `referenced` or `implied`.
+    #[serde(default)]
+    depiction: Option<String>,
+    /// Who said so, and in what capacity. The author's own declaration is
+    /// `declared`; a reader's flag is `reader_flagged`.
+    #[serde(default)]
+    declaration: Option<String>,
+    /// The author's note for a reader who wants to avoid the detail.
+    #[serde(default)]
+    spoiler_safe_note: Option<String>,
+}
+
+/// Declare a warning on a work (spec §10.2).
+///
+/// **A warning is information, and the author is the one who says it.** The
+/// route is a contributor door: a reader cannot declare a warning on
+/// somebody else's work, because a warning is a statement about the work's
+/// content and only the author can make that statement.
+async fn declare_warning(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<DeclareWarningRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let work_id = parse_work_id(&id)?;
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+    let actor = user.actor(acting_pseud(&user)?);
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+    let _ = (&work, &actor);
+
+    // The severity is **clamped**, not trusted: a severity of nine is not a
+    // severity, and the filters compare it.
+    let severity = request.severity.unwrap_or(1).clamp(1, 2);
+    // The depiction and the declaration are **closed sets**. `none_apply` and
+    // `creator_chose_not_to_say` are different statements, and collapsing them
+    // would let a creator's silence read as a clean bill of health.
+    let depiction = match request.depiction.as_deref() {
+        Some("referenced") => "referenced",
+        Some("implied") => "implied",
+        _ => "on_page",
+    };
+    let declaration = match request.declaration.as_deref() {
+        Some("none_apply") => "none_apply",
+        Some("creator_chose_not_to_say") => "creator_chose_not_to_say",
+        Some("reader_flagged") => "reader_flagged",
+        _ => "declared",
+    };
+
+    darkhold_db::taxonomy::declare_work_warning(
+        state.db(),
+        darkhold_db::taxonomy::WorkWarningInput {
+            work_id: &work_id.to_string(),
+            unit_id: request.unit_id.as_deref(),
+            warning_node_id: &request.warning_node_id,
+            severity,
+            depiction,
+            declaration,
+            spoiler_safe_note: request.spoiler_safe_note.as_deref(),
+        },
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    Ok(Json(serde_json::json!({
+        "work_id": work_id.to_string(),
+        "warning_node_id": request.warning_node_id,
+        "severity": severity,
+        "depiction": depiction,
+        "declaration": declaration,
+    })))
+}
+
 async fn relate_work(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,

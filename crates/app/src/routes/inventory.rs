@@ -4494,6 +4494,20 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // The work's declared warnings (spec §10.2).
+    //
+    // A **contributor** door: a warning is a statement about the work's
+    // content, and only the author can make that statement. A reader cannot
+    // declare a warning on somebody else's work.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "works.rs",
+        handler: "declare_warning",
+        method: "POST",
+        path: "/works/{id}/warnings",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // The reading surface — server-rendered HTML (spec §8.5, §10.1).
     //
     // These are PAGES and not API responses, so they are merged at the root

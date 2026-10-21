@@ -762,7 +762,6 @@ so the count can only go down and every fix is visible.**
 | `work_orphans` | neither | a migration with a table: nothing in the instance uses it |
 | `work_passages` | neither | a migration with a table: nothing in the instance uses it |
 | `work_tag_votes` | neither | a migration with a table: nothing in the instance uses it |
-| `work_warnings` | neither | a migration with a table: nothing in the instance uses it |
 
 Pinned by `the_unreachable_tables_are_exactly_the_ones_the_known_gaps_file_claims`
 in `crates/app/tests/reachability.rs`, so the list fails **in both directions**: a

@@ -353,16 +353,24 @@ async fn list_works_by_tag(
 ) -> ApiResult<Json<serde_json::Value>> {
     let sort = resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "tags").await;
 
-    let works = darkhold_db::taxonomy::works_by_tag(
+    // **The reader's own filters**, and they are applied INSIDE the pool
+    // query (spec §10.2, §12.7). A warning is information and never a gate on
+    // the whole archive: a reader who filters "graphic violence" sees a
+    // *filtered list*, and the filter is visible and reversible.
+    let filters = reader_content_filters(state.db(), session.as_ref()).await?;
+
+    let listed = darkhold_db::taxonomy::works_by_tag_filtered(
         state.db(),
         &tag,
         params.limit.clamp(1, 200),
         params.offset.max(0),
+        &filters,
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e)))?;
 
-    let mut items: Vec<WorksByTagItem> = works
+    let mut items: Vec<WorksByTagItem> = listed
+        .works
         .into_iter()
         .map(
             |(work_id, title, author_handle, updated_at)| WorksByTagItem {
@@ -376,9 +384,50 @@ async fn list_works_by_tag(
 
     apply_works_sort(&mut items, &sort);
 
-    Ok(Json(
-        serde_json::json!({ "items": items, "sort": sort, "tag": tag }),
-    ))
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "sort": sort,
+        "tag": tag,
+        // The count is the count of what SURVIVED the filter, not the count
+        // before it. A reader told there are forty works and shown twelve,
+        // with nothing saying which twelve, has been told a lie.
+        "total": listed.total,
+        // **The filter is visible.** A reader who cannot see why a work is
+        // missing cannot undo the thing that hid it, and "the filter is
+        // visible and reversible" is the whole of spec §10.2.
+        "filters": filters
+            .iter()
+            .map(|filter| serde_json::json!({ "kind": filter.kind, "value": filter.norm }))
+            .collect::<Vec<serde_json::Value>>(),
+    })))
+}
+
+/// The reader's content filters, as the pool query needs them.
+///
+/// **Per reader, per face** (spec §10.2): the filters live in
+/// `content_filters`, keyed by the pseud, and they are not a global setting.
+/// A signed-out reader has none, and a reader whose filters are empty sees
+/// everything.
+async fn reader_content_filters(
+    db: &darkhold_db::Database,
+    session: Option<&crate::auth::SessionUser>,
+) -> ApiResult<Vec<darkhold_db::taxonomy::ContentFilter>> {
+    let Some(user) = session else {
+        return Ok(Vec::new());
+    };
+    let Some(pseud) = user.pseud_id else {
+        return Ok(Vec::new());
+    };
+    let rows = darkhold_db::settings::list_content_filters(db, pseud.as_uuid())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| darkhold_db::taxonomy::ContentFilter {
+            kind: row.filter_type,
+            norm: row.value,
+        })
+        .collect())
 }
 
 // --- Fandoms ------------------------------------------------------------
