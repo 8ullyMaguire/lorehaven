@@ -72,6 +72,25 @@ impl Client {
         }
     }
 
+    /// The `Cookie` header, the way a browser sends it: **one** header with
+    /// every cookie in it.
+    ///
+    /// Sending one header per cookie is a mistake that hides itself: the
+    /// server reads the *first* one, so the session cookie arrives and the
+    /// rest do not. A browser joins them, and so does this.
+    fn cookie_header(&self) -> Option<String> {
+        if self.cookies.is_empty() {
+            return None;
+        }
+        Some(
+            self.cookies
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect::<Vec<String>>()
+                .join("; "),
+        )
+    }
+
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
             let Ok(text) = value.to_str() else { continue };
@@ -102,8 +121,8 @@ impl Client {
         if form.is_some() {
             builder = builder.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
         }
-        for (name, value) in &self.cookies {
-            builder = builder.header(header::COOKIE, format!("{name}={value}"));
+        if let Some(cookie) = self.cookie_header() {
+            builder = builder.header(header::COOKIE, cookie);
         }
         if let Some(token) = self
             .cookies
@@ -149,8 +168,8 @@ impl Client {
             .method("POST")
             .uri(uri)
             .header(header::CONTENT_TYPE, "application/json");
-        for (name, value) in &self.cookies {
-            builder = builder.header(header::COOKIE, format!("{name}={value}"));
+        if let Some(cookie) = self.cookie_header() {
+            builder = builder.header(header::COOKIE, cookie);
         }
         if let Some(token) = self
             .cookies
@@ -181,8 +200,8 @@ impl Client {
             .method("PATCH")
             .uri(uri)
             .header(header::CONTENT_TYPE, "application/json");
-        for (name, value) in &self.cookies {
-            builder = builder.header(header::COOKIE, format!("{name}={value}"));
+        if let Some(cookie) = self.cookie_header() {
+            builder = builder.header(header::COOKIE, cookie);
         }
         if let Some(token) = self
             .cookies

@@ -4508,6 +4508,16 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
+    // A unit's spoiler gate (spec §10.1).
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "works.rs",
+        handler: "set_unit_gate",
+        method: "POST",
+        path: "/works/{id}/units/{unit}/gate",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // The reading surface — server-rendered HTML (spec §8.5, §10.1).
     //
     // These are PAGES and not API responses, so they are merged at the root
@@ -4529,6 +4539,13 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         method: "POST",
         path: "/works/{work_id}/units/{unit_id}/typography",
         // **Public, and deliberately so** -- see `save_position` below.
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_page.rs",
+        handler: "reveal_section",
+        method: "POST",
+        path: "/works/{work_id}/units/{unit_id}/reveal",
         audience: Audience::Public,
     },
     RouteEntry {

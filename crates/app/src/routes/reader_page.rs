@@ -55,6 +55,74 @@ use crate::http::{ApiError, ApiResult};
 use crate::routes::works::{actor_for, parse_unit_id, parse_work_id, reading_decision, Reading};
 use crate::state::AppState;
 
+/// The cookie that carries a reader's reveal.
+///
+/// **The reveal is per browser, not per account.** It is a decision about
+/// *this* reading -- "show me this part now" -- and it is deliberately not
+/// stored on the account: a reader who reveals a spoiler on one device has
+/// not said they want it revealed on every device, and a reader who has not
+/// revealed it on one device has not said they never want to.
+///
+/// The value is a comma-separated list of scopes: a unit id, or `*` for the
+/// whole work. A cookie is small and a reader's reveal list is short.
+pub const REVEAL_COOKIE: &str = "darkhold_reveal";
+
+/// What the reader has asked to see.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Reveals {
+    /// The units the reader has asked to see.
+    pub units: Vec<String>,
+    /// Whether the reader has asked to see the whole work.
+    pub whole_work: bool,
+}
+
+impl Reveals {
+    /// Read the reveals out of a cookie's value.
+    pub fn parse(raw: Option<&str>) -> Self {
+        let Some(raw) = raw else {
+            return Self::default();
+        };
+        let mut reveals = Self::default();
+        for part in raw.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if part == "*" {
+                reveals.whole_work = true;
+            } else {
+                reveals.units.push(part.to_owned());
+            }
+        }
+        reveals
+    }
+
+    /// Whether this unit is among the reveals.
+    pub fn covers(&self, unit_id: &str) -> bool {
+        self.whole_work || self.units.iter().any(|unit| unit == unit_id)
+    }
+
+    /// The cookie's value with one more scope added.
+    pub fn with(&self, scope: &str) -> String {
+        let mut parts: Vec<String> = self.units.clone();
+        if scope == "*" {
+            parts.push("*".to_owned());
+        } else if !parts.iter().any(|unit| unit == scope) {
+            parts.push(scope.to_owned());
+        }
+        parts.join(",")
+    }
+}
+
+/// The reveal cookie's value, out of the request's cookies.
+fn reveal_cookie(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let cookies = headers.get(header::COOKIE)?.to_str().ok()?;
+    cookies.split(';').find_map(|cookie| {
+        let (name, value) = cookie.split_once('=')?;
+        (name.trim() == REVEAL_COOKIE).then_some(value.trim())
+    })
+}
+
 /// The reading surface's routes.
 ///
 /// Mounted at the **root**, not under `/api/v1`: these are pages, and a page
@@ -70,6 +138,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/works/{work_id}/units/{unit_id}/typography",
             post(save_typography),
+        )
+        .route(
+            "/works/{work_id}/units/{unit_id}/reveal",
+            post(reveal_section),
         )
         .route("/works/{work_id}/units/{unit_id}/notes", post(save_note))
         .route(
@@ -132,6 +204,7 @@ async fn read_unit_page(
     State(state): State<AppState>,
     MaybeSession(session): MaybeSession,
     Path((work_id, unit_id)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
 ) -> ApiResult<Response> {
     let work_id = parse_work_id(&work_id)?;
     let unit_id = parse_unit_id(&unit_id)?;
@@ -197,6 +270,12 @@ async fn read_unit_page(
     let warnings =
         darkhold_db::taxonomy::list_work_warnings(state.db(), &work_id.to_string()).await?;
 
+    // **The gate.** A work can require a gate on a section (spec §10.1), and
+    // until the reader asks, **the text is not in the response** -- a hidden
+    // element with the text in it is not a gate.
+    let reveals = Reveals::parse(reveal_cookie(&headers));
+    let gated = unit.spoiler_gated && !reveals.covers(&unit_id.to_string());
+
     let stylesheet = crate::assets::app_stylesheet(&state).await;
     let body = render_page(
         &work,
@@ -213,6 +292,7 @@ async fn read_unit_page(
         narration.as_deref(),
         &warnings,
         session.is_some(),
+        gated,
     );
 
     Ok((
@@ -374,6 +454,64 @@ async fn save_typography(
     Ok(Redirect::to(&back).into_response())
 }
 
+/// What the reader asked to see.
+#[derive(Debug, Default, Deserialize)]
+pub struct RevealForm {
+    /// `unit` for this section, or `work` for every section of the work.
+    #[serde(default)]
+    pub scope: String,
+}
+
+/// Reveal a gated section, and return the reader to it.
+///
+/// **A form post, not a fetch** (spec §10.1): the gate has to work without
+/// JavaScript, and a gate that only opens with a script is a gate that only
+/// opens for some readers.
+///
+/// The scope is the reader's choice and it is honoured exactly: `unit` reveals
+/// this section, `work` reveals every section of the work. **A work can
+/// require a gate, and the reader can lift it for the reading** -- which is
+/// the difference between a gate and a wall.
+async fn reveal_section(
+    State(_state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+    Path((work_id, unit_id)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+    Form(form): Form<RevealForm>,
+) -> ApiResult<Response> {
+    let work_id = parse_work_id(&work_id)?;
+    let unit_id = parse_unit_id(&unit_id)?;
+    let back = format!("/works/{work_id}/units/{unit_id}");
+
+    let reveals = Reveals::parse(
+        headers
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|cookies| {
+                cookies.split(';').find_map(|cookie| {
+                    let (name, value) = cookie.split_once('=')?;
+                    (name.trim() == REVEAL_COOKIE).then_some(value.trim())
+                })
+            }),
+    );
+    let scope = if form.scope.trim() == "work" {
+        "*".to_owned()
+    } else {
+        unit_id.to_string()
+    };
+    let value = reveals.with(&scope);
+
+    let cookie = format!("{REVEAL_COOKIE}={value}; Path=/; SameSite=Lax; Max-Age=86400");
+    Ok((
+        StatusCode::SEE_OTHER,
+        [
+            (header::LOCATION, back.as_str()),
+            (header::SET_COOKIE, cookie.as_str()),
+        ],
+    )
+        .into_response())
+}
+
 /// Save a reader's note, and return them to the page.
 async fn save_note(
     State(state): State<AppState>,
@@ -443,6 +581,7 @@ fn render_page(
     narration: Option<&str>,
     warnings: &[darkhold_db::taxonomy::WorkWarning],
     signed_in: bool,
+    gated: bool,
 ) -> String {
     let mut page = Html::new();
 
@@ -579,18 +718,74 @@ fn render_page(
         page.close("h1");
     }
     page.open("div", &[("class", "reader-surface__body")]);
-    match sanitized_html {
-        // The one raw insertion on this page, and it is markup the SERVER
-        // produced (spec §8.3, ADR 0002).
-        Some(html) => {
-            page.raw(html);
-        }
-        // A unit with no revision yet has no body. The empty state explains
-        // itself (spec §21.1): "every empty state explains itself".
-        None => {
-            page.open("p", &[("class", "reader-surface__empty")]);
-            page.text("This unit has no text yet.");
-            page.close("p");
+    if gated {
+        // **The text is NOT here.** A gate that leaves the text in the page
+        // and hides it with CSS is a gate that a reader can walk past with
+        // the source view, and it is a gate that a screen reader reads aloud
+        // and a search engine indexes.
+        page.open("section", &[("class", "reader-surface__gate")]);
+        page.open("h2", &[])
+            .text("This part is behind a gate")
+            .close("h2");
+        page.open("p", &[]);
+        page.text(
+            "The author has marked this part of the work as a spoiler. It is not \
+             on this page until you ask for it.",
+        );
+        page.close("p");
+        page.open(
+            "form",
+            &[
+                ("class", "reader-surface__gate-form"),
+                ("method", "post"),
+                (
+                    "action",
+                    &format!("/works/{}/units/{}/reveal", work.id, unit.id),
+                ),
+            ],
+        );
+        page.void(
+            "input",
+            &[("type", "hidden"), ("name", "scope"), ("value", "unit")],
+        );
+        page.open("button", &[("type", "submit")]);
+        page.text("Show me this part");
+        page.close("button");
+        page.close("form");
+        page.open(
+            "form",
+            &[
+                ("class", "reader-surface__gate-form"),
+                ("method", "post"),
+                (
+                    "action",
+                    &format!("/works/{}/units/{}/reveal", work.id, unit.id),
+                ),
+            ],
+        );
+        page.void(
+            "input",
+            &[("type", "hidden"), ("name", "scope"), ("value", "work")],
+        );
+        page.open("button", &[("type", "submit")]);
+        page.text("Show me the whole work from now on");
+        page.close("button");
+        page.close("form");
+        page.close("section");
+    } else {
+        match sanitized_html {
+            // The one raw insertion on this page, and it is markup the SERVER
+            // produced (spec §8.3, ADR 0002).
+            Some(html) => {
+                page.raw(html);
+            }
+            // A unit with no revision yet has no body. The empty state explains
+            // itself (spec §21.1): "every empty state explains itself".
+            None => {
+                page.open("p", &[("class", "reader-surface__empty")]);
+                page.text("This unit has no text yet.");
+                page.close("p");
+            }
         }
     }
     page.close("div");

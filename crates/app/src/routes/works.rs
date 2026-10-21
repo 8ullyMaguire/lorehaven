@@ -93,6 +93,7 @@ pub fn router() -> Router<AppState> {
         // The author's explicit relations (spec §6.2).
         .route("/works/{id}/relations", post(relate_work))
         .route("/works/{id}/warnings", post(declare_warning))
+        .route("/works/{id}/units/{unit}/gate", post(set_unit_gate))
         // The author's series membership (spec §6.2).
         .route("/works/{id}/series", post(put_work_in_series))
         // The author's own declaration that the work contains generated content
@@ -908,6 +909,44 @@ async fn declare_warning(
         "severity": severity,
         "depiction": depiction,
         "declaration": declaration,
+    })))
+}
+
+/// The request that puts a unit behind a spoiler gate, or takes it out.
+#[derive(Debug, Deserialize)]
+struct UnitGateRequest {
+    /// Whether the unit is behind the gate.
+    #[serde(default)]
+    gated: bool,
+}
+
+/// Put a unit behind a spoiler gate, or take it out of one (spec §10.1).
+///
+/// **The author's door.** A gate says "this part of the work is behind a
+/// question", and that is a statement about the work: only somebody who
+/// writes the work can make it.
+async fn set_unit_gate(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path((id, unit)): Path<(String, String)>,
+    Json(request): Json<UnitGateRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _work_id = parse_work_id(&id)?;
+    let unit_id = parse_unit_id(&unit)?;
+    let (_work, contributors) = author_work(&state, &user, &id).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    let changed = content::set_unit_spoiler_gated(state.db(), unit_id, request.gated).await?;
+    if !changed {
+        return Err(ApiError(AppError::NotFound { resource: "unit" }));
+    }
+
+    Ok(Json(serde_json::json!({
+        "unit_id": unit_id.to_string(),
+        "gated": request.gated,
     })))
 }
 

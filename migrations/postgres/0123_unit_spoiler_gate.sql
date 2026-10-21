@@ -1,0 +1,27 @@
+-- 0123: a unit can be behind a spoiler gate (M5-05).
+--
+-- Spec §10.1: a **spoiler gate** hides part of a page until the reader asks.
+-- Spec §10.2: the gate's state is the reader's preference and the work's own
+-- requirement.
+--
+-- THE GATE IS A COLUMN AND NOT A FLAG ON THE BODY
+--
+-- The gate is recorded on the **unit**, because the unit is the smallest
+-- piece of a work's text this schema can address: the editor document's
+-- blocks carry no spoiler marker, and adding one would put a second kind of
+-- block in a document format that has to keep reading.
+--
+-- A reader's page shows ONE unit, so "hides part of a page" is the body's
+-- share of it: the title, the table of contents and the navigation stay, and
+-- the text is withheld until the reader asks. The text is **not in the
+-- response** -- a hidden element with the text in it is not a gate, and the
+-- card says so in as many words.
+--
+-- THE DEFAULT IS OFF
+--
+-- A gate is something a work asks for deliberately, so the default is a unit
+-- with no gate. Every work that exists today keeps reading exactly as it
+-- did, and no migration changes a row.
+--
+-- Dialect: PostgreSQL.
+ALTER TABLE units ADD COLUMN spoiler_gated BOOLEAN NOT NULL DEFAULT false;

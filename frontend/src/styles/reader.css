@@ -140,6 +140,88 @@
 }
 
 /*
+ * The spoiler gate.
+ *
+ * **The text is not in the page until the reader asks** -- so there is nothing
+ * here to hide, and nothing here that a screen reader would read aloud or a
+ * search engine would index. The gate is a form and a sentence.
+ */
+.reader-surface__gate {
+  padding: var(--space-5, 1.5rem);
+  border: 1px solid var(--reader-rule);
+  border-radius: var(--radius-md, 0.5rem);
+  background: color-mix(in srgb, var(--reader-text) 4%, transparent);
+}
+
+.reader-surface__gate h2 {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-family: var(--font-heading, Georgia, serif);
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: 600;
+}
+
+.reader-surface__gate p {
+  margin: 0 0 var(--space-4, 1rem);
+}
+
+.reader-surface__gate-form {
+  display: inline-block;
+  margin: 0 var(--space-3, 0.75rem) var(--space-2, 0.5rem) 0;
+}
+
+.reader-surface__gate-form button {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border: 1px solid var(--reader-rule);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: transparent;
+  color: var(--reader-link);
+  cursor: pointer;
+  font: inherit;
+}
+
+.reader-surface__gate-form button:hover,
+.reader-surface__gate-form button:focus-visible {
+  border-color: var(--reader-link);
+}
+
+/*
+ * The warnings. Above the text, and visible without asking.
+ */
+.reader-surface__warnings {
+  margin: 0 auto var(--space-5, 1.5rem);
+  padding: var(--space-4, 1rem) var(--space-5, 1.5rem);
+  max-width: calc(var(--reader-measure, 66ch) + 2 * var(--space-5, 1.5rem));
+  border: 1px solid var(--reader-rule);
+  border-radius: var(--radius-md, 0.5rem);
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.reader-surface__warnings-title {
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--reader-muted);
+}
+
+.reader-surface__warnings ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reader-surface__warning-name {
+  font-weight: 600;
+}
+
+.reader-surface__warning-note {
+  display: block;
+  color: var(--reader-muted);
+}
+
+/*
  * The way on. Both links are always present — a missing "next" would be a
  * reader guessing, and the absent one is marked rather than removed.
  */

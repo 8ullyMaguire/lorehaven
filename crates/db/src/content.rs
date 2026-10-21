@@ -199,6 +199,9 @@ struct UnitRow {
     created_at: String,
     updated_at: String,
     version: i64,
+    /// The gate, read as a boolean. SQLite stores it as an integer and
+    /// PostgreSQL as a boolean, and the two are cast at the boundary.
+    spoiler_gated: bool,
 }
 
 /// A unit.
@@ -220,6 +223,12 @@ pub struct Unit {
     pub plain_text: String,
     /// How many revisions exist.
     pub revision_count: i64,
+    /// Whether this unit is behind a spoiler gate (spec §10.1).
+    ///
+    /// The gate hides the unit's text until the reader asks for it. It is a
+    /// property of the **reading**, not of the listing: the listings show
+    /// units as they always did.
+    pub spoiler_gated: bool,
     /// Creation time, RFC 3339.
     pub created_at: String,
     /// Last change, RFC 3339.
@@ -485,6 +494,7 @@ fn decode_unit(row: UnitRow) -> ContentResult<Unit> {
         created_at: row.created_at,
         updated_at: row.updated_at,
         version: row.version,
+        spoiler_gated: row.spoiler_gated,
     })
 }
 
@@ -1038,6 +1048,7 @@ const UNIT_COLUMNS: &str = "c.id AS id, c.work_id AS work_id, c.order_key AS ord
     r.plain_text AS plain_text, \
     c.created_at AS created_at, c.updated_at AS updated_at, \
     c.version AS version, \
+    (c.spoiler_gated != 0) AS spoiler_gated, \
     (SELECT COUNT(*) FROM revisions cr WHERE cr.unit_id = c.id) AS revision_count";
 
 const UNIT_COLUMNS_PG: &str = "c.id::text AS id, c.work_id::text AS work_id, c.order_key, \
@@ -1045,7 +1056,43 @@ const UNIT_COLUMNS_PG: &str = "c.id::text AS id, c.work_id::text AS work_id, c.o
     r.word_count, \
     r.plain_text, \
     c.created_at, c.updated_at, c.version, \
+    c.spoiler_gated, \
     (SELECT COUNT(*) FROM revisions cr WHERE cr.unit_id = c.id) AS revision_count";
+
+/// Put a unit behind a spoiler gate, or take it out of one (spec §10.1).
+///
+/// **The gate is the author's to set.** A reader cannot gate somebody else's
+/// text: a gate says "this part of the work is behind a question", and that
+/// is a statement about the work, not about the reading.
+pub async fn set_unit_spoiler_gated(
+    db: &Database,
+    unit_id: UnitId,
+    gated: bool,
+) -> ContentResult<bool> {
+    let sql = db.sql(
+        "UPDATE units SET spoiler_gated = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+        "UPDATE units SET spoiler_gated = $1, updated_at = $2 WHERE id::text = $3 AND deleted_at IS NULL",
+    );
+    let now = crate::identity::now_rfc3339();
+    let gated_int: i64 = i64::from(gated);
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(gated_int)
+            .bind(&now)
+            .bind(unit_id.to_string())
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(gated)
+            .bind(&now)
+            .bind(unit_id.to_string())
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+    Ok(affected > 0)
+}
 
 /// Units of a work in reading order.
 pub async fn units_for_work(db: &Database, work: WorkId) -> ContentResult<Vec<Unit>> {
