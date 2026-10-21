@@ -180,25 +180,31 @@ pub async fn remove_content_filter(
     filter_type: &str,
     value: &str,
 ) -> Result<bool> {
+    // `db.sql`, not one literal for both arms: `?` is SQLite's placeholder
+    // and PostgreSQL rejects it outright (`syntax error at end of input`), so
+    // a shared literal silently disables the whole delete on that backend.
+    // **This arm used a raw `sqlx::query` with `?` in it**, so clearing a
+    // filter failed on PostgreSQL with a syntax error -- and no test reached
+    // it, because the filter had no writer and so nothing could be cleared.
+    let sql = db.sql(
+        "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
+        "DELETE FROM content_filters WHERE pseud_id = ?::uuid AND filter_type = ? AND value = ?",
+    );
     let affected = match db.backend() {
-        Backend::Sqlite => sqlx::query(
-            "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
-        )
-        .bind(pseud_id.to_string())
-        .bind(filter_type)
-        .bind(value)
-        .execute(db.sqlite_pool().expect("sqlite handle"))
-        .await?
-        .rows_affected(),
-        Backend::Postgres => sqlx::query(
-            "DELETE FROM content_filters WHERE pseud_id = ?::uuid AND filter_type = ? AND value = ?",
-        )
-        .bind(pseud_id.to_string())
-        .bind(filter_type)
-        .bind(value)
-        .execute(db.postgres_pool().expect("postgres handle"))
-        .await?
-        .rows_affected(),
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(pseud_id.to_string())
+            .bind(filter_type)
+            .bind(value)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(pseud_id.to_string())
+            .bind(filter_type)
+            .bind(value)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
     };
 
     Ok(affected > 0)

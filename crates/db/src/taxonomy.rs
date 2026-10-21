@@ -921,7 +921,7 @@ pub async fn declare_work_warning(db: &Database, input: WorkWarningInput<'_>) ->
               spoiler_safe_note, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         "INSERT INTO work_warnings
-             (work_id::uuid, unit_id, warning_node_id, severity, depiction, declaration,
+             (work_id, unit_id, warning_node_id, severity, depiction, declaration,
               spoiler_safe_note, created_at, updated_at)
          VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)",
     );
@@ -1159,7 +1159,7 @@ pub async fn works_by_tag_filtered(
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
          JOIN taxonomy_nodes tn ON tn.id = wt.node_id
-         JOIN pseuds p ON p.id = w.owner_pseud_id::text
+         JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'{postgres_clause_text}
          ORDER BY w.updated_at DESC
          LIMIT ${} OFFSET ${}",
@@ -1239,7 +1239,7 @@ pub async fn works_by_tag(
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
          JOIN taxonomy_nodes tn ON tn.id = wt.node_id
-         JOIN pseuds p ON p.id = w.owner_pseud_id::text
+         JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'
          ORDER BY w.updated_at DESC
          LIMIT $2 OFFSET $3",
@@ -1285,7 +1285,7 @@ pub async fn works_by_fandom(
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
          JOIN taxonomy_nodes tn ON tn.id = wt.node_id
-         JOIN pseuds p ON p.id = w.owner_pseud_id::text
+         JOIN pseuds p ON p.id = w.owner_pseud_id
          WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'
          ORDER BY w.updated_at DESC
          LIMIT $2 OFFSET $3",

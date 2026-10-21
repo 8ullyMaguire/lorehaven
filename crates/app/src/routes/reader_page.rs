@@ -619,7 +619,10 @@ async fn set_did_not_finish(
         Err(_) => darkhold_domain::dnf::DnfReason::Other.as_str().to_owned(),
     };
 
-    let _ = darkhold_db::dnf::upsert_dnf(
+    // **The error is logged, not swallowed.** A swallowed error here is a
+    // silent failure: the reader presses the button, the page comes back
+    // saying they have not marked it, and nothing says why.
+    if let Err(error) = darkhold_db::dnf::upsert_dnf(
         state.db(),
         user.account_id,
         pseud,
@@ -635,7 +638,10 @@ async fn set_did_not_finish(
         false,
         &darkhold_db::identity::now_rfc3339(),
     )
-    .await;
+    .await
+    {
+        tracing::error!(%error, "the did-not-finish mark was not saved");
+    }
 
     Ok(Redirect::to(&back).into_response())
 }

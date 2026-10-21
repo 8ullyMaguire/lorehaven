@@ -52,7 +52,7 @@ pub async fn upsert_dnf(
         "INSERT INTO did_not_finish
             (id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::boolean, $8::timestamptz, $9::timestamptz)
-         ON CONFLICT (pseud_id, work_id)
+         ON CONFLICT (pseud_id, work_id) WHERE deleted_at IS NULL
          DO UPDATE SET reason = excluded.reason,
                        note = excluded.note,
                        is_public = excluded.is_public,
@@ -131,10 +131,12 @@ pub async fn delete_dnf(
 /// Read a single DNF record (the pseud's own record for a work).
 pub async fn read_dnf(db: &Database, pseud_id: PseudId, work_id: WorkId) -> Result<Option<DnfRow>> {
     let sql = db.sql(
-        "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+        "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                reason, note, is_public, created_at, updated_at
          FROM did_not_finish
          WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
-        "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+        "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                reason, note, is_public, created_at, updated_at
          FROM did_not_finish
          WHERE pseud_id = $1::uuid AND work_id = $2::uuid AND deleted_at IS NULL",
     );
@@ -210,22 +212,26 @@ pub async fn list_dnf_for_work(
 ) -> Result<Vec<DnfRow>> {
     let sql = if include_private {
         db.sql(
-            "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+            "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                    reason, note, is_public, created_at, updated_at
              FROM did_not_finish
              WHERE work_id = ? AND deleted_at IS NULL
              ORDER BY created_at DESC",
-            "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+            "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                    reason, note, is_public, created_at, updated_at
              FROM did_not_finish
              WHERE work_id = $1::uuid AND deleted_at IS NULL
              ORDER BY created_at DESC",
         )
     } else {
         db.sql(
-            "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+            "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                    reason, note, is_public, created_at, updated_at
              FROM did_not_finish
              WHERE work_id = ? AND is_public = TRUE AND deleted_at IS NULL
              ORDER BY created_at DESC",
-            "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+            "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                    reason, note, is_public, created_at, updated_at
              FROM did_not_finish
              WHERE work_id = $1::uuid AND is_public = TRUE AND deleted_at IS NULL
              ORDER BY created_at DESC",
@@ -366,11 +372,13 @@ pub async fn work_allows_dnf_feedback(db: &Database, work_id: WorkId) -> Result<
 /// List all DNF records by a pseud (for their personal reading history).
 pub async fn list_dnf_by_pseud(db: &Database, pseud_id: PseudId) -> Result<Vec<DnfRow>> {
     let sql = db.sql(
-        "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+        "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                reason, note, is_public, created_at, updated_at
          FROM did_not_finish
          WHERE pseud_id = ? AND deleted_at IS NULL
          ORDER BY updated_at DESC",
-        "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
+        "SELECT id::text, account_id::text, pseud_id::text, work_id::text,
+                reason, note, is_public, created_at, updated_at
          FROM did_not_finish
          WHERE pseud_id = $1::uuid AND deleted_at IS NULL
          ORDER BY updated_at DESC",
