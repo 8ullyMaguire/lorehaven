@@ -744,6 +744,55 @@ pub async fn approve_wrangling(
     Ok(())
 }
 
+/// A dropped duplicate's recorded state: `prominence|source|role`.
+///
+/// An older journal holds the prominence alone, from before a dropped row had
+/// a provenance to lose; the missing parts fall back to the column's defaults
+/// in the restoring statement.
+fn parse_recorded_tag_state(raw: &str) -> (i64, Option<String>, Option<String>) {
+    let mut parts = raw.split('|');
+    let prominence = parts
+        .next()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0);
+    let source = parts.next().filter(|v| !v.is_empty()).map(str::to_owned);
+    let role = parts.next().filter(|v| !v.is_empty()).map(str::to_owned);
+    (prominence, source, role)
+}
+
+/// The state a tag row carries right now.
+///
+/// A merge that *moved* a row left the row's whole state on the target, so the
+/// revert reads it there rather than duplicating it into the journal.
+async fn read_tag_state(
+    db: &Database,
+    work_id: &str,
+    node_id: &str,
+) -> Result<Option<(i64, Option<String>, Option<String>)>> {
+    let sql = db.sql(
+        "SELECT prominence, source, role FROM work_tags WHERE work_id = ? AND node_id = ?",
+        "SELECT prominence, source, role FROM work_tags
+          WHERE work_id = $1::uuid AND node_id = $2",
+    );
+    let row: Option<(i64, String, String)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .bind(node_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .bind(node_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.map(|(prominence, source, role)| (prominence, Some(source), Some(role))))
+}
+
 /// Append one recorded action, so a revert is a read of what happened.
 ///
 /// Every mutation the merge performs records itself here. That is what makes
@@ -806,15 +855,18 @@ async fn apply_merge(
     from_node_id: &str,
     to_node_id: &str,
 ) -> Result<()> {
-    // Record every tag that is about to move, with the node it came from and the
-    // weight it had. The weight is part of what a revert has to restore: a tag
-    // put back at the default would quietly change the reader's own view of how
-    // strongly a work is a fantasy.
+    // Record every tag that is about to move, with the node it came from and
+    // the whole of its state. The prominence is part of what a revert has to
+    // restore: a tag put back at the default would quietly change the reader's
+    // own view of how strongly a work is a fantasy. And so are the provenance
+    // and the role, because a revert that restored the number alone would
+    // relabel an imported tag as the author's and demote its role to the
+    // column's default -- three quiet edits wearing the name of one undo.
     let find_sql = db.sql(
-        "SELECT work_id, weight FROM work_tags WHERE node_id = ?",
-        "SELECT work_id::text AS work_id, weight FROM work_tags WHERE node_id = ?",
+        "SELECT work_id, prominence, source, role FROM work_tags WHERE node_id = ?",
+        "SELECT work_id::text AS work_id, prominence, source, role FROM work_tags WHERE node_id = ?",
     );
-    let tagged: Vec<(String, i64)> = match db.backend() {
+    let tagged: Vec<(String, i64, String, String)> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&find_sql)
                 .bind(from_node_id)
@@ -855,7 +907,7 @@ async fn apply_merge(
         "DELETE FROM work_tags WHERE work_id = ?::uuid AND node_id = ?",
     );
 
-    for (work_id, weight) in &tagged {
+    for (work_id, weight, source, role) in &tagged {
         let already: i64 = match db.backend() {
             Backend::Sqlite => {
                 sqlx::query_as::<_, (i64,)>(&has_target_sql)
@@ -902,13 +954,25 @@ async fn apply_merge(
             // The work already carried the target. Moving the row would create
             // a second row for the same pair, and leaving it would leave the
             // work tagged with both spellings -- which is the state the merge
-            // exists to end. So the source row goes, its weight is recorded
-            // first, and the revert puts it back with that weight.
+            // exists to end. So the source row goes, its whole state is
+            // recorded first, and the revert puts it back exactly as it was.
             //
             // The source node itself is never deleted, so the history it
             // carries survives the merge.
             record_action(db, proposal_id, "retarget_tags", from_node_id, work_id).await?;
-            record_action(db, proposal_id, "set_weight", &weight.to_string(), work_id).await?;
+            // `dedupe_tags` is what this is: the dropped row was the same
+            // claim under another spelling. Its previous value carries all
+            // three facts the row had -- prominence, provenance, role --
+            // because the revert has three things to put back and a row pair
+            // to put them in.
+            record_action(
+                db,
+                proposal_id,
+                "dedupe_tags",
+                &format!("{weight}|{source}|{role}"),
+                work_id,
+            )
+            .await?;
             match db.backend() {
                 Backend::Sqlite => {
                     sqlx::query(&drop_sql)
@@ -1082,33 +1146,64 @@ pub async fn revert_wrangling(
         };
         if action == "retarget_tags" {
             // The tag went from `previous` to the target. Put it back on
-            // `previous` at the weight it had, recreating the row if the
+            // `previous` with the whole of its state, recreating the row if the
             // dedupe step deleted it instead of moving it.
+            //
+            // **A revert puts back three facts, not one.** The row carries a
+            // prominence, a provenance and a role; restoring the number alone
+            // would relabel an imported tag as the author's and demote its
+            // role to the column's default -- two claims quietly edited by an
+            // operation whose whole promise is that nothing changed.
+            let deduped = actions
+                .iter()
+                .find(|(a, sub, _)| {
+                    (a == "dedupe_tags" || a == "set_weight")
+                        && sub.as_deref() == Some(subject.as_str())
+                })
+                .and_then(|(_, _, value)| value.as_deref())
+                .map(parse_recorded_tag_state);
+
+            // A moved row still carries its own state on the target, so the
+            // revert reads it there. A dropped duplicate's state is not the
+            // target's, which is why the merge recorded it beside the drop.
+            let state = match &deduped {
+                Some(state) => Some(state.clone()),
+                None => read_tag_state(db, subject, &target).await?,
+            };
+            let (prominence, source, role) = state.unwrap_or((0, None, None));
+
             {
-                let weight = actions
-                    .iter()
-                    .find(|(a, sub, _)| {
-                        a == "set_weight" && sub.as_deref() == Some(subject.as_str())
-                    })
-                    .and_then(|(_, _, value)| value.as_deref())
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(0);
                 let work_uuid = uuid::Uuid::parse_str(subject)
                     .map_err(|_| anyhow::anyhow!("recorded a non-uuid work id"))?;
                 let previous_uuid = uuid::Uuid::parse_str(previous)
                     .map_err(|_| anyhow::anyhow!("recorded a non-uuid node id"))?;
 
+                // `COALESCE` rather than a Rust default, because the fallback
+                // is the *column's* default and naming it here is the only way
+                // to say so in one statement. A journal written before
+                // provenance existed holds the prominence alone, and the row it
+                // restores is the row the old schema would have written.
                 let restore_sql = db.sql(
-                    "INSERT OR REPLACE INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, ?, ?)",
-                    "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?::uuid, ?::uuid, ?, ?::timestamptz)
-                     ON CONFLICT (work_id, node_id) DO UPDATE SET weight = excluded.weight",
+                    "INSERT OR REPLACE INTO work_tags
+                       (work_id, node_id, prominence, source, role, added_at)
+                     VALUES (?, ?, ?, COALESCE(?, 'author'), COALESCE(?, 'secondary'), ?)",
+                    "INSERT INTO work_tags
+                       (work_id, node_id, prominence, source, role, added_at)
+                     VALUES ($1::uuid, $2::uuid, $3, COALESCE($4, 'author'),
+                             COALESCE($5, 'secondary'), $6::timestamptz)
+                     ON CONFLICT (work_id, node_id) DO UPDATE
+                       SET prominence = excluded.prominence,
+                           source = excluded.source,
+                           role = excluded.role",
                 );
                 match db.backend() {
                     Backend::Sqlite => {
                         sqlx::query(&restore_sql)
                             .bind(subject)
                             .bind(previous)
-                            .bind(weight)
+                            .bind(prominence)
+                            .bind(source.as_deref())
+                            .bind(role.as_deref())
                             .bind(&reverted_at)
                             .execute(db.sqlite_pool().expect("sqlite handle"))
                             .await?;
@@ -1117,7 +1212,9 @@ pub async fn revert_wrangling(
                         sqlx::query(&restore_sql)
                             .bind(work_uuid)
                             .bind(previous_uuid)
-                            .bind(weight)
+                            .bind(prominence)
+                            .bind(source.as_deref())
+                            .bind(role.as_deref())
                             .bind(&reverted_at)
                             .execute(db.postgres_pool().expect("postgres handle"))
                             .await?;
@@ -1125,14 +1222,11 @@ pub async fn revert_wrangling(
                 }
 
                 // The target row goes only if the merge created it. A recorded
-                // `set_weight` beside this subject means the merge deleted the
+                // dedupe beside this subject means the merge deleted the
                 // source instead of moving it, which is what happens to a work
                 // that already carried the target -- and that work must keep
                 // that tag, because it had it before anyone merged anything.
-                let had_target = actions.iter().any(|(a, sub, _)| {
-                    a == "set_weight" && sub.as_deref() == Some(subject.as_str())
-                });
-                if !had_target {
+                if deduped.is_none() {
                     let drop_sql = db.sql(
                         "DELETE FROM work_tags WHERE work_id = ? AND node_id = ?",
                         "DELETE FROM work_tags WHERE work_id = ?::uuid AND node_id = ?",

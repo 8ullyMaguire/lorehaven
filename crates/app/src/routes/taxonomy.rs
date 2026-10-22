@@ -2,13 +2,15 @@
 //!
 //! Spec §15.1–15.3.
 
-use crate::auth::RequireSession;
+use crate::auth::{RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use darkhold_db::taxonomy;
+use darkhold_db::taxonomy::{self, TagAssertion, TagRole, TagSource};
+use darkhold_db::{collaboration, media_resilience};
+use darkhold_domain::WorkId;
 use serde::Deserialize;
 
 pub fn router() -> Router<AppState> {
@@ -57,11 +59,12 @@ pub struct TagWorkBody {
     /// The old spelling, still accepted.
     #[serde(default)]
     weight: Option<i64>,
-    /// Where the claim came from: `author` · `curator` · `imported` ·
-    /// `exchanged` · `inferred`.
-    #[serde(default)]
-    source: Option<String>,
     /// The claim's role: `primary` · `secondary` · `background`.
+    ///
+    /// The caller may say how strongly the work leans on a tag; it may not
+    /// say *where the claim came from*. That is the request's provenance, and
+    /// provenance is a property of the code path that made the claim, not of
+    /// the JSON it carried.
     #[serde(default)]
     role: Option<String>,
 }
@@ -117,35 +120,63 @@ async fn create_taxonomy_alias(
     Ok(Json(serde_json::json!({ "alias": alias })))
 }
 
+/// Tag a work, as one of its authors or as a curator.
+///
+/// **The provenance is derived, never accepted.** `source` says where a claim
+/// came from, so letting the request name it would make the column a claim
+/// about a claim: a session could post `{"source": "imported"}` and launder a
+/// person's assertion into the importer's, or post `{"source": "curator"}` and
+/// dress it in authority it does not have. The two code paths that may tag a
+/// work here are the author's (this pseud is one of the work's contributors)
+/// and a curator's (this account holds an active curator role); anything else
+/// is refused, because the specification's fifth provenance value is not
+/// "a signed-in reader" -- a reader's channel is a vote
+/// (`work_tag_votes`), which feeds `confidence` and never gravity
+/// (ADR 0026).
 async fn tag_work(
     State(state): State<AppState>,
-    RequireSession(_): RequireSession,
+    RequirePseud { user, pseud_id }: RequirePseud,
     Path(id): Path<String>,
     Json(body): Json<TagWorkBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let work_id: String = id
+    let work_id: WorkId = id
         .parse()
         .map_err(|_| ApiError(darkhold_domain::AppError::NotFound { resource: "work" }))?;
-    // **The provenance is the caller's, and an unrecognised one is not
-    // stored as an unrecognised one.** A source the instance does not know
-    // would be read by every surface that shows a tag, and each would have
-    // its own idea of what it means.
-    let source = body
-        .source
-        .as_deref()
-        .map(darkhold_db::taxonomy::TagSource::parse)
-        .unwrap_or(darkhold_db::taxonomy::TagSource::Imported);
-    let role = body
-        .role
-        .as_deref()
-        .map(darkhold_db::taxonomy::TagRole::parse)
-        .unwrap_or(darkhold_db::taxonomy::TagRole::Primary);
-    let assertion = darkhold_db::taxonomy::TagAssertion {
+
+    let contributors = collaboration::contributors_for_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    let source = if contributors.iter().any(|c| c.pseud_id == pseud_id) {
+        TagSource::Author
+    } else {
+        let account_id = user.account_id.to_string();
+        let is_curator = media_resilience::is_active_curator(state.db(), &account_id)
+            .await
+            .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
+        if !is_curator {
+            // Not an author of this work and not a curator: there is no
+            // provenance value that would describe the claim honestly, so
+            // there is no claim.
+            return Err(ApiError(darkhold_domain::AppError::AccessDenied));
+        }
+        TagSource::Curator
+    };
+
+    // The role is a strength, not a provenance, so the caller may choose it --
+    // but the default is the modest one: a bare tag is not the work's headline
+    // description until someone says it is. (The importer and the inheritance
+    // path assert `primary` when they copy a source's own tags; that is the
+    // source's claim being carried over, not this route's judgement.)
+    let assertion = TagAssertion {
         prominence: body.prominence.or(body.weight).unwrap_or(0),
         source,
-        role,
+        role: body
+            .role
+            .as_deref()
+            .map(TagRole::parse)
+            .unwrap_or(TagRole::Secondary),
     };
-    let tag = taxonomy::tag_work(state.db(), &work_id, &body.node_id, assertion)
+    let tag = taxonomy::tag_work(state.db(), &work_id.to_string(), &body.node_id, assertion)
         .await
         .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "tag": tag })))

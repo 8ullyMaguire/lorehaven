@@ -101,3 +101,56 @@ that rewrote content would be a migration with a data-loss story.
 source's `chapter_count` (spec §15.2 lists "chapter count" among the fields a
 signal may carry), and the source adapters keep the site's word — an adapter's
 job is to translate it.
+
+---
+
+## M6 — a tag says where it came from, and the caller cannot say it (M6-04, `DM6-04`)
+
+Spec §6.4: a **tag assertion** is *"a work's claim about an entity, with
+provenance and confidence"*. `work_tags` already carried `source` and
+`confidence`; it now carries the specification's whole vocabulary, under the
+specification's names.
+
+### What changed in the API
+
+**`POST /api/v1/works/{id}/tags` no longer reads `source` from the body.** The
+route derives it: the work's own author gets `author`, an active curator gets
+`curator`, and anyone else is **refused** — the specification has no provenance
+value for "a signed-in reader", and a reader's channel is a tag *vote*, which
+feeds `confidence` and nothing else (ADR 0026, ADR 0029).
+
+```jsonc
+// before — the body chose its own provenance
+{ "node_id": "…", "weight": 40, "source": "imported" }
+
+// after — the body names a strength and a role; the code path names the source
+{ "node_id": "…", "prominence": 40, "role": "primary" }
+```
+
+**The response's `tag` object names the assertion in the specification's
+words**: `prominence` where it used to say `weight`, plus `source` and `role`.
+A client that reads `tag.weight` has to read `tag.prominence`.
+
+**And the door is pseudonymous, not merely authenticated**: a session with no
+selected pseud has no one to attribute a claim to, and is refused.
+
+### What did not change
+
+**The URL.** `/api/v1/works/{id}/tags` is the same door.
+
+**The rows.** Migration `0126` renames two columns and replaces one constraint.
+**It does not rewrite the data**: the tag's number keeps its number and a row
+that said `source = 'author'` still says it. Nothing is rebuilt — SQLite renames
+a column in place, and the source's constraint there is a trigger.
+
+| before | after |
+|---|---|
+| `prominence` (TEXT: `primary`·`secondary`·`background`) | `role` |
+| `weight` (INTEGER) | `prominence` |
+| `source` = `'author'` only | `author`·`curator`·`imported`·`exchanged`·`inferred` |
+
+The two names were **swapped** against the card and against the specification:
+the estate's `prominence` was a role and its `weight` was a prominence. The
+rename also repaired a live bug — the merge-revert path wrote the number into
+the categorical column on one dialect — and a merge's revert now restores a
+dropped duplicate's provenance and role along with its prominence.

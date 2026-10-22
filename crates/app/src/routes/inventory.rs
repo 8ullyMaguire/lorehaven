@@ -1947,7 +1947,11 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "tag_work",
         method: "POST",
         path: "/works/{id}/tags",
-        audience: Audience::Authenticated,
+        // **Pseudonymous, not merely authenticated**: the provenance this
+        // route records is `author` or `curator`, and both are claims a
+        // *pseud* makes. An account with no pseud selected has no one to
+        // attribute the claim to (spec §6.4, ADR 0029).
+        audience: Audience::Pseudonymous,
     },
     // ------------------------------------------------------------------
     // Events — public reads, session-scoped writes

@@ -1760,15 +1760,21 @@ export function autocompleteTaxonomy(
   return apiFetch<{ items: TaxonomyNode[] }>(`/taxonomy?${params}`, { signal });
 }
 
-/** Tag a work with a taxonomy node. */
+/** Tag a work with a taxonomy node.
+ *
+ * `prominence` is how strongly the work leans on the tag (spec §6.4). The
+ * server also still accepts the old spelling `weight`, and the *provenance* is
+ * not sent at all: it comes from the code path — an author's tag is the
+ * author's, a curator's is a curator's, and nobody else may tag a work.
+ */
 export function tagWork(
   workId: string,
   nodeId: string,
-  weight = 0,
+  prominence = 0,
 ): Promise<unknown> {
   return apiFetch(`/works/${encodeURIComponent(workId)}/tags`, {
     method: 'POST',
-    body: JSON.stringify({ node_id: nodeId, weight }),
+    body: JSON.stringify({ node_id: nodeId, prominence }),
   });
 }
 

@@ -3,6 +3,10 @@
 - Status: accepted
 - Date: 2026-10-01
 - Amends: nothing; constrains `docs/plans/advanced-search-*.md`
+- Amended by: [ADR 0029](0029-tag-provenance-is-derived-never-accepted.md) —
+  the five-value `source` vocabulary (§2, last paragraph), with the
+  never-a-gravity-input invariant kept by the vocabulary instead of by a
+  one-value `CHECK`
 - Plan: `docs/plans/advanced-search-phase1-substrate.md`
 
 ## Context
@@ -68,8 +72,11 @@ So the split is:
   contribution cap stays as specified.
 * `work_tags.source` remains constrained to `'author'` in the database, so
   "a reader tag is never a gravity input" is an invariant rather than a convention
-  every write path must remember. **Reader *confirmation* of an author tag is a
-  separate, still-unspecified question — see the amendment in §15.4a.**
+  every write path must remember. **Superseded by ADR 0029**: the vocabulary is now
+  the specification's five values — author, curator, imported, exchanged, inferred —
+  and there is still no `reader` among them, so the invariant holds by the vocabulary
+  itself. **Reader *confirmation* of an author tag is a separate, still-unspecified
+  question — see the amendment in §15.4a.**
 
 ### 3. ML-inferred tags and embeddings: DEFERRED, not refused
 

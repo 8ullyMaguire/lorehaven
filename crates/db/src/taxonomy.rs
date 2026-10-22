@@ -40,11 +40,21 @@ pub struct EntityAlias {
 }
 
 /// A work tag.
+///
+/// The assertion as the store wrote it, so a caller can show what it claimed
+/// rather than what it hoped it claimed: the prominence, the provenance the
+/// code path supplied, and the role.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkTag {
     pub work_id: String,
     pub node_id: String,
-    pub weight: i64,
+    /// How strongly the work leans on the tag (spec §6.4's `prominence`).
+    pub prominence: i64,
+    /// Where the claim came from: `author` · `curator` · `imported` ·
+    /// `exchanged` · `inferred`.
+    pub source: String,
+    /// The claim's role: `primary` · `secondary` · `background`.
+    pub role: String,
     pub added_at: String,
 }
 
@@ -770,11 +780,13 @@ pub struct TagAssertion {
 }
 
 impl Default for TagAssertion {
+    /// The assertion that says the least: nobody claimed it, and the tag is not
+    /// the work's headline description.
     fn default() -> Self {
         Self {
             prominence: 0,
             source: TagSource::Imported,
-            role: TagRole::Primary,
+            role: TagRole::Secondary,
         }
     }
 }
@@ -820,7 +832,9 @@ pub async fn tag_work(
     Ok(WorkTag {
         work_id: work_id.to_owned(),
         node_id: node_id.to_owned(),
-        weight: assertion.prominence,
+        prominence: assertion.prominence,
+        source: assertion.source.as_str().to_owned(),
+        role: assertion.role.as_str().to_owned(),
         added_at: now,
     })
 }

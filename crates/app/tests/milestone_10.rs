@@ -194,6 +194,34 @@ async fn register(client: &mut Client, email: &str, handle: &str) -> (String, St
 }
 
 async fn published_work(harness: &Harness, email: &str, handle: &str, title: &str) -> String {
+    published_work_as_author(harness, email, handle, title)
+        .await
+        .0
+}
+
+/// Create a taxonomy node of kind `tag` and return its id.
+async fn create_tag_node(client: &mut Client, canonical: &str) -> String {
+    let (status, body) = client
+        .post(
+            "/api/v1/taxonomy",
+            json!({ "kind": "tag", "canonical": canonical }),
+        )
+        .await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "create the node {canonical}: {body}"
+    );
+    body["node"]["id"].as_str().expect("node id").to_owned()
+}
+
+/// The same, handing back the author's client so the test can act as the
+/// work's own author -- the only non-curator who may tag it.
+async fn published_work_as_author(
+    harness: &Harness,
+    email: &str,
+    handle: &str,
+    title: &str,
+) -> (String, Client) {
     let mut author = harness.client();
     let _ = register(&mut author, email, handle).await;
     let (status, body) = author
@@ -227,7 +255,7 @@ async fn published_work(harness: &Harness, email: &str, handle: &str, title: &st
         )
         .await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
-    work_id
+    (work_id, author)
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +296,8 @@ async fn search_by_title_finds_matching_work() {
 #[tokio::test]
 async fn search_fielded_fandom_uses_exists() {
     let harness = Harness::new("search-fielded").await;
-    let work_id = published_work(&harness, "a@example.com", "AuthorA", "Tagged Work").await;
+    let (work_id, mut author) =
+        published_work_as_author(&harness, "a@example.com", "AuthorA", "Tagged Work").await;
     let mut client = harness.client();
     let _ = register(&mut client, "b@example.com", "AuthorB").await;
     // Create a fandom node.
@@ -280,8 +309,10 @@ async fn search_fielded_fandom_uses_exists() {
         .await;
     assert_eq!(status, StatusCode::OK, "create node: {body}");
     let node_id = body["node"]["id"].as_str().expect("id");
-    // Tag the work.
-    let (status, _) = client
+    // Tag the work. **As its author**: the route derives the provenance from
+    // the code path, and a signed-in stranger has no provenance value that
+    // would describe the claim (ADR 0026, ADR 0029).
+    let (status, _) = author
         .post(
             &format!("/api/v1/works/{work_id}/tags"),
             json!({ "node_id": node_id }),
@@ -296,6 +327,77 @@ async fn search_fielded_fandom_uses_exists() {
         !items.is_empty(),
         "expected match for fandom:harrypotter: {body}"
     );
+    harness.cleanup().await;
+}
+
+/// **The provenance is the request's, not the body's.**
+///
+/// The route derives `source` from the code path -- the author's tag is an
+/// author's, a curator's is a curator's -- and a signed-in stranger has no
+/// provenance value at all, because the specification's fifth value is not
+/// "a reader" (ADR 0026, ADR 0029). A body that names its own `source` is not
+/// obeyed.
+#[tokio::test]
+async fn a_tag_records_where_it_came_from_and_a_stranger_cannot_claim_it() {
+    let harness = Harness::new("tag-provenance").await;
+    let (work_id, mut author) =
+        published_work_as_author(&harness, "a@example.com", "AuthorA", "Prov Work").await;
+    let mut stranger = harness.client();
+    let _ = register(&mut stranger, "b@example.com", "AuthorB").await;
+
+    // One node per claim, because a tag is unique per (work, node).
+    let authored = create_tag_node(&mut author, "authored").await;
+    let (status, body) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/tags"),
+            json!({ "node_id": authored, "prominence": 40 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "the author's own tag");
+    assert_eq!(body["tag"]["prominence"], 40, "{body}");
+    assert_eq!(body["tag"]["source"], "author", "{body}");
+    assert_eq!(
+        body["tag"]["role"], "secondary",
+        "**the modest default**: a tag is not the work's headline description \
+         until its author says so: {body}"
+    );
+
+    let laundered = create_tag_node(&mut author, "laundered").await;
+    let (status, body) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/tags"),
+            // A source in the body is not an instruction; the role is.
+            json!({ "node_id": laundered, "source": "imported", "role": "primary" }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the author's tag with a source named"
+    );
+    assert_eq!(
+        body["tag"]["source"], "author",
+        "**the body cannot name its own provenance**: the code path decides it: {body}"
+    );
+    assert_eq!(
+        body["tag"]["role"], "primary",
+        "the role is the caller's: {body}"
+    );
+
+    let refused = create_tag_node(&mut stranger, "refused").await;
+    let (status, body) = stranger
+        .post(
+            &format!("/api/v1/works/{work_id}/tags"),
+            json!({ "node_id": refused }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "**a stranger has no provenance**: a reader's channel is a vote, and a \
+         vote is not a tag: {body}"
+    );
+
     harness.cleanup().await;
 }
 

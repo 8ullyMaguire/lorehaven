@@ -1,94 +1,93 @@
 -- 0126: the work-tag assertions carry their provenance (M6-04).
 --
 -- Spec §6.4: a **tag assertion** is "a work's claim about an entity, with
--- provenance and confidence".
+-- provenance and confidence", and the work_tag it describes carries
+-- `source` (author · curator · imported · exchanged · inferred),
+-- `confidence` (0..1), `role` (primary · secondary · background) and
+-- `prominence`.
 --
 -- THE ESTATE ALREADY HAD THREE OF THE FOUR COLUMNS, AND THE CARD'S NAMES
 -- ARE SWAPPED AGAINST THEM.
 --
 -- `work_tags` already carried `source` (TEXT, CHECKed to `'author'`), and
 -- `confidence` (REAL). And it carried a `prominence` (TEXT) whose CHECK is
--- `('primary', 'secondary', 'background')` -- which is the card's **`role`**,
--- word for word. So the card's end state is:
+-- `('primary', 'secondary', 'background')` -- which is the specification's
+-- **`role`**, word for word. So the end state is:
 --
---   * `role` (TEXT: primary | secondary | background) -- the estate's old
---     `prominence`, renamed to free the name;
---   * `prominence` (INTEGER) -- the estate's old `weight`, which was always a
+--   * `role` (TEXT: primary | secondary | background) -- the old
+--     `prominence`, renamed to free the name for the number;
+--   * `prominence` (INTEGER) -- the old `weight`, which was always a
 --     prominence and was called the other thing;
 --   * `source` (TEXT), widened from one value to five;
 --   * `confidence` (REAL), unchanged.
 --
--- The vocabulary of `source` is `author` · `curator` · `imported` ·
--- `exchanged` · `inferred`. **The distinction is the one that matters to a
--- reader**: a tag the *author* put on their own work is a statement of fact
--- about the work, and a tag the importer guessed from a source's own metadata
--- is a guess. Both are in the table, and a surface that shows a work's tags
--- can say which is which.
+-- THE TABLE IS NOT REBUILT, AND THAT IS A DECISION
 --
--- THE TABLE IS REBUILT, AND THAT IS THE EXPENSIVE PART
+-- Migration 0103 already refused to rebuild this table: *"rebuilding
+-- `work_tags` on SQLite means recreating a table other migrations and the
+-- store both depend on, for a constraint the store already guarantees."*
+-- This migration needs no rebuild either -- SQLite can rename a column
+-- (3.25 and later, and the bundled engine is 3.46), and `source`'s CHECK is
+-- a **trigger**, which is dropped and recreated. The table is the largest
+-- in the schema, and copying it to change a column's name is a cost the
+-- rename does not ask for.
 --
--- `source`'s CHECK is `source = 'author'`, and SQLite cannot widen a CHECK
--- without a rebuild -- the same "a 12-step table rebuild per table" the
--- estate's own notes warn about. So the table is rebuilt, and the rebuild is
--- honest about what it preserves:
+-- THE DEFAULTS STAY THE ESTATE'S, AND THAT IS A DECISION TOO
 --
---   * every row, with its prominence and its confidence;
---   * the `confirmation` state and the `flagged_by`/`flagged_at` pair, which
---     are the reader's own record of whether a tag is right (§49.2);
---   * the `status` column.
+-- `role` keeps `DEFAULT 'secondary'` and `source` keeps `DEFAULT 'author'`.
+-- The card asks for `'primary'` and `'imported'`. A default must not
+-- manufacture a claim -- migration 0099's own note says so, and it is why
+-- `confirmation` defaults to `'unconfirmed'` rather than to `'reader'` --
+-- and both of the estate's defaults are the modest ones: a tag is not
+-- central until somebody says it is, and an unlabelled tag is not an
+-- authorship claim until somebody says it is. Changing a column's default
+-- needs a table rebuild on SQLite, and 0103 refused to rebuild this table
+-- for a constraint the store already guarantees; the store now writes
+-- `source` on every path, so the guarantee is in the store.
 --
--- `work_tags` has no foreign keys *pointing at it* and only one of its own
--- (`node_id` -> `taxonomy_nodes`), so the rebuild strands nothing. The
--- indexes are recreated under their own names, and the new ones
--- (`work_tags_node_work`) are created after the rename.
+-- THE DATA IS NOT REWRITTEN
 --
--- The data is not rewritten: the prominence keeps its number, the confidence
--- keeps its value, and a row that said `source = 'author'` still says it.
+-- The renames are a change of vocabulary and not of content: the number
+-- keeps its number, the confidence keeps its value, and a row that said
+-- `source = 'author'` still says it.
 --
 -- Dialect: SQLite.
-CREATE TABLE work_tags_rebuilt (
-    work_id       TEXT NOT NULL,
-    node_id       TEXT NOT NULL REFERENCES canonical_entities(id) ON DELETE CASCADE,
-    -- The tag's prominence: how much the work leans on it. The old `weight`.
-    prominence    INTEGER NOT NULL DEFAULT 0,
-    added_at      TEXT NOT NULL,
-    -- The reader's own record of whether a tag is right (§49.2).
-    confirmation  TEXT NOT NULL DEFAULT 'unconfirmed'
-        CHECK (confirmation IN ('unconfirmed', 'reader', 'wrangler', 'inaccurate')),
-    flagged_by    TEXT,
-    flagged_at    TEXT,
-    -- The claim's role in the work's description: primary, secondary or
-    -- background. The primary/secondary split is the theme overlap rule
-    -- (§2.2): a tag's primary theme is the theme whose seed claims it.
-    role          TEXT NOT NULL DEFAULT 'secondary'
-        CHECK (role IN ('primary', 'secondary', 'background')),
-    -- Where the claim came from.
-    source        TEXT NOT NULL DEFAULT 'imported'
-        CHECK (source IN ('author', 'curator', 'imported', 'exchanged', 'inferred')),
-    -- How sure the claim is. Fed by the votes and by nothing else.
-    confidence    REAL NOT NULL DEFAULT 1.0,
-    status        TEXT NOT NULL DEFAULT 'applied',
-    PRIMARY KEY (work_id, node_id)
-);
 
-INSERT INTO work_tags_rebuilt
-    (work_id, node_id, prominence, added_at, confirmation, flagged_by, flagged_at,
-     role, source, confidence, status)
-SELECT work_id, node_id, weight, added_at, confirmation, flagged_by, flagged_at,
-       -- The old `prominence` was the role, and its vocabulary is the role's.
-       prominence,
-       -- The old CHECK allowed only 'author', and 'author' is in the new
-       -- vocabulary, so every existing row keeps its source.
-       source,
-       confidence,
-       status
-FROM work_tags;
+-- The trigger that constrained the old `prominence` is dropped *before* the
+-- rename, so nothing has to be rewritten under it, and the constraint comes
+-- back under the column's new name.
+DROP TRIGGER work_tags_prominence_ck;
 
-DROP TABLE work_tags;
+-- The categorical column is the specification's `role`.
+ALTER TABLE work_tags RENAME COLUMN prominence TO role;
 
-ALTER TABLE work_tags_rebuilt RENAME TO work_tags;
+-- The number was always a prominence and was called the other thing.
+ALTER TABLE work_tags RENAME COLUMN weight TO prominence;
 
-CREATE INDEX work_tags_node ON work_tags (node_id);
--- The recount reads the work counts by node, so the index has to answer
--- "which nodes carry this many works" without a scan of `work_tags`.
-CREATE INDEX work_tags_node_work ON work_tags (node_id, work_id);
+CREATE TRIGGER work_tags_role_ck
+    BEFORE INSERT ON work_tags
+    FOR EACH ROW
+    WHEN NEW.role NOT IN ('primary', 'secondary', 'background')
+    BEGIN
+        SELECT RAISE(ABORT, 'work_tags.role must be primary|secondary|background');
+    END;
+
+-- The provenance's vocabulary, widened from the one value the old CHECK
+-- allowed.
+--
+-- **The widening is not a griefing vector, because there is still no
+-- reader-applied value.** ADR 0026 refused a reader *tag layer* so that "a
+-- reader tag is never a gravity input" would be an invariant rather than a
+-- convention every write path must remember. The five values here are
+-- author, curator, imported, exchanged and inferred -- none of them is a
+-- reader -- so the invariant holds by the vocabulary itself. A reader's
+-- contribution is a *vote*, and a vote feeds `work_tags.confidence` only.
+DROP TRIGGER work_tags_source_ck;
+
+CREATE TRIGGER work_tags_source_ck
+    BEFORE INSERT ON work_tags
+    FOR EACH ROW
+    WHEN NEW.source NOT IN ('author', 'curator', 'imported', 'exchanged', 'inferred')
+    BEGIN
+        SELECT RAISE(ABORT, 'work_tags.source must be author|curator|imported|exchanged|inferred');
+    END;

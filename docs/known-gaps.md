@@ -760,7 +760,7 @@ so the count can only go down and every fix is visible.**
 | `work_index_policy` | neither | a migration with a table: nothing in the instance uses it |
 | `work_orphans` | neither | a migration with a table: nothing in the instance uses it |
 | `work_passages` | neither | a migration with a table: nothing in the instance uses it |
-| `work_tag_votes` | neither | a migration with a table: nothing in the instance uses it |
+| `work_tag_votes` | read, never written | a reader with no writer: the votes are counted into a tag's confidence (M6-04), and **no surface collects them yet** — the reader layer that would write them is not built |
 
 Pinned by `the_unreachable_tables_are_exactly_the_ones_the_known_gaps_file_claims`
 in `crates/app/tests/reachability.rs`, so the list fails **in both directions**: a

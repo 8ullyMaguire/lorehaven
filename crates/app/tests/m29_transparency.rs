@@ -549,6 +549,71 @@ async fn tag_work(db: &Database, work: &str, node: &str) {
     }
 }
 
+/// Tag a work with an explicit provenance and role.
+async fn tag_work_with(
+    db: &Database,
+    work: &str,
+    node: &str,
+    prominence: i64,
+    source: &str,
+    role: &str,
+) {
+    let sql = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, prominence, source, role, added_at)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, source, role, added_at)
+         VALUES (?::uuid, ?::uuid, ?, ?, ?, ?::timestamptz)",
+    );
+    match db.backend() {
+        darkhold_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(work)
+                .bind(node)
+                .bind(prominence)
+                .bind(source)
+                .bind(role)
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("tag");
+        }
+        darkhold_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(work)
+                .bind(node)
+                .bind(prominence)
+                .bind(source)
+                .bind(role)
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("tag");
+        }
+    }
+}
+
+/// A tag row's whole state: prominence, provenance and role.
+async fn tag_state_of(db: &Database, work: &str, node: &str) -> Option<(i64, String, String)> {
+    let sql = db.sql(
+        "SELECT prominence, source, role FROM work_tags WHERE work_id = ? AND node_id = ?",
+        "SELECT prominence, source, role FROM work_tags WHERE work_id = ?::uuid AND node_id = ?",
+    );
+    match db.backend() {
+        darkhold_db::Backend::Sqlite => sqlx::query_as(&sql)
+            .bind(work)
+            .bind(node)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("tag state"),
+        darkhold_db::Backend::Postgres => sqlx::query_as(&sql)
+            .bind(work)
+            .bind(node)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("tag state"),
+    }
+}
+
 async fn tags_of(db: &Database, work: &str) -> Vec<String> {
     let sql = db.sql(
         "SELECT node_id FROM work_tags WHERE work_id = ? ORDER BY node_id",
@@ -1686,7 +1751,7 @@ async fn an_approved_merge_moves_the_tags_and_reverting_puts_them_back() {
     let to = make_node(&harness.db, "space opera").await;
     let deduper_pseud = pseud_of(&harness.db, &proposer_account.to_string()).await;
     let work = make_work(&harness.db, &deduper_pseud.to_string()).await;
-    tag_work(&harness.db, &work, &from).await;
+    tag_work_with(&harness.db, &work, &from, 40, "curator", "primary").await;
     assert_eq!(tags_of(&harness.db, &work).await, vec![from.clone()]);
 
     let (_, body) = proposer
@@ -1741,6 +1806,13 @@ async fn an_approved_merge_moves_the_tags_and_reverting_puts_them_back() {
         vec![from.clone()],
         "the revert put the tag back exactly where it was"
     );
+    assert_eq!(
+        tag_state_of(&harness.db, &work, &from).await,
+        Some((40, "curator".to_owned(), "primary".to_owned())),
+        "**a moved row comes back with its prominence, provenance and role**: \
+         the merge moved the row, so the revert reads them where they stayed \
+         and writes them back where the row belongs"
+    );
 
     // And the log shows both, so a reader can see a merge happened *and* that
     // it was undone. A log that only grows in one direction misleads.
@@ -1779,8 +1851,11 @@ async fn a_merge_that_would_create_a_duplicate_tag_does_not() {
     let to = make_node(&harness.db, "fantasy").await;
     let deduper_pseud = pseud_of(&harness.db, &proposer_account.to_string()).await;
     let work = make_work(&harness.db, &deduper_pseud.to_string()).await;
-    tag_work(&harness.db, &work, &from).await;
-    tag_work(&harness.db, &work, &to).await;
+    // The two rows differ in *every* column a merge could lose: the duplicate
+    // is a curated primary claim with a real prominence, the survivor is the
+    // author's own modest secondary one.
+    tag_work_with(&harness.db, &work, &from, 40, "curator", "primary").await;
+    tag_work_with(&harness.db, &work, &to, 10, "author", "secondary").await;
 
     let (_, body) = proposer
         .post(
@@ -1803,7 +1878,66 @@ async fn a_merge_that_would_create_a_duplicate_tag_does_not() {
     assert_eq!(status, StatusCode::OK, "approve failed: {approved}");
 
     let tags = tags_of(&harness.db, &work).await;
-    assert_eq!(tags, vec![to], "exactly one row, pointing at the target");
+    assert_eq!(
+        tags,
+        vec![to.clone()],
+        "exactly one row, pointing at the target"
+    );
+    assert_eq!(
+        tag_state_of(&harness.db, &work, &to).await,
+        Some((10, "author".to_owned(), "secondary".to_owned())),
+        "**the survivor keeps its own prominence, provenance and role**: the \
+         merge dropped a duplicate and did not blend two claims into one"
+    );
+
+    // The revert puts the dropped row back with all three of its facts. A
+    // revert that restored only the prominence would relabel a curator's claim
+    // as the author's and demote its role, which is not an undo.
+    let (status, body) = steward
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/revert"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "revert failed: {body}");
+    assert_eq!(
+        tag_rows_of(&harness.db, &work).await.len(),
+        2,
+        "the dropped claim is back"
+    );
+    assert_eq!(
+        tag_state_of(&harness.db, &work, &from).await,
+        Some((40, "curator".to_owned(), "primary".to_owned())),
+        "**the revert restored the dropped claim exactly**, provenance and \
+         role included"
+    );
+    assert_eq!(
+        tag_state_of(&harness.db, &work, &to).await,
+        Some((10, "author".to_owned(), "secondary".to_owned())),
+        "and the survivor was not touched by the revert"
+    );
+}
+
+/// Every tag row's state, for a count that cannot be satisfied by a leftover.
+async fn tag_rows_of(db: &Database, work: &str) -> Vec<(String, i64, String, String)> {
+    let sql = db.sql(
+        "SELECT node_id, prominence, source, role FROM work_tags
+          WHERE work_id = ? ORDER BY node_id",
+        "SELECT node_id::text AS node_id, prominence, source, role FROM work_tags
+          WHERE work_id = ?::uuid ORDER BY node_id",
+    );
+    match db.backend() {
+        darkhold_db::Backend::Sqlite => sqlx::query_as(&sql)
+            .bind(work)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("rows"),
+        darkhold_db::Backend::Postgres => sqlx::query_as(&sql)
+            .bind(work)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("rows"),
+    }
 }
 
 #[tokio::test]

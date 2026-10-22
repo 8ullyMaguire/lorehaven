@@ -12,16 +12,49 @@ So the card's end state is: **`role`** (the old `prominence`, renamed to free th
 **`prominence`** (the old `weight`, which was always a prominence and was called the other
 thing), **`source`** widened to five values, and `confidence` unchanged.
 
-### And the source's check was `source = 'author'`
+### And it did not need a table rebuild, which the first draft of this entry claimed
 
-So the five-value vocabulary needs a **table rebuild** — the same *"a 12-step table rebuild
-per table"* the estate's own notes warn about. The rebuild is honest about what it preserves:
-every row with its prominence and its confidence, the `confirmation` state and the
-`flagged_by`/`flagged_at` pair (the reader's own record of whether a tag is right, §49.2),
-and the `status` column.
+The estate's notes warn about *"a 12-step table rebuild per table"*, and a `CHECK` that has
+to change its vocabulary looks like a rebuild. It is not: SQLite renames a column in place
+(the bundled engine is 3.46), and on SQLite the source's constraint is a `BEFORE INSERT`
+**trigger**, which is dropped and recreated. PostgreSQL renames the column, renames the
+constraint whose name had gone stale, and re-adds the `CHECK`. Migration 0103 already
+refused to rebuild this table *"for a constraint the store already guarantees"*, and the
+table is the largest in the schema.
 
-**The data is not rewritten**: the prominence keeps its number, and a row that said
+An earlier attempt at a rebuild is recorded because it failed loudly rather than silently:
+it declared `node_id REFERENCES canonical_entities` — a foreign key `work_tags` never had —
+and the per-file dialect-parity test caught the twins declaring different tables for one
+file. The migration declares no table at all now, which is what a rename should declare.
+
+**And the data is not rewritten**: the prominence keeps its number, and a row that said
 `source = 'author'` still says it.
+
+### The renames repaired a live bug
+
+`revert_wrangling` wrote the tag's number into the **categorical** column on SQLite
+(`prominence`, TEXT since 0103) and into `weight` on PostgreSQL. The two arms disagreed, and
+one of them put `40` where `primary|secondary|background` belongs. With the names unswapped,
+both arms write the number to the number — and the revert restores all three facts now,
+because a dropped duplicate's `prominence|source|role` is recorded beside the drop
+(`dedupe_tags`). A revert that restored the number alone would relabel a curator's claim as
+the author's and demote its role: three quiet edits wearing the name of one undo.
+
+### Provenance is derived, never accepted
+
+`POST /works/{id}/tags` no longer takes `source` in the body. The route derives it: a
+contributor of the work is `author`, an active curator is `curator`, and anyone else is
+`403` with no row — because the specification's fifth value is not "a signed-in reader".
+A reader's channel is a vote, and a vote feeds `confidence` only (ADR 0026, ADR 0029).
+`milestone_10`'s fandom test now tags its work as that work's author, which is the endpoint's
+actual rule rather than a test being bent to fit one.
+
+### The defaults stayed the estate's
+
+`role` keeps `DEFAULT 'secondary'` and `source` keeps `DEFAULT 'author'`, not the card's
+`'primary'` and `'imported'`: a default must not manufacture a claim (migration 0099's own
+rule about `confirmation`). The store names a source on every path, so the default is
+unreachable.
 
 ### The confidence is fed by the votes and by nothing else
 
@@ -31,6 +64,14 @@ so a reader who votes twice is one opinion and not two.
 
 **And no votes is not low confidence.** The absence of a claim is not a claim against the
 tag, and an unvoted assertion is fully confident.
+
+### What the five values are, and who writes each
+
+`author` — the work-creation path and the author's own tag route. `imported` — the importer.
+`curator` — the tag route for an account holding an active curator role. `exchanged` and
+`inferred` have **no writer yet**: the exchange imports as `imported`, and nothing infers a
+tag. The vocabulary is the specification's and is wider than the code, deliberately: a value
+no path produces is a gap for the card that needs it, not a licence to reuse a neighbour.
 
 ---
 
