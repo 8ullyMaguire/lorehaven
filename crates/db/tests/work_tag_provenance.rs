@@ -135,13 +135,13 @@ async fn assertion_row(
         }
     };
     let row = match db.backend() {
-        darkhold_db::Backend::Sqlite => sqlx::query_as::<_, (i64, String, String, f64)>(&sql)
+        darkhold_db::Backend::Sqlite => sqlx::query_as::<_, (i64, String, String, f64)>(sql)
             .bind(work_id)
             .bind(node_id)
             .fetch_optional(db.sqlite_pool().expect("sqlite"))
             .await
             .expect("the row"),
-        darkhold_db::Backend::Postgres => sqlx::query_as::<_, (i64, String, String, f64)>(&sql)
+        darkhold_db::Backend::Postgres => sqlx::query_as::<_, (i64, String, String, f64)>(sql)
             .bind(work_id)
             .bind(node_id)
             .fetch_optional(db.postgres_pool().expect("postgres"))
