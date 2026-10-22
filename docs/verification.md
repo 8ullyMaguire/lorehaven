@@ -1,3 +1,39 @@
+## 2026-10-22 — M6-04: the assertions carry their provenance
+
+**Milestone:** M6 · **Requirements:** `DM6-04`
+
+### The estate already had three of the four columns, and the card's names are swapped
+
+`work_tags` carried `source` (CHECKed to `'author'`), `confidence` (REAL), and a `prominence`
+(TEXT) whose CHECK is `('primary', 'secondary', 'background')` — which is the card's
+**`role`**, word for word.
+
+So the card's end state is: **`role`** (the old `prominence`, renamed to free the name),
+**`prominence`** (the old `weight`, which was always a prominence and was called the other
+thing), **`source`** widened to five values, and `confidence` unchanged.
+
+### And the source's check was `source = 'author'`
+
+So the five-value vocabulary needs a **table rebuild** — the same *"a 12-step table rebuild
+per table"* the estate's own notes warn about. The rebuild is honest about what it preserves:
+every row with its prominence and its confidence, the `confirmation` state and the
+`flagged_by`/`flagged_at` pair (the reader's own record of whether a tag is right, §49.2),
+and the `status` column.
+
+**The data is not rewritten**: the prominence keeps its number, and a row that said
+`source = 'author'` still says it.
+
+### The confidence is fed by the votes and by nothing else
+
+Never by gravity, never by a rank, never by a reader count. And **a vote is not a reader**:
+the votes are counted, not the voters, and the key says so — one row per (work, tag, voter),
+so a reader who votes twice is one opinion and not two.
+
+**And no votes is not low confidence.** The absence of a claim is not a claim against the
+tag, and an unvoted assertion is fully confident.
+
+---
+
 ## 2026-10-22 — M6-03: the closure, and a walk that terminates on a cycle
 
 **Milestone:** M6 · **Requirements:** `DM6-03`
