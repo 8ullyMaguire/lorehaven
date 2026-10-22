@@ -181,7 +181,7 @@ impl Harness {
                          VALUES ('{node}', '{kind}', '{canonical}', '{canonical}', '2026-01-01T00:00:00Z')"
                     ),
                     format!(
-                        "INSERT OR IGNORE INTO work_tags (work_id, node_id, weight, added_at) \
+                        "INSERT OR IGNORE INTO work_tags (work_id, node_id, prominence, added_at) \
                          VALUES ('{work}', '{node}', 1, '2026-01-01T00:00:00Z')"
                     ),
                 ] {
@@ -201,7 +201,7 @@ impl Harness {
                          ON CONFLICT (id) DO NOTHING"
                     ),
                     format!(
-                        "INSERT INTO work_tags (work_id, node_id, weight, added_at) \
+                        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) \
                          VALUES ('{work}', '{node}', 1, '2026-01-01T00:00:00Z') \
                          ON CONFLICT (work_id, node_id) DO NOTHING"
                     ),

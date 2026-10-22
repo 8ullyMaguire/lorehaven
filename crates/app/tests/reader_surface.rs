@@ -157,7 +157,7 @@ impl Harness {
 
     async fn tag(&self, work_id: &str, node_id: &str) {
         self.exec(
-            "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?1, ?2, 0, ?3)",
+            "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?1, ?2, 0, ?3)",
             &[work_id, node_id, T0],
         )
         .await;

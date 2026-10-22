@@ -676,19 +676,131 @@ pub async fn create_alias(
     })
 }
 
+/// Where a tag assertion came from (spec §6.4).
+///
+/// **The distinction is the one that matters to a reader.** A tag the
+/// *author* put on their own work is a statement of fact about the work, and
+/// a tag the importer guessed from a source's own metadata is a guess. Both
+/// are in the table, and a surface that shows a work's tags can say which is
+/// which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagSource {
+    /// The author tagged their own work.
+    Author,
+    /// A curator tagged it.
+    Curator,
+    /// It came in with an import.
+    Imported,
+    /// It came in through the metadata exchange.
+    Exchanged,
+    /// It was inferred, not asserted by anybody.
+    Inferred,
+}
+
+impl TagSource {
+    /// The storage form.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Author => "author",
+            Self::Curator => "curator",
+            Self::Imported => "imported",
+            Self::Exchanged => "exchanged",
+            Self::Inferred => "inferred",
+        }
+    }
+
+    /// The storage form, from a column value.
+    ///
+    /// An unrecognised value is **imported**: the value the table's default
+    /// carries, and the one that says the least.
+    pub fn parse(raw: &str) -> Self {
+        match raw {
+            "author" => Self::Author,
+            "curator" => Self::Curator,
+            "exchanged" => Self::Exchanged,
+            "inferred" => Self::Inferred,
+            _ => Self::Imported,
+        }
+    }
+}
+
+/// A tag's role in a work's description (spec §6.4, §2.2).
+///
+/// The primary/secondary split is the **theme overlap rule**: a tag's primary
+/// theme is the theme whose seed claims it, and the secondary is derived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagRole {
+    /// The tag's own theme claims it.
+    Primary,
+    /// Another theme's seed also claims it.
+    Secondary,
+    /// It is in the work and nothing claims it.
+    Background,
+}
+
+impl TagRole {
+    /// The storage form.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+            Self::Background => "background",
+        }
+    }
+
+    /// The storage form, from a column value.
+    pub fn parse(raw: &str) -> Self {
+        match raw {
+            "secondary" => Self::Secondary,
+            "background" => Self::Background,
+            _ => Self::Primary,
+        }
+    }
+}
+
+/// What to assert about a work's tag.
+#[derive(Debug, Clone, Copy)]
+pub struct TagAssertion {
+    /// The tag's prominence: how much the work leans on it.
+    pub prominence: i64,
+    /// Where the claim came from.
+    pub source: TagSource,
+    /// The claim's role in the work's description.
+    pub role: TagRole,
+}
+
+impl Default for TagAssertion {
+    fn default() -> Self {
+        Self {
+            prominence: 0,
+            source: TagSource::Imported,
+            role: TagRole::Primary,
+        }
+    }
+}
+
 /// Tag a work.
-pub async fn tag_work(db: &Database, work_id: &str, node_id: &str, weight: i64) -> Result<WorkTag> {
+pub async fn tag_work(
+    db: &Database,
+    work_id: &str,
+    node_id: &str,
+    assertion: TagAssertion,
+) -> Result<WorkTag> {
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, source, role, added_at)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, source, role, added_at)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6)",
     );
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&sql)
                 .bind(work_id)
                 .bind(node_id)
-                .bind(weight)
+                .bind(assertion.prominence)
+                .bind(assertion.source.as_str())
+                .bind(assertion.role.as_str())
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
@@ -697,7 +809,9 @@ pub async fn tag_work(db: &Database, work_id: &str, node_id: &str, weight: i64) 
             sqlx::query(&sql)
                 .bind(work_id)
                 .bind(node_id)
-                .bind(weight)
+                .bind(assertion.prominence)
+                .bind(assertion.source.as_str())
+                .bind(assertion.role.as_str())
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -706,9 +820,56 @@ pub async fn tag_work(db: &Database, work_id: &str, node_id: &str, weight: i64) 
     Ok(WorkTag {
         work_id: work_id.to_owned(),
         node_id: node_id.to_owned(),
-        weight,
+        weight: assertion.prominence,
         added_at: now,
     })
+}
+
+/// Recompute every tag's confidence from the votes (spec §6.4).
+///
+/// The confidence is fed by `work_tag_votes` and **only** by it: never by
+/// gravity, never by a rank, never by a reader count. A vote is a reader
+/// saying "this tag is right" or "this tag is wrong", and the share of the
+/// votes that agree is the confidence.
+///
+/// **A vote is not a reader.** The votes are counted, not the voters, and a
+/// reader who votes twice on the same tag is one row -- the primary key says
+/// so. So the number is a share of opinions and never a headcount.
+pub async fn recompute_confidence(db: &Database) -> Result<i64, sqlx::Error> {
+    let sql = db.sql(
+        "UPDATE work_tags
+            SET confidence = (
+                SELECT CASE
+                    WHEN COUNT(*) = 0 THEN 1.0
+                    ELSE (CAST(SUM(CASE WHEN vote > 0 THEN 1 ELSE 0 END) AS REAL) + 1.0)
+                         / (COUNT(*) + 1.0)
+                END
+                  FROM work_tag_votes v
+                 WHERE v.work_id = work_tags.work_id AND v.node_id = work_tags.node_id
+            )",
+        "UPDATE work_tags
+            SET confidence = (
+                SELECT CASE
+                    WHEN COUNT(*) = 0 THEN 1.0
+                    ELSE (CAST(SUM(CASE WHEN vote > 0 THEN 1 ELSE 0 END) AS REAL) + 1.0)
+                         / (COUNT(*) + 1.0)
+                END
+                  FROM work_tag_votes v
+                 WHERE v.work_id::text = work_tags.work_id::text
+                   AND v.node_id = work_tags.node_id
+            )",
+    );
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
+    };
+    Ok(affected as i64)
 }
 
 /// List all tags (taxonomy nodes of kind 'tag') with work counts, for the Tags surface (spec §43.1).
@@ -785,12 +946,12 @@ pub async fn tag_weights_for_work(
     work_id: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
     let sql = db.sql(
-        "SELECT tn.canonical, wt.weight
+        "SELECT tn.canonical, wt.prominence
          FROM work_tags wt
          JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = ? AND tn.kind = 'tag'
          ORDER BY tn.canonical ASC",
-        "SELECT tn.canonical, wt.weight::bigint
+        "SELECT tn.canonical, wt.prominence::bigint
          FROM work_tags wt
          JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = $1::uuid AND tn.kind = 'tag'

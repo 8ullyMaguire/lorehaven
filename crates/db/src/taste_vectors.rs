@@ -789,7 +789,7 @@ async fn fetch_work_tag_weights_sqlite(
     work_id: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
     sqlx::query_as::<_, (String, i64)>(
-        "SELECT tn.canonical, COALESCE(wt.weight, 0)
+        "SELECT tn.canonical, COALESCE(wt.prominence, 0)
          FROM work_tags wt
          JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = ?",
@@ -810,7 +810,7 @@ async fn fetch_work_tag_weights_postgres(
         // the parameter as text and the comparison fails 42883
         // ("operator does not exist: uuid = text") — SQLite has no such
         // mismatch, so this only ever surfaces on the PostgreSQL leg.
-        "SELECT tn.canonical, COALESCE(wt.weight, 0)
+        "SELECT tn.canonical, COALESCE(wt.prominence, 0)
          FROM work_tags wt
          JOIN canonical_entities tn ON tn.id = wt.node_id
          WHERE wt.work_id = $1::uuid",

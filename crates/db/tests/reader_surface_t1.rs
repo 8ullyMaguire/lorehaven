@@ -227,7 +227,7 @@ async fn exec(db: &Database, tmpl: &str, args: &[&str]) {
                     .replace(&format!("?{n}"), &format!("${n}"))
             });
             // The bind follows the MARKER in the template, not the value. Binding by
-            // value was the previous version and it is wrong: `work_tags.weight` is bigint
+            // value was the previous version and it is wrong: `work_tags.prominence` is bigint
             // and its fixture argument is the string "0", so a value-keyed rule bound a
             // boolean to a bigint column and PostgreSQL answered 42846 "cannot cast type
             // boolean to bigint". Every test using `tag()` failed, and SQLite accepted all
@@ -390,7 +390,7 @@ async fn node(db: &Database, kind: &str, canonical: &str) -> String {
 async fn tag(db: &Database, work_id: &str, node_id: &str) {
     exec(
         db,
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at)
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at)
          VALUES (?1#u, ?2#t, ?3#i, ?4)",
         &[work_id, node_id, "0", T0],
     )

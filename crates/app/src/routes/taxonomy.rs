@@ -48,8 +48,22 @@ pub struct CreateAliasBody {
 #[derive(Debug, Deserialize)]
 pub struct TagWorkBody {
     node_id: String,
+    /// The tag's prominence: how much the work leans on it.
+    ///
+    /// **Prominence and not weight**, because the number was always a
+    /// prominence and was called the other thing (spec §6.4).
     #[serde(default)]
-    weight: i64,
+    prominence: Option<i64>,
+    /// The old spelling, still accepted.
+    #[serde(default)]
+    weight: Option<i64>,
+    /// Where the claim came from: `author` · `curator` · `imported` ·
+    /// `exchanged` · `inferred`.
+    #[serde(default)]
+    source: Option<String>,
+    /// The claim's role: `primary` · `secondary` · `background`.
+    #[serde(default)]
+    role: Option<String>,
 }
 
 async fn autocomplete(
@@ -112,7 +126,26 @@ async fn tag_work(
     let work_id: String = id
         .parse()
         .map_err(|_| ApiError(darkhold_domain::AppError::NotFound { resource: "work" }))?;
-    let tag = taxonomy::tag_work(state.db(), &work_id, &body.node_id, body.weight)
+    // **The provenance is the caller's, and an unrecognised one is not
+    // stored as an unrecognised one.** A source the instance does not know
+    // would be read by every surface that shows a tag, and each would have
+    // its own idea of what it means.
+    let source = body
+        .source
+        .as_deref()
+        .map(darkhold_db::taxonomy::TagSource::parse)
+        .unwrap_or(darkhold_db::taxonomy::TagSource::Imported);
+    let role = body
+        .role
+        .as_deref()
+        .map(darkhold_db::taxonomy::TagRole::parse)
+        .unwrap_or(darkhold_db::taxonomy::TagRole::Primary);
+    let assertion = darkhold_db::taxonomy::TagAssertion {
+        prominence: body.prominence.or(body.weight).unwrap_or(0),
+        source,
+        role,
+    };
+    let tag = taxonomy::tag_work(state.db(), &work_id, &body.node_id, assertion)
         .await
         .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "tag": tag })))

@@ -637,7 +637,22 @@ async fn apply_source_tags(
                 continue;
             }
         };
-        match darkhold_db::taxonomy::tag_work(db, work_id, &node.id, 1).await {
+        match darkhold_db::taxonomy::tag_work(
+            db,
+            work_id,
+            &node.id,
+            darkhold_db::taxonomy::TagAssertion {
+                prominence: 1,
+                // **The importer's tags are imported tags.** A tag that came in
+                // with a source's own metadata is the source's claim, not the
+                // instance's, and a reader who sees it is entitled to know
+                // which it is.
+                source: darkhold_db::taxonomy::TagSource::Imported,
+                role: darkhold_db::taxonomy::TagRole::Primary,
+            },
+        )
+        .await
+        {
             Ok(_) => count.applied += 1,
             Err(error) => {
                 tracing::warn!(import_job_id = %row.id, tag = %label, %error,

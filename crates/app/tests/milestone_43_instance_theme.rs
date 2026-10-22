@@ -537,7 +537,7 @@ async fn compute_reads_the_real_taxonomy() {
     ))
     .await;
     h.exec(&format!(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) \
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) \
          VALUES ('{work}', '{node}', 100, '2026-01-01T00:00:00Z')"
     ))
     .await;
@@ -618,7 +618,7 @@ async fn compute_ignores_public_bookmarks() {
         ))
         .await;
         h.exec(&format!(
-            "INSERT INTO work_tags (work_id, node_id, weight, added_at) \
+            "INSERT INTO work_tags (work_id, node_id, prominence, added_at) \
              VALUES ('{work}', '{node}', 100, '2026-01-01T00:00:00Z')"
         ))
         .await;
@@ -695,7 +695,7 @@ async fn compute_ignores_tags_on_unbookmarked_works() {
     ))
     .await;
     h.exec(&format!(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) \
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) \
          VALUES ('{work}', '{node}', 100, '2026-01-01T00:00:00Z')"
     ))
     .await;

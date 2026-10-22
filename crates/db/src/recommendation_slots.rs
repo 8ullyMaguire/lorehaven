@@ -1099,8 +1099,8 @@ pub async fn revert_wrangling(
                     .map_err(|_| anyhow::anyhow!("recorded a non-uuid node id"))?;
 
                 let restore_sql = db.sql(
-                    "INSERT OR REPLACE INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-                    "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?::uuid, ?::uuid, ?, ?::timestamptz)
+                    "INSERT OR REPLACE INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?::uuid, ?::uuid, ?, ?::timestamptz)
                      ON CONFLICT (work_id, node_id) DO UPDATE SET weight = excluded.weight",
                 );
                 match db.backend() {

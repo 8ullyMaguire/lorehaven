@@ -808,8 +808,8 @@ async fn search_respects_content_filters() {
         }
     }
     let sql_tag = db.sql(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
     );
     match db.backend() {
         darkhold_db::Backend::Sqlite => {
@@ -924,8 +924,8 @@ async fn content_filters_narrow_the_page_instead_of_shortening_it() {
         "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
     );
     let sql_tag = db.sql(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
     );
 
     match db.backend() {
@@ -1189,8 +1189,8 @@ async fn content_filters_reach_the_recommendation_surface() {
         "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
     );
     let sql_tag = db.sql(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
     );
     match db.backend() {
         darkhold_db::Backend::Sqlite => {

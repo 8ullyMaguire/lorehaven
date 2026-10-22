@@ -182,7 +182,7 @@ impl Harness {
                     // The node id is looked up rather than reused from `node`,
                     // because on a conflict the insert was a no-op and `node` is
                     // an id that does not exist.
-                    sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at, confirmation) VALUES (?, (SELECT id FROM canonical_entities WHERE kind = 'tag' AND norm = ?), 10, ?, ?)")
+                    sqlx::query("INSERT INTO work_tags (work_id, node_id, prominence, added_at, confirmation) VALUES (?, (SELECT id FROM canonical_entities WHERE kind = 'tag' AND norm = ?), 10, ?, ?)")
                         .bind(&work)
                         .bind(&norm)
                         .bind(&stamp)
@@ -200,7 +200,7 @@ impl Harness {
                         .execute(self.db.postgres_pool().expect("postgres"))
                         .await
                         .expect("node");
-                    sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at, confirmation) VALUES ($1::uuid, (SELECT id FROM canonical_entities WHERE kind = 'tag' AND norm = $2), 10, $3, $4)")
+                    sqlx::query("INSERT INTO work_tags (work_id, node_id, prominence, added_at, confirmation) VALUES ($1::uuid, (SELECT id FROM canonical_entities WHERE kind = 'tag' AND norm = $2), 10, $3, $4)")
                         .bind(&work)
                         .bind(&norm)
                         .bind(&stamp)

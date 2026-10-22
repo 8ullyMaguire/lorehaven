@@ -121,7 +121,7 @@ async fn tagged_work(db: &Database, title: &str, tag: &str, works: usize) -> Str
             extra
         };
         let statement = format!(
-            "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ('{tagged}', '{node}', 1, '2026-01-01T00:00:00Z')"
+            "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES ('{tagged}', '{node}', 1, '2026-01-01T00:00:00Z')"
         );
         let result = match db.backend() {
             darkhold_db::Backend::Sqlite => sqlx::query(&statement)

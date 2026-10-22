@@ -191,7 +191,7 @@ async fn seed_one(db: &Database) -> String {
     .await;
     exec(
         db,
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?1#u, ?2#u, 1, ?3#t)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?1#u, ?2#u, 1, ?3#t)",
         &[&work, &node, T0],
     )
     .await;

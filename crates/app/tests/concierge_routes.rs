@@ -239,7 +239,7 @@ async fn seed_works(tdb: &TestDb, count: usize, words: u32) -> Vec<String> {
 
 /// Tag `work` with a mood node, so `moods_in_use` and `filter_by_mood` can see it.
 ///
-/// `work_tags.weight` is 1 and `canonical_entities.review_status` is `pending` because
+/// `work_tags.prominence` is 1 and `canonical_entities.review_status` is `pending` because
 /// neither query filters on either: `moods_in_use` selects `tn.norm` for nodes of
 /// kind `mood` joined to a published work, and `filter_by_mood` compares that norm
 /// against the selector. A confirmed-status node would be equally visible, and an
@@ -257,7 +257,7 @@ async fn tag_mood(tdb: &TestDb, work: &str, canonical: &str) {
     .await;
     exec(
         tdb,
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?1#u, ?2#u, 1, ?3#t)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?1#u, ?2#u, 1, ?3#t)",
         &[work, &node, T0],
     )
     .await;

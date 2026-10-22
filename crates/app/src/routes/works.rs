@@ -2887,7 +2887,19 @@ async fn fork_work(
     // Inherit tags from parent (spec §40.1).
     let parent_tags = taxonomy::tags_for_work(state.db(), &parent_str).await?;
     for node_id in parent_tags {
-        let _ = taxonomy::tag_work(state.db(), &new_work.id.to_string(), &node_id, 1).await;
+        let _ = taxonomy::tag_work(
+            state.db(),
+            &new_work.id.to_string(),
+            &node_id,
+            taxonomy::TagAssertion {
+                prominence: 1,
+                // **A tag the author put on their own work** is a statement of
+                // fact about the work (spec §6.4).
+                source: taxonomy::TagSource::Author,
+                role: taxonomy::TagRole::Primary,
+            },
+        )
+        .await;
     }
 
     let view = author_view(&state, &user, &new_work).await?;

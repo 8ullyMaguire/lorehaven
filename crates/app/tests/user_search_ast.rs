@@ -92,7 +92,7 @@ async fn seed_tagged_work(db: &darkhold_db::Database, slug: &str, owner: &str, f
                 .bind(&node_id).bind(fandom).bind(fandom.to_lowercase()).bind("2026-01-01T00:00:00Z")
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             sqlx::query(
-                "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, 1, ?)",
+                "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, 1, ?)",
             )
             .bind(&work_id)
             .bind(&node_id)
@@ -105,7 +105,7 @@ async fn seed_tagged_work(db: &darkhold_db::Database, slug: &str, owner: &str, f
             sqlx::query("INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1::uuid, 'fandom', $2, $3, $4)")
                 .bind(&node_id).bind(fandom).bind(fandom.to_lowercase()).bind("2026-01-01T00:00:00Z")
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2::uuid, 1, $3)")
+            sqlx::query("INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES ($1::uuid, $2::uuid, 1, $3)")
                 .bind(&work_id).bind(&node_id).bind("2026-01-01T00:00:00Z")
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
         }

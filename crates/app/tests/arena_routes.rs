@@ -262,7 +262,7 @@ async fn seed_published_works(tdb: &TestDb, count: usize, fandom: &str) {
                 .await
                 .expect("seed work");
                 sqlx::query(
-                    "INSERT INTO work_tags (work_id, node_id, weight, added_at)
+                    "INSERT INTO work_tags (work_id, node_id, prominence, added_at)
                      VALUES ($1::uuid, $2::uuid, 1, $3::timestamptz)",
                 )
                 .bind(uuid::Uuid::parse_str(&work).expect("uuid"))
@@ -287,7 +287,7 @@ async fn seed_published_works(tdb: &TestDb, count: usize, fandom: &str) {
                 .execute(pool)
                 .await
                 .expect("seed work");
-                sqlx::query("INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, 1, ?)")
+                sqlx::query("INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, 1, ?)")
                     .bind(&work)
                     .bind(&node)
                     .bind(T0)

@@ -173,7 +173,7 @@ async fn tag_mood(db: &Database, work_id: &str, canonical: &str) -> String {
          &[&node_id, canonical, &canonical.to_lowercase(), T0]).await;
     exec(
         db,
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?1#u, ?2#u, 1, ?3)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?1#u, ?2#u, 1, ?3)",
         &[work_id, &node_id, T0],
     )
     .await;
@@ -379,7 +379,7 @@ async fn moods_in_use_lists_only_moods_a_published_work_carries() {
          &[&tag_node, T0]).await;
     exec(
         &db,
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?1#u, ?2#u, 1, ?3)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?1#u, ?2#u, 1, ?3)",
         &[&other_kind, &tag_node, T0],
     )
     .await;

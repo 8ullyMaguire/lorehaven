@@ -82,7 +82,7 @@ impl Fixture {
     async fn tag_work(&self, work_id: &str, node_id: &str) {
         exec_with(
             &self.tdb,
-            "INSERT INTO work_tags (work_id, node_id, weight, added_at) \
+            "INSERT INTO work_tags (work_id, node_id, prominence, added_at) \
              VALUES (?1#u, ?2#u, 0, '2026-01-01T00:00:00Z')",
             &[&work_id.to_string(), &node_id.to_string()],
         )
@@ -174,7 +174,7 @@ async fn one_shared_tag_is_enough_to_exclude() {
     let mixed = f.work_by("Half in profile", Some(&a)).await;
     exec_with(
         &f.tdb,
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) \
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) \
              VALUES (?1#u, ?2#u, 0, '2026-01-01T00:00:00Z')",
         &[&mixed, &b],
     )
@@ -480,7 +480,7 @@ async fn account(tdb: &TestDb, email: &str) -> String {
 /// green on SQLite.
 ///
 /// The PostgreSQL bind follows the MARKER in the template, not the value of the argument.
-/// Keying on the value is wrong and was wrong here: `work_tags.weight` is bigint and its
+/// Keying on the value is wrong and was wrong here: `work_tags.prominence` is bigint and its
 /// argument is the string "0", so a value-keyed rule that saw "0" would bind a boolean.
 async fn exec_with(tdb: &TestDb, tmpl: &str, args: &[&String]) {
     let db = tdb.db();

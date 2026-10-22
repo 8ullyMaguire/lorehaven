@@ -537,8 +537,8 @@ async fn media_ref_collab_applies_content_filters() {
         "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
     );
     let sql_tag = db.sql(
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, prominence, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
     );
     match db.backend() {
         Backend::Sqlite => {
