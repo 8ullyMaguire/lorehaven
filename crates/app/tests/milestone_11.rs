@@ -616,9 +616,18 @@ async fn theme_boost_tag_raises_work_score() {
     let node = darkhold_db::taxonomy::create_node(harness.tdb.db(), "tag", "adventure")
         .await
         .expect("node");
-    darkhold_db::taxonomy::tag_work(harness.tdb.db(), &w2, &node.id, 1)
-        .await
-        .expect("tag");
+    darkhold_db::taxonomy::tag_work(
+        harness.tdb.db(),
+        &w2,
+        &node.id,
+        darkhold_db::taxonomy::TagAssertion {
+            prominence: 1,
+            source: darkhold_db::taxonomy::TagSource::Imported,
+            role: darkhold_db::taxonomy::TagRole::Primary,
+        },
+    )
+    .await
+    .expect("tag");
 
     let mut client = harness.client();
     let (status, body) = client.get("/api/v1/discovery").await;

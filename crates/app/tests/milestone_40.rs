@@ -498,12 +498,30 @@ async fn fork_inherits_parent_tags() {
     // Add tags to parent via DB for test simplicity.
     // `.expect`, not `let _ =`: swallowing this is what hid a `$2::uuid` cast on a
     // TEXT column, which made every tag a silent no-op on PostgreSQL.
-    darkhold_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-1", 1)
-        .await
-        .expect("tag parent with tag-1");
-    darkhold_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-2", 1)
-        .await
-        .expect("tag parent with tag-2");
+    darkhold_db::taxonomy::tag_work(
+        harness.tdb.db(),
+        &parent_id,
+        "tag-1",
+        darkhold_db::taxonomy::TagAssertion {
+            prominence: 1,
+            source: darkhold_db::taxonomy::TagSource::Imported,
+            role: darkhold_db::taxonomy::TagRole::Primary,
+        },
+    )
+    .await
+    .expect("tag parent with tag-1");
+    darkhold_db::taxonomy::tag_work(
+        harness.tdb.db(),
+        &parent_id,
+        "tag-2",
+        darkhold_db::taxonomy::TagAssertion {
+            prominence: 1,
+            source: darkhold_db::taxonomy::TagSource::Imported,
+            role: darkhold_db::taxonomy::TagRole::Primary,
+        },
+    )
+    .await
+    .expect("tag parent with tag-2");
 
     // Fork.
     let (status, body) = author
