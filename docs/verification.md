@@ -1,3 +1,35 @@
+## 2026-10-22 — M6-03: the closure, and a walk that terminates on a cycle
+
+**Milestone:** M6 · **Requirements:** `DM6-03`
+
+### The tables were there, and the closure had no writer
+
+The aliases, the edges and the closure all existed — the estate's known-gaps file says so:
+*"`entity_closure` — read, never written — a reader with no writer: the feature's other half
+was never built."* And `+children` reads the closure, so the expansion **never expanded**.
+
+### A cycle makes a recursive CTE loop, and the two engines disagree about it
+
+PostgreSQL's recursive term may not use `UNION`, so a cycle is an unbounded recursion.
+SQLite's `UNION` deduplicates and so terminates. The same tree would be handled
+differently by the two engines — **the worst kind of difference, because it is invisible
+until one of them hangs.**
+
+So the walk is done in Rust with a **visited set**: a node is never expanded twice, the walk
+terminates whatever the tree contains, and the two engines get the same closure.
+
+### The closure is the tree
+
+Only the **browsable** entities are in it: an entity below the floor is an assertion, and an
+assertion is not a node (spec §6.4, R-23).
+
+### And the rebuild is a rebuild, and not an append
+
+A stale row is a row that says a tree that no longer exists, so the closure is cleared and
+filled. The known-gaps file's claim about the closure is gone with it.
+
+---
+
 ## 2026-10-22 — M6-02: the floor decides what is a node, and not what is known
 
 **Milestone:** M6 · **Requirements:** `DM6-02`
