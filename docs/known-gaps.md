@@ -726,7 +726,6 @@ so the count can only go down and every fix is visible.**
 | `media_collection_items` | read, never written | a reader with no writer: the feature's other half was never built |
 | `media_rights` | read, never written | a reader with no writer: the feature's other half was never built |
 | `quality_signals` | read, never written | a reader with no writer: the feature's other half was never built |
-| `entity_closure` | read, never written | a reader with no writer: the feature's other half was never built |
 | `work_moods` | read, never written | a reader with no writer: the feature's other half was never built |
 | `ai_consents` | neither | a migration with a table: nothing in the instance uses it |
 | `announcements` | neither | a migration with a table: nothing in the instance uses it |
