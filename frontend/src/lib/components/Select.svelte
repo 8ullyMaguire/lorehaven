@@ -61,6 +61,11 @@
     flex-direction: column;
     gap: var(--space-2);
     margin-bottom: var(--space-4);
+    /* A flex item's automatic minimum size is its content's, and a native
+       select is as wide as its longest option — so `width: 100%` below could
+       not shrink it. In /search's filter builder that put the page 46px wider
+       than a 390px phone. */
+    min-width: 0;
   }
 
   label {

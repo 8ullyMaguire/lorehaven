@@ -338,6 +338,10 @@
     border-radius: 4px;
     padding: var(--space-3);
     margin-bottom: var(--space-4);
+    /* A fieldset's UA default is `min-width: min-content`, which the filter
+       builder's widest row then pushes past a phone's viewport — measured at
+       390px, the page scrolled 46px sideways. */
+    min-width: 0;
   }
 
   .filters legend {
@@ -352,12 +356,6 @@
     flex-wrap: wrap;
   }
 
-  .filter-row .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
   .filter-row label {
     font-size: var(--text-xs);
     font-weight: 600;
@@ -369,6 +367,8 @@
     border-radius: 4px;
     min-height: 2.75rem;
     font: inherit;
+    width: 100%;
+    max-width: 100%;
   }
 
   .add-filter {

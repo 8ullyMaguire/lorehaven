@@ -906,6 +906,24 @@
     font-weight: 600;
     font-size: var(--text-sm);
     white-space: nowrap;
+    /* A thumb aiming at "Search" used to land on 22 pixels of target: the row is
+       one line of 14px text and the links carried no padding. Twelve pixels top
+       and bottom take the hit area to 46, past the 44 a fingertip needs, and the
+       equal negative margin hands that space straight back to the layout, so the
+       header keeps the height `--header-height` (scroll-padding-top) assumes.
+       This changes what the finger hits, not what the eye sees — measured after:
+       link box 46px, text still at y=69..91, header still 109px.
+    padding: var(--space-3) 0;
+    margin: calc(-1 * var(--space-3)) 0;
+  }
+
+  /* "More" is the other control in this row, and it was 32px tall. Same trick, so
+     the row's height and the menu's position do not move. */
+  .mobile :global(.btn) {
+    padding-top: 0.875rem;
+    padding-bottom: 0.875rem;
+    margin-top: -0.375rem;
+    margin-bottom: -0.375rem;
   }
 
   .mobile a[aria-current='page'] {

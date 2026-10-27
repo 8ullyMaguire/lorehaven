@@ -2966,3 +2966,27 @@ from `getComputedStyle` against the nearest opaque ancestor (4.5:1, or 3:1 for l
   the current I/O; the page resolves on its own. That is the search problem above wearing a different hat.
 
 Screenshots of ten routes after the deploy are in the session workspace as `after-*.png`.
+
+## The visual pass, and the two claims it got wrong
+
+Run through fresh `hermes chat -q` processes, because `vision_analyze` in a long-lived session cannot see
+images until the process restarts (the config fix is in the hermes-agent skill: `model.supports_vision`,
+`agent.image_input_mode: native`, and no explicit `auxiliary.vision`). Eight screenshots, four desktop at
+1440×900 and four phone at 390×844, each reviewed for clipping, contrast, imbalance and placeholder state.
+
+Confirmed by measurement rather than by the reviewer's eye:
+
+- **Nav contrast "very dim"** — false. The links are `rgb(173,185,174)` on the surface, **7.39:1**.
+  Perceptual on a 2x dark screenshot; no change made.
+- **Tap targets "cramped"** — true and quantified. `nav.mobile a` rendered **22px tall** with no padding.
+  Fixed in `App.svelte` with `padding: var(--space-3) 0` and an equal negative margin, so the hit area is
+  **46px** while the layout contribution stays 22px. Verified live: link box 46, text still at y=69..91,
+  header still **109px** — unchanged, so `--header-height` (scroll-padding-top) keeps holding.
+- **Roadmap** was pure skeleton bars with no explanation in the pre-deploy capture; after the deploy it is
+  one empty state that says why the board is empty and what to do. Found by the review, fixed before it
+  was described.
+- **Community** at 1440 is top-weighted: a ~200px band of content, then ~365px of nothing to the footer.
+- **Discover** cards size to their text, so the right edge is ragged, and the last card is cut by the
+  viewport with no boundary cue.
+
+The last two are design decisions, not defects with a one-line fix, and are left alone deliberately.
