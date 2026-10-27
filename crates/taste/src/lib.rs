@@ -17,10 +17,14 @@
 //! So the split is configurable — `[taste] mode = "embedded" | "service"` — and **the
 //! domain is shared either way**. The two processes never share a database connection.
 //!
-//! **Nothing in here pretends to work.** Every module below is empty and says which
-//! section of the specification it will implement. A stub that returns a plausible number
-//! is worse than an empty module, because a stub is a ranking that looks measured and is
-//! not.
+//! **Nothing in here pretends to work.** A module is either implemented and tested or empty
+//! and explicit about which section of the specification it will implement. A stub that
+//! returns a plausible number is worse than an empty module, because a stub is a ranking that
+//! looks measured and is not.
+//!
+//! Implemented so far: [`arena::glicko`] (Glicko-2 with draws, matched against kindred case by
+//! case) and [`eval`] (the ranking metrics the parity harness scores with). Everything else is
+//! still a declaration.
 
 /// The catalogue: the instance's works, tags and entities, ingested into the on-disk
 /// index the engine reads (spec §8.2, §12.7).
@@ -49,6 +53,10 @@ pub mod diversify;
 /// The arena: the pairwise comparison surface and the ladder it puts works on
 /// (spec §12.4).
 pub mod arena;
+
+/// Ranking metrics: `nDCG@10`, `recall@50` and overlap, which is how "we match kindred"
+/// becomes a number instead of a claim (spec §8.3, R-6).
+pub mod eval;
 
 /// The ranker: the blend that turns a reader's profile and a candidate work into an
 /// order (spec §12.7, §19).
