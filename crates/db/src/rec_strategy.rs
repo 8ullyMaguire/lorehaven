@@ -319,20 +319,34 @@ pub fn cooccurrence_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            // **Cross-reader, and it used to be self-referential.** The join was
+            // `b1.account_id = b2.account_id`, which pairs a reader's bookmarks with that same
+            // reader's bookmarks and then excludes everything the reader has bookmarked — so the
+            // result set was empty for every reader, on every catalogue, by construction. The suite
+            // did not notice because it only ever asserted emptiness (T-R6-02).
+            //
+            // The strategy's name is the fix: a work "co-occurs" when the readers who bookmarked
+            // what this reader bookmarked also bookmarked it. `b1` is the reader's shelf, `b2` is
+            // other readers of those same works, `b3` is what those readers also shelved.
             let sql = format!(
                 r#"
-                SELECT CAST(b2.subject_id AS TEXT), COUNT(*) as score
+                SELECT CAST(b3.subject_id AS TEXT), COUNT(*) as score
                 FROM bookmarks b1
-                JOIN bookmarks b2 ON b1.account_id = b2.account_id
-                    AND b1.subject_id != b2.subject_id
+                JOIN bookmarks b2
+                    ON b2.subject_id = b1.subject_id
+                   AND b2.account_id != b1.account_id
+                   AND b2.subject_type = 'work'
+                JOIN bookmarks b3
+                    ON b3.account_id = b2.account_id
+                   AND b3.subject_type = 'work'
                 WHERE b1.account_id = '{}'
                     AND b1.subject_type = 'work'
-                    AND b2.subject_type = 'work'
-                    AND b2.subject_id NOT IN (
+                    AND b3.subject_id != b1.subject_id
+                    AND b3.subject_id NOT IN (
                         SELECT subject_id FROM bookmarks
                         WHERE account_id = '{}' AND subject_type = 'work'
                     )
-                GROUP BY b2.subject_id
+                GROUP BY b3.subject_id
                 ORDER BY score DESC
                 LIMIT {}
                 "#,
@@ -355,29 +369,54 @@ pub fn time_decay_strategy() -> RecStrategyFn {
             // than a dialect query: one string below, one expression here. The failure mode
             // of getting this wrong is a parse error, `function julianday(unknown) does not
             // exist`, which reads like a missing extension instead of a dialect bug.
+            // The age is `b3.created_at` -- the bookmark of the *other* reader whose taste brought
+            // this work here -- and not `b2`'s, because `b2` is the join through the reader's own
+            // shelf and says nothing about how fresh the recommendation is. Same cross-reader
+            // correction as `cooccurrence_strategy`, which carried the identical self-referential
+            // join and the identical permanent emptiness.
             let age_days = db.sql(
-                "julianday('now') - julianday(b2.created_at)",
-                "EXTRACT(EPOCH FROM (now() - b2.created_at::timestamptz)) / 86400.0",
+                "julianday('now') - julianday(b3.created_at)",
+                "EXTRACT(EPOCH FROM (now() - b3.created_at::timestamptz)) / 86400.0",
             );
+            // The score expression is a dialect fragment as well, for the reason the seeded suite
+            // found (T-R6-02): `SUM(1.0 / ...)` is NUMERIC on PostgreSQL and Rust decodes these rows
+            // as `f64`, so the query failed with "Rust type `f64` (as SQL type `FLOAT8`) is not
+            // compatible with SQL type `NUMERIC`". SQLite has no such distinction, which is why
+            // only the PostgreSQL run of the new test could find it.
+            let score = db.sql(
+                "SUM(1.0 / (1.0 + {age_days}))",
+                "SUM(1.0 / (1.0 + {age_days}))::double precision",
+            )
+            .replace("{age_days}", &age_days);
+            // Named format arguments throughout, for the reason `hidden_classics` gives below: a
+            // positional list with four holes and two repeats of one value is where an argument
+            // goes into the wrong hole and the query is still valid.
             let sql = format!(
                 r#"
-                SELECT CAST(b2.subject_id AS TEXT),
-                       SUM(1.0 / (1.0 + {age_days})) as score
+                SELECT CAST(b3.subject_id AS TEXT),
+                       {score} as score
                 FROM bookmarks b1
-                JOIN bookmarks b2 ON b1.account_id = b2.account_id
-                    AND b1.subject_id != b2.subject_id
-                WHERE b1.account_id = '{}'
+                JOIN bookmarks b2
+                    ON b2.subject_id = b1.subject_id
+                   AND b2.account_id != b1.account_id
+                   AND b2.subject_type = 'work'
+                JOIN bookmarks b3
+                    ON b3.account_id = b2.account_id
+                   AND b3.subject_type = 'work'
+                WHERE b1.account_id = '{account}'
                     AND b1.subject_type = 'work'
-                    AND b2.subject_type = 'work'
-                    AND b2.subject_id NOT IN (
+                    AND b3.subject_id != b1.subject_id
+                    AND b3.subject_id NOT IN (
                         SELECT subject_id FROM bookmarks
-                        WHERE account_id = '{}' AND subject_type = 'work'
+                        WHERE account_id = '{account}' AND subject_type = 'work'
                     )
-                GROUP BY b2.subject_id
+                GROUP BY b3.subject_id
                 ORDER BY score DESC
-                LIMIT {}
+                LIMIT {cap}
                 "#,
-                account_id, account_id, cap
+                score = score,
+                account = account_id,
+                cap = cap
             );
             let pairs = query_pairs_f64(&db, &sql).await?;
             Ok(pairs.into_iter().map(|(id, _)| id).collect())

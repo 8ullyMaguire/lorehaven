@@ -776,6 +776,18 @@ same rule. That is deliberate: two scans that must agree are a cross-check.
 
 Listed because the pattern recurs and the fix is the reference for it.
 
+* **Two collaborative strategies could never return a row, on any database.** `cooccurrence_strategy`
+  and `time_decay_strategy` joined `bookmarks` to itself on `account_id` — pairing a reader's shelf
+  with the same reader's shelf — and then excluded everything on that shelf, so the result was empty
+  by construction. The suite did not notice because every test in it asserted `is_empty()`
+  (T-R6-02). Both now walk the graph they are named for: readers who shelved what this reader
+  shelved, then what those readers also shelved. `time_decay`'s age comes from the *other* reader's
+  bookmark, since the join through the reader's own shelf says nothing about freshness.
+* **`SUM(1.0 / ...)` is NUMERIC on PostgreSQL and these rows decode as `f64`.** The sixth dialect
+  fault in this file's neighbourhood, found the moment the strategy suite seeded a row instead of
+  asserting emptiness: `Rust type f64 (as SQL type FLOAT8) is not compatible with SQL type NUMERIC`.
+  SQLite has one numeric type, so only the PostgreSQL run could see it. Fixed with an explicit
+  `::double precision` fragment, beside the existing `age_days` fragment.
 * **The works ladder was stored and nothing read it.** `work_ratings` was written by every arena
   ballot (spec §12.4a) and no candidate engine loaded a rating, so the arena collected a signal with
   no consumer — the same fault the project charges kindred's tag arena with, one layer along. Fixed
