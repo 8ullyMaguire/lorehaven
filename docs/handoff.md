@@ -82,9 +82,13 @@ second engine in `routes/discovery.rs` reads `work_ratings::top_rated_for`: four
 `matches >= 3` floor, `published`/`public`, the reader's content filters, and the reader's own
 ballots) and `taste_signal` deliberately left unset, because the explanation renders a non-zero
 signal as a claim about the reader's taste and a rating is a fact about the work. Its **position is
-the ranking decision**: `blend` orders by the first engine that produced a work, so last would have
-been cut off every feed by `popular` and first would have been a leaderboard wearing a feed's
-clothes; second, between personalisation and popularity, is a quality prior. New reason
+the ranking decision, and the first attempt at it served nothing.** `blend` orders by the first
+engine that produced a work and the route takes the first twenty candidates, so an engine placed
+after one that fills the page contributes zero items — live, with two accounts and two ballots,
+five rated works and not one in the feed. It now leads a bounded shelf (`LADDER_SHELF = 5`): a few
+works readers vouched for, then this reader's taste. The general form of the lesson is worth more
+than the fix: **a ranking engine's position is part of its implementation, and only a live feed
+proves it contributes.** New reason
 `rated_by_readers`, with the reader-facing sentence in both the Rust phrase table and the
 `SLOT_REASON_LABEL` map — the map falls back to the raw code, so a missing entry prints the wire
 name at a reader rather than failing loudly.
