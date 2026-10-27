@@ -912,14 +912,16 @@
        equal negative margin hands that space straight back to the layout, so the
        header keeps the height `--header-height` (scroll-padding-top) assumes.
        This changes what the finger hits, not what the eye sees — measured after:
-       link box 46px, text still at y=69..91, header still 109px.
+       link box 46px, text still at y=69..91, header still 109px. */
     padding: var(--space-3) 0;
     margin: calc(-1 * var(--space-3)) 0;
   }
 
-  /* "More" is the other control in this row, and it was 32px tall. Same trick, so
-     the row's height and the menu's position do not move. */
-  .mobile :global(.btn) {
+  /* "More" is the other control in this row, and it was 32px tall. `button.btn.sm`
+     beats the shared `.btn.quiet.sm` on specificity (element + two classes + .mobile
+     against three classes), which is why the plain `.mobile :global(.btn)` form did
+     nothing. Same trick otherwise, so the row's height does not move. */
+  .mobile :global(button.btn.sm) {
     padding-top: 0.875rem;
     padding-bottom: 0.875rem;
     margin-top: -0.375rem;
