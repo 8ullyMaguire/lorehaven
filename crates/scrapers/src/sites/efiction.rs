@@ -211,6 +211,16 @@ const MEMBERS: &[Member] = &[
         host: "ninelivesarchive.com",
         archive_path: "",
     },
+    // psychfic.com serves the family's shapes at the host root, and it is the only
+    // member recorded from a live page since the october 2026 sweep (see the
+    // fixtures): `index=1` is the metadata page with no body, `textsize=0&chapter=K`
+    // carries `div#story`, and the chapter links are ordinary `viewstory.php` hrefs.
+    // It writes story URLs without the `www.` in its own links, which is why the
+    // matcher trims the prefix on both sides rather than trusting the table.
+    Member {
+        host: "psychfic.com",
+        archive_path: "",
+    },
     Member {
         host: "sinfuldreams.com",
         archive_path: "/unicornfic",

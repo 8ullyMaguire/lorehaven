@@ -198,6 +198,92 @@ pub async fn record_response(
     Ok(ids)
 }
 
+/// Record that the reader took one served slot (§16.10a's draw).
+///
+/// Returns the take time, or `None` when the slot is not this reader's — the same
+/// answer for "never served" and "somebody else's", because §3.3 makes "does this
+/// object exist" and "may you read it" one answer.
+///
+/// **Idempotent, and the first take wins.** The `chosen_at IS NULL` in the WHERE
+/// is what makes a second pick on one hand a no-op instead of a rewrite: a reader
+/// who takes card 2 and then taps card 3 has chosen once, and moving the timestamp
+/// would make the record say the choice was card 3 while the reader's first action
+/// (which is the one that carried information) was card 2.
+pub async fn mark_chosen(
+    db: &Database,
+    pseud_id: Uuid,
+    request_id: &str,
+    work_id: &str,
+) -> Result<Option<String>> {
+    let now = crate::identity::now_rfc3339();
+    let update = db.sql(
+        "UPDATE recommendation_slots SET chosen_at = ?
+          WHERE pseud_id = ? AND request_id = ? AND work_id = ? AND chosen_at IS NULL",
+        // `chosen_at` is TEXT on both engines (migration 0128), so the value binds
+        // without a cast on either arm; the three ids are UUID on PostgreSQL.
+        "UPDATE recommendation_slots SET chosen_at = ?
+          WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND work_id = ?::uuid
+            AND chosen_at IS NULL",
+    );
+
+    let affected = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&update)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .bind(work_id)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+                .rows_affected()
+        }
+        Backend::Postgres => {
+            sqlx::query(&update)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .bind(work_id)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?
+                .rows_affected()
+        }
+    };
+
+    if affected > 0 {
+        return Ok(Some(now));
+    }
+
+    // Nothing was updated, and there are two reasons for that: the slot is already
+    // taken (which is a success, and the reader should be told what it recorded),
+    // or it is not this reader's at all (which is a miss). One SELECT separates
+    // them, and it is scoped to the caller for the reason above.
+    let existing = db.sql(
+        "SELECT chosen_at FROM recommendation_slots
+          WHERE pseud_id = ? AND request_id = ? AND work_id = ?",
+        "SELECT chosen_at FROM recommendation_slots
+          WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND work_id = ?::uuid",
+    );
+    let row: Option<(Option<String>,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&existing)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .bind(work_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&existing)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .bind(work_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.and_then(|r| r.0))
+}
+
 /// The explanation for one slot, or `None` if the reader does not own it.
 ///
 /// `pseud_id` is the caller's, and the comparison is in the WHERE, so asking

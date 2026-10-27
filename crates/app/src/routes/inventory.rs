@@ -1422,6 +1422,28 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/discovery/taste-profile",
         audience: Audience::Authenticated,
     },
+    // ------------------------------------------------------------------
+    // The draw (§16.10a) — `docs/spec-amendments/draw-slot.md`
+    //
+    // Authenticated, both of them: a draw deals from **the reader's own** ranked
+    // pool, and there is no such thing as an anonymous reader's pool. An
+    // anonymous hand would have to be dealt from the catalogue, which is a
+    // browse with a card suit on it.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "draw.rs",
+        handler: "get_draw",
+        method: "GET",
+        path: "/discovery/draw",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "draw.rs",
+        handler: "post_draw_pick",
+        method: "POST",
+        path: "/discovery/draw/pick",
+        audience: Audience::Authenticated,
+    },
     RouteEntry {
         file: "discovery.rs",
         handler: "recompute_taste_profile",

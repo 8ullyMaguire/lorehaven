@@ -23,6 +23,8 @@ pub mod directory;
 pub mod discovery;
 pub mod dnf;
 pub mod document;
+// §16.10a: the draw slot's deal.
+pub mod draw;
 pub mod earned_bookmark;
 pub mod economy;
 pub mod error;

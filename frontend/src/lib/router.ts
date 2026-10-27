@@ -41,6 +41,7 @@ export type RouteId =
   | 'concierge'
   | 'blind-date'
   | 'surprise-me'
+  | 'draw'
   | 'arena'
   | 'community'
   | 'forum-category'
@@ -109,6 +110,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/concierge': 'concierge',
   '/blind-date': 'blind-date',
   '/surprise-me': 'surprise-me',
+  '/draw': 'draw',
   '/arena': 'arena',
   '/community': 'community',
   '/notifications': 'notifications',

@@ -1,0 +1,18 @@
+-- 0128: a served slot can be taken (§16.10a, docs/spec-amendments/draw-slot.md).
+--
+-- The draw deals a hand from the reader's own ranked pool, and every card is
+-- already a `recommendation_slots` row — the table exists to answer "what did
+-- this instance put in front of this reader, and why" (§12 north-star
+-- attribution). What it could not answer is what the reader did about it, and a
+-- draw whose choice is invisible teaches the recommender nothing.
+--
+-- NULLABLE, AND WITH NO BACKFILL. A slot nobody took has no take time, and the
+-- difference between "served and passed" and "served and still deciding" is a
+-- difference between NULL and a timestamp, not between two booleans. A default of
+-- now() would have marked every historical slot as taken.
+--
+-- TEXT rather than TIMESTAMPTZ, matching every other timestamp on this table
+-- (`created_at` included): the two dialects store RFC 3339 text, and a column
+-- that is TIMESTAMPTZ on one engine and TEXT on the other is the class of drift
+-- the two-engine gate exists to catch.
+ALTER TABLE recommendation_slots ADD COLUMN chosen_at TEXT;

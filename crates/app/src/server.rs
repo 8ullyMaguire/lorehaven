@@ -391,6 +391,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // §16.10a: the draw. Default class, like discovery: two reads and one
+        // write, all gated on a session inside the handlers.
+        .merge(classified(
+            routes::draw::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Items 14, 27 and 33 of the 100-idea audit. Default class: the router carries one
         // per-reader read (item 14, gated inside its handler by RequireSession) and two
         // reads over public rows. Classing the whole tree as Read would understate the
