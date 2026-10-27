@@ -88,6 +88,7 @@
 /* ---- Reading Room: warm paper and evergreen (default) ------------------ */
 :root,
 [data-theme='reading-room'] {
+  color-scheme: light;
   --color-bg: #f6f3ec;
   --color-surface: #fffdfa;
   --color-surface-raised: #ffffff;
@@ -140,6 +141,7 @@
 
 /* ---- Clear Day: neutral white and charcoal ----------------------------- */
 [data-theme='clear-day'] {
+  color-scheme: light;
   --color-bg: #ffffff;
   --color-surface: #fafafa;
   --color-surface-raised: #ffffff;

@@ -82,6 +82,29 @@ a:hover {
   color: var(--color-primary-hover);
 }
 
+/*
+ * A button's label is the theme's ink, never the platform's.
+ *
+ * Unstyled buttons took the user-agent's `buttontext`, and Chrome resolves that
+ * from the *system* colour scheme rather than the page's — so on a dark-mode
+ * machine every button we had not given a colour rendered white. In the light
+ * themes that is white on cream: measured live at 1.11 on the /roadmap tab
+ * strip and on /search's "Add", both invisible. `inherit` keeps the label with
+ * the surface it sits on; a filled control still overrides it with its own
+ * contrast token.
+ */
+button {
+  color: inherit;
+}
+
+/* Same reasoning for native fields, which otherwise flip their text and their
+   dropdown chrome to the system scheme mid-page. */
+input,
+select,
+textarea {
+  color: var(--color-text);
+}
+
 /* A visible focus ring on everything, so keyboard users are never lost. */
 :focus-visible {
   outline: 2px solid var(--color-focus);
