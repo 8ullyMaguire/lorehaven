@@ -77,13 +77,22 @@ M8/M4), so this predates the arena change and is recorded rather than quietly de
 565 pass, including all nine of `Arena.test.ts` — one of which now pins the new contract: the vote
 carries all four card ids, because the server cannot derive the middles from best and worst.
 
-**Nothing reads `work_ratings` yet.** The ladder stores signal and the feed ignores it — the same
-fault this project accuses kindred's tag arena of, one layer further along. T-M16-10 is written:
-a fourth candidate engine feeding `Candidate.taste_signal` (not the positional score, or a
-1600-rated work outranks a personalised one for every reader), gated on `matches >= 3` so a work
-rated once — `phi ≈ 300`, mostly noise — cannot claim a slot, and empty rather than erroring on a
-fresh instance. The ladder also starts nearly empty here: one ballot is four rated works, so the
-first hour of arena use matters more than any tuning.
+**The ladder now reaches the feed, and that closed the gap this section used to record.** The
+second engine in `routes/discovery.rs` reads `work_ratings::top_rated_for`: four filters (a
+`matches >= 3` floor, `published`/`public`, the reader's content filters, and the reader's own
+ballots) and `taste_signal` deliberately left unset, because the explanation renders a non-zero
+signal as a claim about the reader's taste and a rating is a fact about the work. Its **position is
+the ranking decision**: `blend` orders by the first engine that produced a work, so last would have
+been cut off every feed by `popular` and first would have been a leaderboard wearing a feed's
+clothes; second, between personalisation and popularity, is a quality prior. New reason
+`rated_by_readers`, with the reader-facing sentence in both the Rust phrase table and the
+`SLOT_REASON_LABEL` map — the map falls back to the raw code, so a missing entry prints the wire
+name at a reader rather than failing loudly.
+
+The ladder starts nearly empty here (one ballot is four rated works), so the first hour of arena use
+matters more than any tuning: with four ratings, the feed's head is four fixed works. That is the
+honest consequence of an instance whose whole ranking signal is 0 bookmarks, 1 reading-history row
+and 0 kudos.
 
 ## M59 Phase C1 — the body audience, and the SQLite this project actually runs
 

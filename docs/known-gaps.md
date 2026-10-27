@@ -7,25 +7,6 @@ comment in the test body is the entry's executable form.
 
 ## Open — product decisions
 
-### M16-D02 · The works ladder is stored, and nothing reads it
-
-`work_ratings` is written by the arena ballot (spec §12.4a) and no ranking consults it. In
-`crates/app/src/routes/discovery.rs` no candidate engine loads a rating, and
-`discovery::blend` does not know the table exists. A stored signal that nobody reads is the same
-fault this repository accuses kindred's tag arena of, one layer further along: there it was a
-ladder with no ratings, here it is ratings with no reader.
-
-Left open rather than half-wired on purpose. The integration is a design decision, not a plumbing
-one: the rating must arrive through `Candidate.taste_signal` and **not** through the positional
-score, because a 1600-rated work in the position canal outranks a personalised work for every
-reader on the instance, which is a global leaderboard wearing a feed's clothes. And it must be
-gated on `matches >= 3`: one ballot rates a work to `phi ≈ 253`, and a rating with that much
-uncertainty is mostly noise — presenting it as a reason would be presenting a guess as evidence.
-
-Planned as T-M16-10 in `10-Projects/darkhold-implementation-plan.md`, verified by
-`select count(*) from work_ratings where matches >= 3` being non-zero and at least one feed slot
-whose reason names the ladder.
-
 ### M21-D03 · A re-subscribe returns an id that addresses no row
 
 `subscribe_work` mints a fresh `Uuid` and returns it unconditionally, but its
@@ -795,6 +776,15 @@ same rule. That is deliberate: two scans that must agree are a cross-check.
 
 Listed because the pattern recurs and the fix is the reference for it.
 
+* **The works ladder was stored and nothing read it.** `work_ratings` was written by every arena
+  ballot (spec §12.4a) and no candidate engine loaded a rating, so the arena collected a signal with
+  no consumer — the same fault the project charges kindred's tag arena with, one layer along. Fixed
+  by `work_ratings::top_rated_for` and a second engine in `routes/discovery.rs`, which carries four
+  filters (a `matches` floor, the published/public pair, the reader's content filters, and the
+  reader's own ballots) and deliberately leaves `taste_signal` unset, because a rating is evidence
+  about the work and the explanation renders that field as a claim about the reader's taste. The
+  engine sits between personalisation and popularity: last would have been sliced off every feed by
+  the popularity engine, first would have been a leaderboard in a feed's clothes.
 * **`category_governance`: six broken PostgreSQL statements.**
   `vote_on_proposal` and `vote_on_entry_mod` were non-functional on PostgreSQL
   entirely, plus four `MAX()`/`SUM()` aggregates decoding `INT4` into `i64`
