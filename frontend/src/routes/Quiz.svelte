@@ -205,13 +205,13 @@
 
   .quiz-pick.active {
     background: var(--accent);
-    color: white;
+    color: var(--color-accent-contrast);
     border-color: var(--accent);
   }
 
   .quiz-reject.active {
     background: var(--danger);
-    color: white;
+    color: var(--color-danger-contrast);
     border-color: var(--danger);
   }
 

@@ -417,7 +417,7 @@
 
   .tab.active {
     background: var(--accent);
-    color: white;
+    color: var(--color-accent-contrast);
   }
 
   .board {
@@ -592,13 +592,13 @@
   }
 
   .badge.best {
-    background: #4caf50;
-    color: white;
+    background: var(--color-success);
+    color: var(--color-primary-contrast);
   }
 
   .badge.worst {
-    background: #f44336;
-    color: white;
+    background: var(--color-danger);
+    color: var(--color-danger-contrast);
   }
 
   .ballot-submit {

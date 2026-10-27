@@ -180,7 +180,7 @@
   button {
     padding: 0.5rem 1rem;
     background: var(--accent);
-    color: white;
+    color: var(--color-accent-contrast);
     border: none;
     border-radius: 4px;
     cursor: pointer;

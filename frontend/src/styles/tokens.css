@@ -304,6 +304,13 @@
   --color-success-bg: var(--color-surface-raised);
   --color-success-bg: color-mix(in srgb, var(--color-success) 14%, var(--color-surface));
 
+  /* filled-control ink: every theme's primary-contrast is the ink that reads
+     on that theme's filled buttons, and the accent and danger fills are the same
+     weight of colour. A literal `color: white` on those fills measured 2.26 on
+     the copper accent in `after-hours`; the token is what makes it theme-aware. */
+  --color-accent-contrast: var(--color-primary-contrast);
+  --color-danger-contrast: var(--color-primary-contrast);
+
   /* shape and type */
   --radius: var(--radius-md);
   --radius-full: var(--radius-pill);

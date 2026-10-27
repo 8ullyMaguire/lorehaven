@@ -108,13 +108,11 @@ describe('design tokens', () => {
   });
 
   it('defines every custom property a component reads', () => {
-    console.log('DEBUG defined', defined.size, 'used', used.size, 'sample', [...defined].slice(0,6));
     const missing: string[] = [];
     for (const [name, where] of [...used].sort()) {
       if (defined.has(name) || RUNTIME.has(name) || FALLBACK_OK.has(name)) continue;
       missing.push(`${name} (${[...where].sort().join(', ')})`);
     }
-    console.log('DEBUG missing', missing.length, missing.slice(0,5));
     expect(
       missing,
       `undefined custom properties fall back to their literal, which is usually a light-theme ` +
@@ -128,5 +126,27 @@ describe('design tokens', () => {
     for (const name of ['--surface', '--text-muted', '--border', '--accent', '--danger', '--radius']) {
       expect(tokens, `${name} must be declared in styles/tokens.css`).toContain(`${name}:`);
     }
+  });
+  it('never paints text with a literal white', () => {
+    // `color: white` on a filled control is right only while the fill is dark.
+    // Measured on `/roadmap` in `after-hours`, the active tab's white label sat
+    // on the copper accent at a ratio of 2.26 — below the 4.5 body-text
+    // threshold, in the theme the instance ships as its default. The fill's ink
+    // belongs in a token (`--color-accent-contrast` and friends) so it follows
+    // the theme instead of the fill happening to be dark enough.
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (!file.endsWith('.svelte')) continue;
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        if (/^\s*color:\s*(white|#fff(fff)?)\s*;/i.test(line)) {
+          offenders.push(`${relative(ROOT, file)}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      'use --color-accent-contrast / --color-danger-contrast / --color-primary-contrast ' +
+        'instead of a literal white text colour:\n  ' + offenders.join('\n  '),
+    ).toEqual([]);
   });
 });

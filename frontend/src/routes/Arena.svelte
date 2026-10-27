@@ -393,7 +393,7 @@
 
   .reason-tag.selected {
     background: var(--primary);
-    color: white;
+    color: var(--color-primary-contrast);
     border-color: var(--primary);
   }
 

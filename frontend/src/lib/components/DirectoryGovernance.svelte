@@ -523,7 +523,7 @@
   .entry-mod-button {
     padding: var(--space-1) var(--space-2);
     background: var(--accent);
-    color: white;
+    color: var(--color-accent-contrast);
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;

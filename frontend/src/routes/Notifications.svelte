@@ -152,7 +152,7 @@
   }
   .unread-badge {
     background: var(--accent);
-    color: white;
+    color: var(--color-accent-contrast);
     border-radius: 999px;
     padding: 0.25rem 0.75rem;
     font-size: 0.75rem;

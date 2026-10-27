@@ -27,7 +27,9 @@
     <path d="M18 42V22a6 6 0 0 1 12 0v20" fill="none" stroke="currentColor" stroke-width="1.5" />
   </svg>
 
-  <h3>{title}</h3>
+  <!-- h2, not h3: an empty state is often the page's first content, and an
+       h1 followed by h3 skips a level for a reader navigating by headings. -->
+  <h2>{title}</h2>
   {#if description}
     <p>{description}</p>
   {/if}

@@ -405,7 +405,7 @@
   .unpin {
     padding: var(--space-1) var(--space-2);
     background: var(--danger);
-    color: white;
+    color: var(--color-danger-contrast);
     border: none;
     border-radius: var(--radius);
     cursor: pointer;
