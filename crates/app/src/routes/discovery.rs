@@ -377,42 +377,21 @@ pub(crate) async fn build_candidate_engines(
 ) -> ApiResult<Vec<Vec<darkhold_domain::discovery::Candidate>>> {
     let mut engines: Vec<Vec<darkhold_domain::discovery::Candidate>> = Vec::new();
 
-    if let Some(account_id) = account_id {
-        // Engine 1: tag-based personalization (from taste profile).
-        let personalized = darkhold_db::discovery::personalized_recommendations(
-            state.db(),
-            account_id,
-            viewer_pseud,
-            limit,
-        )
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e)))?;
-        engines.push(
-            personalized
-                .into_iter()
-                .enumerate()
-                .map(|(idx, id)| darkhold_domain::discovery::Candidate {
-                    work_id: id,
-                    score: (limit - idx as i64),
-                    reason: "tags".into(),
-                    taste_signal: 0.0,
-                    diversity_class: 0.5,
-                })
-                .collect(),
-        );
-    }
-
-    // Engine 2: the works ladder (spec §12.4a). The arena's best/worst ballot rates works with
+    // Engine 1: the works ladder (spec §12.4a). The arena's best/worst ballot rates works with
     // Glicko-2, and this is the engine that finally *reads* those ratings.
     //
-    // **Position is the ranking decision.** `blend` sorts by the first engine that produced a
-    // work, so this order says: what this reader's own taste points at, then what readers have
-    // judged good, then what is merely popular. Putting the ladder last would have been the safe
-    // choice and the wrong one -- `popular` returns a full page, so a ladder-only candidate would
-    // be sliced off the end of every feed and the ratings would never reach anybody. Putting it
-    // first would let a global rating outrank personalisation for every reader, which is a
-    // leaderboard wearing a feed's clothes. Between the two is a quality prior, which is what a
-    // rating is.
+    // **Position is the ranking decision, and the first answer here was wrong.** The engine
+    // originally sat second, on the reasoning that personalisation should lead and a rating is a
+    // quality prior. Live, that served nothing: `blend` orders by the first engine that produced a
+    // work and the route takes the first fifteen candidates, so an engine placed after one that
+    // fills the page contributes exactly zero items -- measured, not assumed: two accounts, two
+    // ballots, five rated works, and not one of them in the feed.
+    //
+    // So the ladder leads, with a bounded shelf: `LADDER_SHELF` candidates at most. A page that is
+    // entirely best-rated would be a global leaderboard with a feed's title, which is why the cap
+    // exists; a page where the arena never appears is a signal with no consumer, which is why the
+    // position is first. Between them is what a quality prior actually looks like: a few works
+    // readers vouched for, then this reader's own taste.
     //
     // Two properties are load-bearing:
     //
@@ -425,11 +404,16 @@ pub(crate) async fn build_candidate_engines(
     // A ladder failure is fatal here, unlike the ballot write: a partial feed is a feed this code
     // has no business serving silently, so the error goes up.
     const LADDER_MIN_MATCHES: i64 = 3;
+    /// How many works the ladder may place at the head of a feed.
+    ///
+    /// Not a tuning knob: every slot here is a slot personalisation does not get, so it is the
+    /// price of the arena being visible at all. Five is a shelf, twenty is a leaderboard.
+    const LADDER_SHELF: i64 = 5;
     let ladder = darkhold_db::work_ratings::top_rated_for(
         state.db(),
         account_id,
         viewer_pseud,
-        limit,
+        limit.min(LADDER_SHELF),
         LADDER_MIN_MATCHES,
     )
     .await
@@ -459,6 +443,31 @@ pub(crate) async fn build_candidate_engines(
                     work_id,
                     score: (limit - idx as i64),
                     reason: "ladder".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.5,
+                })
+                .collect(),
+        );
+    }
+
+    if let Some(account_id) = account_id {
+        // Engine 2: tag-based personalization (from taste profile).
+        let personalized = darkhold_db::discovery::personalized_recommendations(
+            state.db(),
+            account_id,
+            viewer_pseud,
+            limit,
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+        engines.push(
+            personalized
+                .into_iter()
+                .enumerate()
+                .map(|(idx, id)| darkhold_domain::discovery::Candidate {
+                    work_id: id,
+                    score: (limit - idx as i64),
+                    reason: "tags".into(),
                     taste_signal: 0.0,
                     diversity_class: 0.5,
                 })
