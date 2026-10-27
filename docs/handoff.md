@@ -59,6 +59,29 @@ signal.
   with a bundle and a merge (`86ab12a7`), taking the superset `rec_strategy.rs` (nine CASTs plus
   four further dialect fixes) over the narrower `id_cast()` helper it replaced.
 
+### Two recommender strategies had never returned a row
+
+`rec_strategy_integration.rs` asserted `is_empty()` against an empty database in every test, so it
+was equally green when a query was broken — and it was. Seeding the fixture (T-R6-02) found that
+`cooccurrence_strategy` and `time_decay_strategy` joined `bookmarks` to itself **on `account_id`**:
+a reader's shelf paired with the same reader's shelf, then everything on that shelf excluded. Empty
+by construction, on every catalogue, on both engines, for every reader — the two strategies the
+recommendation layer is named after contributed nothing, ever.
+
+Both now walk the graph they are named for: readers who shelved what this reader shelved, then what
+*those* readers also shelved. `time_decay`'s age comes from the other reader's bookmark, because the
+join through the reader's own shelf says nothing about freshness.
+
+The same test found a sixth dialect fault: `SUM(1.0 / (1.0 + age))` is NUMERIC on PostgreSQL while
+the row decodes as `f64`, so `time_decay` errored instead of ranking. SQLite has one numeric type,
+which is why only the PostgreSQL run could see it. Fixed with a `::double precision` fragment beside
+the existing `age_days` one.
+
+Live, read-only, on the real catalogue: all nine strategies now execute on PostgreSQL without a
+decode error — `bandit` and `completion_weight` return 5 ids, and the collaborative ones return 0
+because this instance holds 0 bookmarks and 1 reading-history row. Zero is the correct answer here;
+an error was the wrong one.
+
 ### One catalogue, not two
 
 `fic-catalogue-ingest.timer` was still folding every crawl into **both** the ascend and the
