@@ -750,6 +750,17 @@ pub fn apply_arena_ballot(
     let best_score = dimension_score(best, &target_dim, dimensions);
     let worst_score = dimension_score(worst, &target_dim, dimensions);
 
+    // A comparison the cards do not differ on is NOT evidence, and it must not be scored as a
+    // loss. This is not a nicety: `work_vector_from_tags` raises a work's score on a dimension
+    // only when the work carries a tag named after it, and this catalogue has none (0 of
+    // 30,981 tags, measured 2026-10-27) — so every card is [0.5; 5], `best_score > worst_score`
+    // is false, and the old code recorded `actual = 0.0` on every ballot ever cast. That is a
+    // -16 drift per ballot with nothing pushing back, and the weights it produced were flat by
+    // construction. See docs/spec-amendments/arena-work-ladder.md.
+    if (best_score - worst_score).abs() < f64::EPSILON {
+        return updated;
+    }
+
     if let Some(dim_elo) = updated.iter_mut().find(|d| d.dimension_key == target_dim) {
         let expected = 1.0 / (1.0 + 10f64.powf(-(dim_elo.elo_rating - 1500.0) / 400.0));
         let actual = if best_score > worst_score { 1.0 } else { 0.0 };
@@ -958,6 +969,44 @@ mod arena_tests {
             updated[0].elo_rating < 1500.0,
             "preferring the lower-scoring card must lower the dimension Elo, got {}",
             updated[0].elo_rating
+        );
+    }
+
+    #[test]
+    fn a_ballot_between_cards_that_score_the_same_records_nothing() {
+        // The catalogue this shipped against has no tag named after any dimension, so every
+        // card's vector is [0.5; 5] and `best_score > worst_score` is false. Before the guard
+        // that recorded `actual = 0.0` — a loss — on EVERY ballot, drifting the dimension down
+        // by 16 a time with nothing pushing back. See
+        // docs/spec-amendments/arena-work-ladder.md.
+        let round = ArenaRound {
+            cards: vec![
+                test_card_at("1", "fandom_a", "prose", 0.5),
+                test_card_at("2", "fandom_a", "prose", 0.5),
+                test_card_at("3", "fandom_a", "prose", 0.5),
+                test_card_at("4", "fandom_a", "prose", 0.5),
+            ],
+        };
+        let elos = vec![DimensionElo {
+            dimension_key: "prose".to_string(),
+            elo_rating: 1500.0,
+            matches_played: 2,
+        }];
+        let ballot = ArenaBallot {
+            best_work_id: "1".to_string(),
+            worst_work_id: "4".to_string(),
+            reason_tags: vec!["prose".to_string()],
+        };
+        let dims = vec![TasteDimension {
+            key: "prose".to_string(),
+            label: "Prose".to_string(),
+            admin_target: 0.5,
+            weight: 1.0,
+        }];
+        let updated = apply_arena_ballot(&elos, &round, &ballot, &dims);
+        assert_eq!(
+            updated[0], elos[0],
+            "a ballot between indistinguishable cards must not move the Elo or the match count"
         );
     }
 

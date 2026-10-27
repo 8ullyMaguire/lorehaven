@@ -3467,6 +3467,15 @@ export interface ArenaVoteRequest {
   best_work_id: string;
   worst_work_id: string;
   reason_tags: string[];
+  /**
+   * Every card the reader was shown (spec §12.4a).
+   *
+   * The ballot is five comparisons — best over the two middles and the worst, each middle
+   * over the worst — and the server cannot derive the middles from best and worst. Omitting
+   * this still records the ballot, but only best against worst, which rates two works
+   * instead of four. Optional so an older client keeps working.
+   */
+  card_ids?: string[];
 }
 
 export interface ArenaVoteResponse {

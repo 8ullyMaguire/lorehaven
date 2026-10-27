@@ -99,6 +99,8 @@ pub mod taste_health;
 pub mod taste_import;
 pub mod taste_leakage;
 pub mod taste_vectors;
+/// The works ladder: the arena's Glicko-2 ratings, stored (spec §12.4a).
+pub mod work_ratings;
 pub mod tasting;
 pub mod taxonomy;
 pub mod thread_modes;
