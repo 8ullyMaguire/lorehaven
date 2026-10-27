@@ -86,7 +86,10 @@ the ranking decision, and the first attempt at it served nothing.** `blend` orde
 engine that produced a work and the route takes the first twenty candidates, so an engine placed
 after one that fills the page contributes zero items — live, with two accounts and two ballots,
 five rated works and not one in the feed. It now leads a bounded shelf (`LADDER_SHELF = 5`): a few
-works readers vouched for, then this reader's taste. The general form of the lesson is worth more
+works readers vouched for, then this reader's taste. Re-measured after the fix, same procedure:
+**5 of 5 rated works in the feed**, each explaining itself as `rated_by_readers`, with
+`taste_signal: None` — the sentence says what readers thought of the work and claims nothing about
+the reader. The general form of the lesson is worth more
 than the fix: **a ranking engine's position is part of its implementation, and only a live feed
 proves it contributes.** New reason
 `rated_by_readers`, with the reader-facing sentence in both the Rust phrase table and the
