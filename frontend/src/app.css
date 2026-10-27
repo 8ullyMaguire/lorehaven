@@ -97,6 +97,25 @@ button {
   color: inherit;
 }
 
+/*
+ * A form field must be allowed to be narrower than its contents.
+ *
+ * Four components (TextField, Textarea, Select, Combobox) render a `.field`;
+ * as a flex item its automatic minimum is the content's, and a select or an
+ * input sized by its longest option then pushes the row past the viewport —
+ * measured on /search at 390px, 33px of sideways scroll after the fieldset's
+ * own minimum was fixed.
+ */
+.field {
+  min-width: 0;
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+}
+
 /* Same reasoning for native fields, which otherwise flip their text and their
    dropdown chrome to the system scheme mid-page. */
 input,
