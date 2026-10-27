@@ -7,8 +7,9 @@
 pub enum NodeKind {
     /// A fandom (e.g. "Harry Potter").
     Fandom,
-    /// A ship / relationship.
-    Ship,
+    /// A relationship — the pairing, spec §6.4's kind. Called `ship` in the estate, and
+    /// `parse` still accepts that spelling so a caller holding an old string keeps working.
+    Relationship,
     /// A character.
     Character,
     /// A general tag.
@@ -23,7 +24,7 @@ impl NodeKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Fandom => "fandom",
-            Self::Ship => "ship",
+            Self::Relationship => "relationship",
             Self::Character => "character",
             Self::Tag => "tag",
             Self::Warning => "warning",
@@ -34,7 +35,7 @@ impl NodeKind {
     pub fn parse(raw: &str) -> Option<Self> {
         Some(match raw {
             "fandom" => Self::Fandom,
-            "ship" => Self::Ship,
+            "relationship" | "ship" => Self::Relationship,
             "character" => Self::Character,
             "tag" => Self::Tag,
             "warning" => Self::Warning,
@@ -226,7 +227,7 @@ mod tests {
     fn node_kind_round_trips() {
         for kind in [
             NodeKind::Fandom,
-            NodeKind::Ship,
+            NodeKind::Relationship,
             NodeKind::Character,
             NodeKind::Tag,
             NodeKind::Warning,

@@ -414,12 +414,14 @@ async fn reader_bookmarked_work_ids(db: &Database, account_id: &str) -> Result<V
 
 /// Evidence weight for a taxonomy node kind (spec §5).
 ///
-/// Fandom and ship are the strongest requests a reader can make; a generic tag is weak.
+/// Fandom and relationship are the strongest requests a reader can make; a generic tag is weak.
+/// `ship` is kept beside `relationship` because the kind was spelled that way until 0127 and a
+/// caller may hold a row from a database that has not run it.
 /// Resolved here rather than in the caller so the weighting lives in one place and the
 /// unit test below can pin it.
 pub fn kind_weight(kind: &str) -> i64 {
     match kind {
-        "fandom" | "ship" => 3,
+        "fandom" | "relationship" | "ship" => 3,
         "character" => 2,
         _ => 1,
     }
@@ -767,4 +769,22 @@ async fn load_tag_sets(
             .push((node_id, kind_weight(&kind)));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod kind_weight_tests {
+    use super::kind_weight;
+
+    /// The vocabulary 0127 writes must be the one this function weights, or every pairing
+    /// silently drops to the generic-tag weight (1) while looking correctly resolved.
+    #[test]
+    fn a_relationship_weighs_as_much_as_a_fandom() {
+        assert_eq!(kind_weight("relationship"), 3);
+        assert_eq!(kind_weight("fandom"), 3);
+        // The pre-0127 spelling, for a row read from a database that has not migrated.
+        assert_eq!(kind_weight("ship"), 3);
+        assert_eq!(kind_weight("character"), 2);
+        assert_eq!(kind_weight("tag"), 1);
+        assert_eq!(kind_weight("freeform"), 1);
+    }
 }
