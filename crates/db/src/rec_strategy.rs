@@ -241,6 +241,24 @@ impl RecRegistry {
 }
 
 /// Run a query that returns `(String, i64)` pairs on either backend.
+///
+/// # Every query in this module casts its id column to TEXT, and it has to
+///
+/// The helpers below decode their first column into `String` on both engines. That is
+/// correct on SQLite, where an id *is* text, and wrong on PostgreSQL, where the same column
+/// is `uuid`: sqlx refuses to decode a `uuid` into a `String` and fails the whole strategy
+/// with `mismatched types; Rust type String (as SQL type TEXT) is not compatible with SQL
+/// type UUID`.
+///
+/// The symptom is worth naming because it does not look like this module's fault: the feed
+/// answers `500` for every signed-in reader while every anonymous surface stays healthy, and
+/// the error names a column rather than a query. It is why `rec_mode = "pluggable"` was dead
+/// on PostgreSQL and why the shadow comparison could never run — both go through here.
+///
+/// `CAST(x AS TEXT)` is the dialect-neutral fix: PostgreSQL has a `uuid → text` cast, and
+/// SQLite's `CAST(text AS TEXT)` is the identity. A per-dialect SQL string would have been
+/// the other option, and it is the worse one: two strings are two things to keep in step,
+/// and the second one is only ever exercised in CI if CI runs PostgreSQL.
 async fn query_pairs(db: &Database, sql: &str) -> Result<Vec<(String, i64)>> {
     match db.backend() {
         crate::Backend::Sqlite => {
@@ -303,7 +321,7 @@ pub fn cooccurrence_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT b2.subject_id, COUNT(*) as score
+                SELECT CAST(b2.subject_id AS TEXT), COUNT(*) as score
                 FROM bookmarks b1
                 JOIN bookmarks b2 ON b1.account_id = b2.account_id
                     AND b1.subject_id != b2.subject_id
@@ -333,10 +351,18 @@ pub fn time_decay_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            // `julianday()` is SQLite-only, so the age in days is a dialect fragment rather
+            // than a dialect query: one string below, one expression here. The failure mode
+            // of getting this wrong is a parse error, `function julianday(unknown) does not
+            // exist`, which reads like a missing extension instead of a dialect bug.
+            let age_days = db.sql(
+                "julianday('now') - julianday(b2.created_at)",
+                "EXTRACT(EPOCH FROM (now() - b2.created_at::timestamptz)) / 86400.0",
+            );
             let sql = format!(
                 r#"
-                SELECT b2.subject_id,
-                       SUM(1.0 / (1.0 + julianday('now') - julianday(b2.created_at))) as score
+                SELECT CAST(b2.subject_id AS TEXT),
+                       SUM(1.0 / (1.0 + {age_days})) as score
                 FROM bookmarks b1
                 JOIN bookmarks b2 ON b1.account_id = b2.account_id
                     AND b1.subject_id != b2.subject_id
@@ -368,7 +394,7 @@ pub fn tag_graph_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT wt2.work_id, COUNT(*) as score
+                SELECT CAST(wt2.work_id AS TEXT), COUNT(*) as score
                 FROM bookmarks b
                 JOIN work_tags wt1 ON wt1.work_id = b.subject_id
                 JOIN work_tags wt2 ON wt1.node_id = wt2.node_id
@@ -400,7 +426,7 @@ pub fn author_graph_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT w2.id, COUNT(*) as score
+                SELECT CAST(w2.id AS TEXT), COUNT(*) as score
                 FROM bookmarks b
                 JOIN works w1 ON w1.id = b.subject_id
                 JOIN works w2 ON w1.owner_pseud_id = w2.owner_pseud_id
@@ -432,7 +458,7 @@ pub fn sequential_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT DISTINCT r.subject_id
+                SELECT CAST(r.subject_id AS TEXT)
                 FROM reading_history_entry r
                 JOIN works w ON w.id = r.subject_id
                 WHERE r.account_id = '{}'
@@ -443,7 +469,8 @@ pub fn sequential_strategy() -> RecStrategyFn {
                         SELECT subject_id FROM bookmarks
                         WHERE account_id = '{}' AND subject_type = 'work'
                     )
-                ORDER BY r.last_read_at DESC
+                GROUP BY r.subject_id
+                ORDER BY MAX(r.last_read_at) DESC
                 LIMIT {}
                 "#,
                 account_id, account_id, cap
@@ -463,7 +490,7 @@ pub fn completion_weight_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT w.id,
+                SELECT CAST(w.id AS TEXT),
                        (CASE w.completion
                            WHEN 'completed' THEN 2
                            ELSE 1
@@ -499,12 +526,12 @@ pub fn curator_prior_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT b.subject_id, COUNT(*) as score
+                SELECT CAST(b.subject_id AS TEXT), COUNT(*) as score
                 FROM bookmarks b
                 JOIN accounts a ON a.id = b.account_id
                 WHERE b.subject_type = 'work'
-                    AND b.is_public = 1
-                    AND a.is_curator = 1
+                    AND b.is_public
+                    AND a.is_curator
                     AND b.subject_id NOT IN (
                         SELECT subject_id FROM bookmarks
                         WHERE account_id = '{}' AND subject_type = 'work'
@@ -530,8 +557,8 @@ pub fn bandit_strategy() -> RecStrategyFn {
         Box::pin(async move {
             let sql = format!(
                 r#"
-                SELECT w.id,
-                       COALESCE(m.views, 0) as score
+                SELECT CAST(w.id AS TEXT),
+                       CAST(COALESCE(m.views, 0) AS BIGINT) as score
                 FROM works w
                 LEFT JOIN work_metric_aggregates m ON m.work_id = w.id
                 WHERE w.lifecycle = 'published'
@@ -629,7 +656,7 @@ pub fn hidden_classics_strategy() -> RecStrategyFn {
             let sql = format!(
                 r#"
                 WITH engagement AS (
-                    SELECT w.id AS work_id,
+                    SELECT CAST(w.id AS TEXT) AS work_id,
                            (SELECT COUNT(DISTINCT v.viewer_hash)
                             FROM work_view_log v
                             WHERE {view_join} AND v.is_automated = 0) AS readers,
