@@ -39,6 +39,12 @@ const GW_CHAPTER_1: &str =
 const GW_CHAPTER_2: &str =
     "https://www.giantessworld.net/viewstory.php?sid=11369&textsize=0&chapter=2";
 
+const PSY_WORK: &str = "https://www.psychfic.com/viewstory.php?sid=4376&index=1";
+const PSY_CHAPTER_1: &str =
+    "https://www.psychfic.com/viewstory.php?sid=4376&textsize=0&chapter=1";
+const PSY_CHAPTER_2: &str =
+    "https://www.psychfic.com/viewstory.php?sid=4376&textsize=0&chapter=2";
+
 /// Read a recorded page.
 ///
 /// Through the crate's own decoder, because these pages declare `ISO-8859-1`
@@ -401,6 +407,13 @@ fn gw_reading() -> FixtureFetcher {
     FixtureFetcher::new()
         .with_page(GW_WORK, fixture("giantessworld-work.html"))
         .with_page(GW_CHAPTER_1, fixture("giantessworld-story-1.html"))
+}
+
+fn psychfic_reading() -> FixtureFetcher {
+    FixtureFetcher::new()
+        .with_page(PSY_WORK, fixture("psychfic-work.html"))
+        .with_page(PSY_CHAPTER_1, fixture("psychfic-chapter-1.html"))
+        .with_page(PSY_CHAPTER_2, fixture("psychfic-chapter-2.html"))
 }
 
 #[tokio::test]
@@ -772,4 +785,84 @@ fn every_member_in_the_family_is_tried_not_only_the_two_that_were_recorded() {
             "{raw} belongs to a member of the family"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// A member recorded after the port, from a live page
+// ---------------------------------------------------------------------------
+//
+// `psychfic.com` was added to `MEMBERS` in october 2026 and is the test of the
+// claim the family rests on: that a new archive running the same script needs a
+// row, not an adapter. Its pages were recorded from the live site rather than
+// written from memory of the script, and they disagree with the two members above
+// in one way that is asserted rather than smoothed over — its `index=1` work page
+// carries no body at all, which is the shape the family reads metadata from.
+
+#[test]
+fn a_sixth_member_needs_a_row_and_not_a_second_implementation() {
+    let work = recorded_work("psychfic-work.html", PSY_WORK);
+
+    assert_eq!(work.title, "Click- To Catch A Vampire");
+    assert_eq!(work.author_text, "Redwolffclaw");
+    assert_eq!(work.source_key.as_str(), "efiction");
+    // The member, not just the script: this is what keeps `sid=4376` here from
+    // colliding with `sid=4376` on any other archive in the family.
+    assert_eq!(work.source_work_key, "psychfic.com/4376");
+}
+
+#[tokio::test]
+async fn the_work_page_without_a_body_is_still_the_work_page() {
+    // The recorded `index=1` page has no `div#story`, and that is correct rather
+    // than a broken fixture: the family reads a work's metadata and chapter list
+    // from the index view, and the prose only from a chapter view. A preview that
+    // expected a body here would fail on every multi-chapter member.
+    let recorded = fixture("psychfic-work.html");
+    assert!(
+        !recorded.contains("id=\"story\""),
+        "the fixture no longer shows the shape this test is about"
+    );
+
+    let fetch = psychfic_reading();
+    let work = Efiction::new()
+        .preview(&fetch, &url(PSY_WORK), None)
+        .await
+        .expect("the index view reads as a work");
+    assert_eq!(work.title, "Click- To Catch A Vampire");
+    // And the preview asked for no chapter: a page a reader is still deciding
+    // about is not a page to spend one request per chapter on.
+    assert_eq!(fetch.requested(), vec![PSY_WORK.to_owned()]);
+}
+
+#[tokio::test]
+async fn the_new_member_reads_its_chapters_and_not_its_neighbours() {
+    // The failure this catches is the one a table entry can cause: a member whose
+    // chapter URL is built correctly but whose urls are read from the wrong install.
+    // Two chapters of one work must yield two different bodies, each the prose on
+    // its own page.
+    let fetch = psychfic_reading();
+    let adapter = Efiction::new();
+    let work = adapter
+        .preview(&fetch, &url(PSY_WORK), None)
+        .await
+        .expect("the recorded work page reads");
+
+    let first = adapter
+        .fetch_unit(&fetch, &work, 1, None)
+        .await
+        .expect("chapter 1 reads");
+    let second = adapter
+        .fetch_unit(&fetch, &work, 2, None)
+        .await
+        .expect("chapter 2 reads");
+
+    assert_eq!(first.ordinal, 1);
+    assert_eq!(second.ordinal, 2);
+    assert!(
+        first.content_html.contains("Gus walked into the Psych office"),
+        "chapter 1's prose is the prose on chapter 1's page"
+    );
+    assert_ne!(
+        first.content_html, second.content_html,
+        "two chapters read as one body means the URL was built from the wrong chapter"
+    );
 }

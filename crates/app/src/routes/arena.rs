@@ -65,6 +65,14 @@ pub struct ArenaVoteRequest {
     pub worst_work_id: String,
     #[serde(default)]
     pub reason_tags: Vec<String>,
+    /// The cards the reader was actually shown, so the ballot can be scored as the five
+    /// comparisons it is (spec §12.4a). Optional and usually four: a client that omits it
+    /// still rates best against worst, which is one comparison instead of five. The field is
+    /// not required because an old bundle is not a reason to reject a vote — but a vote whose
+    /// middles are missing is four works rated by two, and the response says how many
+    /// comparisons were recorded so the difference is visible rather than assumed.
+    #[serde(default)]
+    pub card_ids: Vec<String>,
 }
 
 /// Response for POST /arena/vote.
@@ -217,6 +225,34 @@ async fn post_arena_vote(
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(anyhow::anyhow!("record ballot: {e}"))))?;
+
+    // The works ladder (spec §12.4a). This is the rating path: one ballot is five comparisons
+    // and one rating period per work, all inside one transaction.
+    //
+    // A failure here does NOT fail the request. The ballot above is already stored and it is
+    // the reader's judgement; losing a rating update is recoverable from the ballots, and
+    // losing the vote because the ladder was unhappy is not. It is logged so a broken ladder
+    // is visible rather than silently assumed working.
+    match darkhold_db::work_ratings::record_ballot(
+        db,
+        &req.best_work_id,
+        &req.worst_work_id,
+        &req.card_ids,
+        1.0,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            tracing::debug!(
+                works = outcome.works,
+                comparisons = outcome.comparisons,
+                "arena ballot applied to the works ladder"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the works ladder did not record this ballot");
+        }
+    }
 
     // Get current Elo ratings.
     let dimensions = get_account_dimensions(db, &account_id).await?;

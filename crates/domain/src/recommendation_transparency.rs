@@ -64,6 +64,8 @@ pub enum SlotMechanism {
     Search,
     /// Blind Date's daily pick.
     BlindDate,
+    /// The draw (§16.10a): a hand of cards dealt from the reader's own pool.
+    Draw,
     /// A shelf, or an explicit "more like this" on a work page.
     SimilarToShelf,
     /// Federation: a sister instance's pick.
@@ -80,6 +82,7 @@ impl SlotMechanism {
             SlotMechanism::DiscoveryFeed => "discovery_feed",
             SlotMechanism::Search => "search",
             SlotMechanism::BlindDate => "blind_date",
+            SlotMechanism::Draw => "draw",
             SlotMechanism::SimilarToShelf => "similar_to_shelf",
             SlotMechanism::Federated => "federated",
             SlotMechanism::InstanceCuration => "instance_curation",
@@ -92,6 +95,7 @@ impl SlotMechanism {
             SlotMechanism::DiscoveryFeed,
             SlotMechanism::Search,
             SlotMechanism::BlindDate,
+            SlotMechanism::Draw,
             SlotMechanism::SimilarToShelf,
             SlotMechanism::Federated,
             SlotMechanism::InstanceCuration,

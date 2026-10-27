@@ -21,6 +21,8 @@ pub mod decision_service;
 pub mod derivative;
 pub mod directory;
 pub mod discovery;
+// §16.10a: the draw slot.
+pub mod draw;
 pub mod dnf;
 pub mod economy;
 pub mod erasure;

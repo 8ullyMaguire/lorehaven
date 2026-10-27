@@ -31,6 +31,8 @@
   import ForumTopic from './routes/ForumTopic.svelte';
   import BlindDate from './routes/BlindDate.svelte';
   import SurpriseMe from './routes/SurpriseMe.svelte';
+  // §16.10a: the draw slot.
+  import Draw from './routes/Draw.svelte';
   import Discover from './routes/Discover.svelte';
   import Concierge from './routes/Concierge.svelte';
   import Exports from './routes/Exports.svelte';
@@ -110,6 +112,7 @@
       { href: '/media', label: 'Media' },
       { href: '/blind-date', label: 'Blind Date' },
       { href: '/surprise-me', label: 'Surprise Me' },
+      { href: '/draw', label: 'Draw' },
       { href: '/arena', label: 'Arena' },
     ] },
     // The label is "Create", NOT "Publish". This is not a copy preference.
@@ -505,6 +508,8 @@
     <BlindDate />
   {:else if route.id === 'surprise-me'}
     <SurpriseMe />
+  {:else if route.id === 'draw'}
+    <Draw />
   {:else if route.id === 'arena'}
     <Arena />
   {:else if route.id === 'community'}

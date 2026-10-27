@@ -3473,6 +3473,15 @@ export interface ArenaVoteRequest {
   best_work_id: string;
   worst_work_id: string;
   reason_tags: string[];
+  /**
+   * Every card the reader was shown (spec §12.4a).
+   *
+   * The ballot is five comparisons — best over the two middles and the worst, each middle
+   * over the worst — and the server cannot derive the middles from best and worst. Omitting
+   * this still records the ballot, but only best against worst, which rates two works
+   * instead of four. Optional so an older client keeps working.
+   */
+  card_ids?: string[];
 }
 
 export interface ArenaVoteResponse {
@@ -4894,4 +4903,89 @@ export function fetchDnfReasons(
 /** Everything the caller's own pseud has marked. */
 export function fetchMyDnfList(signal?: AbortSignal): Promise<DnfRecord[]> {
   return apiFetch<DnfRecord[]>('/me/dnf', { signal });
+}
+
+/**
+ * One card in a draw hand (§16.10a, `docs/spec-amendments/draw-slot.md`).
+ *
+ * `slotId` is the server's record of *this* card in *this* hand, and the pick
+ * names it by the pair `(requestId, workId)` rather than by the slot id — the
+ * request is what makes a take attributable to one dealt hand instead of to a work
+ * the reader has been shown before.
+ */
+export interface DrawCard {
+  workId: string;
+  title: string;
+  authorHandle: string;
+  position: number;
+  slotId: string;
+}
+
+/**
+ * A dealt hand.
+ *
+ * `emptyReason` is set only when `cards` is empty, and it is a string rather than a
+ * boolean for the reason Surprise Me learned: "the catalogue has nothing to deal"
+ * and "your engines produced nothing" are different messages, and only one of them
+ * is about the reader. The server writes the sentence; the page renders it.
+ */
+export interface DrawHand {
+  cards: DrawCard[];
+  requestId: string | null;
+  date: string;
+  nonce: number;
+  poolSize?: number;
+  emptyReason?: string;
+}
+
+/** Deal a hand. The same `(nonce, day)` deals the same hand; a new nonce does not. */
+export async function fetchDraw(
+  options: { nonce?: number; hand?: number; signal?: AbortSignal } = {},
+): Promise<DrawHand> {
+  const query = new URLSearchParams();
+  if (options.nonce !== undefined) query.set('nonce', String(options.nonce));
+  if (options.hand !== undefined) query.set('hand', String(options.hand));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  const body = await apiFetch<{
+    cards: {
+      work_id: string;
+      title: string;
+      author_handle: string;
+      position: number;
+      slot_id: string;
+    }[];
+    request_id: string | null;
+    date: string;
+    nonce: number;
+    pool_size?: number;
+    empty_reason?: string;
+  }>(`/discovery/draw${suffix}`, { signal: options.signal });
+  return {
+    cards: body.cards.map((card) => ({
+      workId: card.work_id,
+      title: card.title,
+      authorHandle: card.author_handle,
+      position: card.position,
+      slotId: card.slot_id,
+    })),
+    requestId: body.request_id,
+    date: body.date,
+    nonce: body.nonce,
+    poolSize: body.pool_size,
+    emptyReason: body.empty_reason,
+  };
+}
+
+/**
+ * Take one card.
+ *
+ * The response is the take time rather than the work, because the work is already on
+ * screen and the only new fact is that the server recorded the choice. A `404` means
+ * the slot is not this reader's — never "that work does not exist".
+ */
+export function pickDrawCard(requestId: string, workId: string): Promise<{ chosenAt: string }> {
+  return apiFetch<{ work_id: string; chosen_at: string }>('/discovery/draw/pick', {
+    method: 'POST',
+    body: JSON.stringify({ request_id: requestId, work_id: workId }),
+  }).then((body) => ({ chosenAt: body.chosen_at }));
 }

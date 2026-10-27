@@ -198,6 +198,102 @@ pub async fn record_response(
     Ok(ids)
 }
 
+/// Record that the reader took a card from one dealt hand (§16.10a's draw).
+///
+/// Returns the work the hand recorded and when it recorded it, or `None` when the
+/// request holds no slot for this reader — the same answer for "never served" and
+/// "somebody else's", because §3.3 makes "does this object exist" and "may you read
+/// it" one answer.
+///
+/// # One take per hand, and the first one wins
+///
+/// A hand is a choice, so the database enforces the choice: the `NOT EXISTS` below
+/// refuses to mark a card when *any* card of the same request is already taken.
+/// Without it, two taps on two cards of one hand recorded **two** takes — which is
+/// not a choice but a second choice, and it corrupts the one signal this feature
+/// exists to collect. (Found by the live walk, not by a unit test: the unit test
+/// took one card, and a take that works once is exactly what a missing constraint
+/// looks like from the inside.)
+///
+/// The call stays idempotent for the caller: a second pick — the same card or
+/// another one — returns the take that was recorded, with the work it was recorded
+/// for, so the page can show what actually happened instead of what was tapped.
+pub async fn mark_chosen(
+    db: &Database,
+    pseud_id: Uuid,
+    request_id: &str,
+    work_id: &str,
+) -> Result<Option<(String, String)>> {
+    let now = crate::identity::now_rfc3339();
+    let update = db.sql(
+        "UPDATE recommendation_slots SET chosen_at = ?
+          WHERE pseud_id = ? AND request_id = ? AND work_id = ? AND chosen_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM recommendation_slots
+                             WHERE pseud_id = ? AND request_id = ? AND chosen_at IS NOT NULL)",
+        // `chosen_at` is TEXT on both engines (migration 0128), so the value binds
+        // without a cast on either arm; the ids are UUID on PostgreSQL.
+        "UPDATE recommendation_slots SET chosen_at = ?
+          WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND work_id = ?::uuid
+            AND chosen_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM recommendation_slots
+                             WHERE pseud_id = ?::uuid AND request_id = ?::uuid
+                               AND chosen_at IS NOT NULL)",
+    );
+
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&update)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .bind(work_id)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&update)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .bind(work_id)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+
+    // Whatever the update did, the answer is the take this hand holds — which is
+    // the one the update just made, or the one that was there before it. Reading it
+    // back rather than returning `now` is what makes a second pick honest: the page
+    // learns which card the hand recorded, not which card was tapped.
+    let existing = db.sql(
+        "SELECT work_id, chosen_at FROM recommendation_slots
+          WHERE pseud_id = ? AND request_id = ? AND chosen_at IS NOT NULL",
+        "SELECT work_id::text, chosen_at FROM recommendation_slots
+          WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND chosen_at IS NOT NULL",
+    );
+    let row: Option<(String, String)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&existing)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&existing)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row)
+}
+
 /// The explanation for one slot, or `None` if the reader does not own it.
 ///
 /// `pseud_id` is the caller's, and the comparison is in the WHERE, so asking

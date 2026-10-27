@@ -1,0 +1,11 @@
+-- 0128: a served slot can be taken (§16.10a, docs/spec-amendments/draw-slot.md).
+--
+-- Same statement as the PostgreSQL dialect, and it is not decoration: the two
+-- dialects are compared migration by migration by the parity test, and a
+-- migration present in one and not the other is a schema that drifts silently on
+-- whichever engine the developer does not run.
+--
+-- Nullable with no backfill: a slot nobody took has no take time, and "served and
+-- passed" is NULL rather than a boolean column that would need a second meaning
+-- for "not yet".
+ALTER TABLE recommendation_slots ADD COLUMN chosen_at TEXT;

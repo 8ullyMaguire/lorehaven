@@ -96,6 +96,9 @@
         best_work_id: bestId,
         worst_work_id: worstId,
         reason_tags: selectedReasons,
+        // The server rates works from the ballot (spec §12.4a), and it needs the middles to
+        // do it: best-over-worst alone is one comparison where four cards are five.
+        card_ids: round.cards.map((card) => card.work_id),
       });
       if (res.next_round) {
         round = res.next_round;

@@ -1,0 +1,40 @@
+# Darkhold on thinkcentre. Adopted from the lorehaven database: the two
+# migration chains share 0001-0113 byte-for-byte apart from comments, so this
+# instance continues the same schema rather than starting a second one.
+environment = "production"
+
+[site]
+name = "Darkhold"
+tagline = "The dark side of fanfiction"
+base_url = "https://darkhold.polarisocial.xyz"
+contact_email = "admin@polarisocial.xyz"
+
+[server]
+bind = "127.0.0.1"
+port = 8081
+max_body_bytes = 2097152
+request_timeout_secs = 30
+cors_origins = ["https://darkhold.polarisocial.xyz"]
+
+[database]
+url = "postgres://lorehaven:lorehavenpass@127.0.0.1/lorehaven"
+max_connections = 5
+acquire_timeout_secs = 10
+
+# The lorehaven storage root: 963 MB of objects plus secret.key. Sharing it is
+# what keeps existing uploads readable and stored credentials decryptable.
+[storage]
+root = "/personal/documents/code/rust/lorehaven/data"
+
+[security]
+cookie_secure = true
+session_ttl_days = 30
+csrf_required = true
+trust_proxy = true
+
+[logging]
+filter = "info,darkhold_app=info"
+format = "pretty"
+
+[tts]
+engine = "silent"

@@ -29,6 +29,12 @@ tracing.workspace = true
 uuid.workspace = true
 
 darkhold-domain = { path = "../domain" }
+# The works ladder stores the arena's ratings, and the rating maths lives in the
+# taste engine (T-M16-01). Depending on it is the right direction — the engine is a
+# pure crate that reads no database — and the alternative is worse: a second copy of
+# Glicko-2 in the store, which is two things to keep in step and the one that diverges
+# is the one nobody measures.
+darkhold-taste = { path = "../taste" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
