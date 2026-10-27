@@ -218,8 +218,8 @@ fn render_exists_character(a: &CharacterAssertion) -> Result<SqlFragment, QueryE
 ///
 /// "Any romantic pairing involving X" is an `EXISTS` over relationships whose
 /// participants include X. The correlation that matters is between the
-/// **relationship row** and the **participant**: `ship_participants` is joined on
-/// `ship_node_id` *inside* the same `EXISTS`, so a relationship counts only if
+/// **relationship row** and the **participant**: `relationship_participants` is joined on
+/// `relationship_node_id` *inside* the same `EXISTS`, so a relationship counts only if
 /// that relationship's own participants include X.
 ///
 /// `excluded_participants` compiles to a `NOT EXISTS` nested inside the same
@@ -308,11 +308,11 @@ fn render_scoped(p: &ScopedPredicate) -> Result<SqlFragment, QueryError> {
     // drops `b` would silently let a ship value name a subset of its participants.
     let mut clauses: Vec<String> = vec![
         // (a) every participant of the ship is named in the value
-        "EXISTS (SELECT 1 FROM ship_participants sp WHERE sp.ship_node_id = wr.ship_node_id \
+        "EXISTS (SELECT 1 FROM relationship_participants sp WHERE sp.relationship_node_id = wr.relationship_node_id \
          AND (? || '%') LIKE '%/' || sp.character_node_id || '/%')"
             .to_owned(),
         // (b) no participant of the ship is unnamed in the value
-        "NOT EXISTS (SELECT 1 FROM ship_participants sm WHERE sm.ship_node_id = wr.ship_node_id \
+        "NOT EXISTS (SELECT 1 FROM relationship_participants sm WHERE sm.relationship_node_id = wr.relationship_node_id \
          AND (? || '%') NOT LIKE '%/' || sm.character_node_id || '/%')"
             .to_owned(),
     ];
@@ -324,7 +324,7 @@ fn render_scoped(p: &ScopedPredicate) -> Result<SqlFragment, QueryError> {
     // (c) every name in the value is a participant of the ship
     for w in &withs {
         clauses.push(
-            "EXISTS (SELECT 1 FROM ship_participants sq WHERE sq.ship_node_id = wr.ship_node_id \
+            "EXISTS (SELECT 1 FROM relationship_participants sq WHERE sq.relationship_node_id = wr.relationship_node_id \
              AND sq.character_node_id = ?)"
                 .to_owned(),
         );
@@ -413,6 +413,59 @@ fn render_min_match(needed: usize, terms: &[QueryAst]) -> Result<SqlFragment, Qu
     Ok(SqlFragment { sql, binds })
 }
 
+
+/// The three spellings a taxonomy name is stored under, and a predicate that
+/// accepts any of them.
+///
+/// `canonical_entities.norm` does not have one shape. When a signal creates a
+/// node it holds the domain rule's collapsed-whitespace form (`slow burn`);
+/// when the importer creates it, it holds a stripped slug (`slowburn`,
+/// `asongoficeandfiregeorgerrmartin`). On the live instance 3,396 of 4,760 nodes
+/// are the second shape.
+///
+/// Fielded search bound `value.trim().to_lowercase()` against `norm` alone, so
+/// every multi-word name matched nothing — while `fandom:40K` worked, which is
+/// what made it look like a parser problem rather than a binding one. The
+/// search box's own placeholder advertises `fandom:"Harry Potter" AND tag:draco`,
+/// and its empty state repeats the same advice, so the failure was invisible on
+/// the one surface that teaches the syntax: measured live, `tag:` returned zero
+/// rows for a name 367 works carry, and zero for the node's own id.
+///
+/// Three binds rather than one, because the fix has to accept a row whichever
+/// writer made it, and because a query that silently matches nothing is a worse
+/// failure than three indexed comparisons.
+fn taxonomy_predicate(
+    relation: &str,
+    node_column: &str,
+    kind: &str,
+    value: &str,
+) -> SqlFragment {
+    // `kind` is a literal from this module, never reader input, so interpolating
+    // it cannot inject; the value is always bound.
+    let sql = format!(
+        "(EXISTS (SELECT 1 FROM {relation} r \
+          JOIN canonical_entities tn ON tn.id = r.{node_column} \
+          WHERE r.work_id = works.id AND tn.kind = '{kind}' \
+            AND (tn.norm = ? OR tn.norm = ? OR LOWER(tn.canonical) = ?)))"
+    );
+    SqlFragment::new(sql)
+        .with_bind(crate::exchange::normalise(value))
+        .with_bind(stripped_slug(value))
+        .with_bind(value.trim().to_lowercase())
+}
+
+/// The importer's normal form: lowercased, alphanumerics only.
+///
+/// Not a second normaliser to adopt — it exists so a query can reach the rows
+/// that already carry it. See `taxonomy_predicate`.
+fn stripped_slug(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
 /// Compile §15.4.1.3's `tag:"X"+children`.
 ///
 /// The term's own node resolves the reader's name to a node id, and the closure
@@ -487,8 +540,8 @@ fn render_exists_relationship(a: &RelationshipAssertion) -> Result<SqlFragment, 
 
     let list = placeholders(a.participant_any.len());
     clauses.push(format!(
-        "EXISTS (SELECT 1 FROM ship_participants sp \
-         WHERE sp.ship_node_id = wr.ship_node_id AND sp.character_node_id IN ({list}))"
+        "EXISTS (SELECT 1 FROM relationship_participants sp \
+         WHERE sp.relationship_node_id = wr.relationship_node_id AND sp.character_node_id IN ({list}))"
     ));
     binds.extend(a.participant_any.iter().cloned());
 
@@ -511,8 +564,8 @@ fn render_exists_relationship(a: &RelationshipAssertion) -> Result<SqlFragment, 
     if !a.excluded_participants.is_empty() {
         let list = placeholders(a.excluded_participants.len());
         clauses.push(format!(
-            "NOT EXISTS (SELECT 1 FROM ship_participants sx \
-             WHERE sx.ship_node_id = wr.ship_node_id AND sx.character_node_id IN ({list}))"
+            "NOT EXISTS (SELECT 1 FROM relationship_participants sx \
+             WHERE sx.relationship_node_id = wr.relationship_node_id AND sx.character_node_id IN ({list}))"
         ));
         binds.extend(a.excluded_participants.iter().cloned());
     }
@@ -805,10 +858,7 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             let sql = "(LOWER(pseuds.handle) LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
-        QueryField::Fandom => {
-            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN canonical_entities tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'fandom' AND tn.norm = ?))";
-            Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
-        }
+        QueryField::Fandom => Ok(taxonomy_predicate("work_tags", "node_id", "fandom", value)),
         // `character:` reads `work_characters`, NOT `work_tags` with
         // `kind = 'character'`.
         //
@@ -824,14 +874,10 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
         // pure — §15.4 requires "the same typed AST as the visual filter builder",
         // and a parser that had to look ids up would need I/O.
         QueryField::Character => {
-            let sql = "(EXISTS (SELECT 1 FROM work_characters wc \
-                       JOIN canonical_entities tn ON tn.id = wc.character_node_id \
-                       WHERE wc.work_id = works.id AND tn.kind = 'character' \
-                         AND tn.norm = ?))";
-            Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
+            Ok(taxonomy_predicate("work_characters", "character_node_id", "character", value))
         }
         // `relationship:` names a pairing, and a pairing IS its participant set
-        // (0103's `ship_participants`, ordered so A/B and B/A are one node). So the
+        // (0103's `relationship_participants`, ordered so A/B and B/A are one node). So the
         // reader's `relationship:"Alice/Bob"` matches when some ship the work claims
         // a relationship about has participant set exactly {alice, bob}.
         //
@@ -896,8 +942,8 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             let all_named: String = names
                 .iter()
                 .map(|_| {
-                    "EXISTS (SELECT 1 FROM ship_participants sq \
-                       WHERE sq.ship_node_id = wr.ship_node_id \
+                    "EXISTS (SELECT 1 FROM relationship_participants sq \
+                       WHERE sq.relationship_node_id = wr.relationship_node_id \
                          AND sq.character_node_id = ?)"
                         .to_owned()
                 })
@@ -907,11 +953,11 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             let sql = format!(
                 "(EXISTS (SELECT 1 FROM work_relationships wr \
                    WHERE wr.work_id = works.id \
-                     AND EXISTS (SELECT 1 FROM ship_participants sp \
-                                 WHERE sp.ship_node_id = wr.ship_node_id \
+                     AND EXISTS (SELECT 1 FROM relationship_participants sp \
+                                 WHERE sp.relationship_node_id = wr.relationship_node_id \
                                    AND (? || '%') LIKE '%/' || sp.character_node_id || '/%') \
-                     AND NOT EXISTS (SELECT 1 FROM ship_participants sm \
-                                     WHERE sm.ship_node_id = wr.ship_node_id \
+                     AND NOT EXISTS (SELECT 1 FROM relationship_participants sm \
+                                     WHERE sm.relationship_node_id = wr.relationship_node_id \
                                        AND (? || '%') NOT LIKE '%/' || sm.character_node_id || '/%') \
                      AND {all_named}))"
             );
@@ -928,14 +974,8 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             }
             Ok(fragment)
         }
-        QueryField::Tag => {
-            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN canonical_entities tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'tag' AND tn.norm = ?))";
-            Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
-        }
-        QueryField::Mood => {
-            let sql = "(EXISTS (SELECT 1 FROM work_moods wm JOIN canonical_entities tn ON tn.id = wm.node_id WHERE wm.work_id = works.id AND tn.kind = 'mood' AND tn.norm = ?))";
-            Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
-        }
+        QueryField::Tag => Ok(taxonomy_predicate("work_tags", "node_id", "tag", value)),
+        QueryField::Mood => Ok(taxonomy_predicate("work_moods", "node_id", "mood", value)),
         QueryField::Summary => {
             let sql = "(LOWER(works.summary) LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
@@ -959,6 +999,49 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
 mod tests {
     use super::*;
     use crate::query::parse_query;
+
+    #[test]
+    fn a_multi_word_tag_matches_either_stored_spelling() {
+        // Measured on the live instance: `tag:"2 broke girls"` returned zero
+        // rows for a name 367 works carry, because the predicate bound
+        // `trim().to_lowercase()` against a `norm` of `2brokegirls`, and
+        // `fandom:40K` worked for the opposite reason — `40k` is already its own
+        // slug. Three spellings, three binds: the domain rule, the importer's
+        // stripped slug, and the case-insensitive canonical.
+        let ast = parse_query("tag:\"2 broke girls\"").expect("query parses");
+        let fragment = render_query(&ast).expect("query renders");
+        assert_eq!(
+            fragment.binds,
+            vec![
+                "2 broke girls".to_owned(),   // domain normalise: collapsed, spaced
+                "2brokegirls".to_owned(),     // importer slug: alphanumerics only
+                "2 broke girls".to_owned(),   // canonical, case-insensitive
+            ],
+            "all three stored spellings must be reachable: {}",
+            fragment.sql
+        );
+        assert!(
+            fragment.sql.contains("LOWER(tn.canonical) = ?"),
+            "the canonical fallback is what matches a row whose norm scheme the              query normaliser does not reproduce: {}",
+            fragment.sql
+        );
+    }
+
+    #[test]
+    fn a_punctuated_name_matches_its_stripped_slug() {
+        // The importer strips punctuation as well as spaces: a fandom stored as
+        // `asongoficeandfiregeorgerrmartin` must still be found by the name a
+        // reader types.
+        let ast = parse_query("fandom:\"A Song of Ice and Fire - George R. R. Martin\"")
+            .expect("query parses");
+        let fragment = render_query(&ast).expect("query renders");
+        assert_eq!(
+            fragment.binds[1],
+            "asongoficeandfiregeorgerrmartin",
+            "the slug bind must be alphanumeric-only: {:?}",
+            fragment.binds
+        );
+    }
 
     #[test]
     fn a_negated_free_text_term_is_null_safe() {
@@ -1035,7 +1118,17 @@ mod tests {
         let frag = render_query(&ast).unwrap();
         assert!(frag.sql.contains("EXISTS"));
         assert!(frag.sql.contains("work_tags"));
-        assert_eq!(frag.binds, vec!["harrypotter".to_owned()]);
+        // Three spellings of one name, because `canonical_entities.norm` holds
+        // either the domain rule or the importer's slug — see
+        // `taxonomy_predicate`.
+        assert_eq!(
+            frag.binds,
+            vec![
+                "harrypotter".to_owned(),
+                "harrypotter".to_owned(),
+                "harrypotter".to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -1043,7 +1136,8 @@ mod tests {
         let ast = parse_query("fandom:x AND tag:y").unwrap();
         let frag = render_query(&ast).unwrap();
         assert!(frag.sql.contains(" AND "));
-        assert_eq!(frag.binds.len(), 2);
+        // Three binds per taxonomy field, one field name each.
+        assert_eq!(frag.binds.len(), 6, "binds: {:?}", frag.binds);
     }
 
     #[test]
@@ -1095,7 +1189,12 @@ mod tests {
     fn render_fielded_normalizes_case() {
         let ast = parse_query("fandom:MyFandom").unwrap();
         let frag = render_query(&ast).unwrap();
-        assert_eq!(frag.binds, vec!["myfandom".to_owned()]);
+        assert!(
+            frag.binds.iter().all(|b| b == "myfandom"),
+            "every spelling is lowercased: {:?}",
+            frag.binds
+        );
+        assert_eq!(frag.binds.len(), 3);
     }
 
     #[test]
@@ -1170,8 +1269,9 @@ mod tests {
         let ast = parse_query("words:>1000 AND tag:romance").unwrap();
         let frag = render_query(&ast).unwrap();
         assert!(frag.sql.contains(" AND "));
-        // One bind for the comparison, one for the taxonomy lookup.
-        assert_eq!(frag.binds.len(), 2);
+        // One bind for the comparison, three for the taxonomy lookup (the three
+        // stored spellings).
+        assert_eq!(frag.binds.len(), 4, "binds: {:?}", frag.binds);
     }
 
     #[test]
