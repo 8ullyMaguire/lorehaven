@@ -253,6 +253,14 @@ fn scan(sources: &[PathBuf], tables: &BTreeSet<String>) -> (BTreeSet<String>, BT
     let mut readers: BTreeSet<String> = BTreeSet::new();
     let mut writers: BTreeSet<String> = BTreeSet::new();
 
+    // `taxonomy_predicate(relation, …)` in `query_sql` is the one place a table
+    // name is a function argument instead of following `from`: the builder
+    // interpolates it into `SELECT 1 FROM {relation} r JOIN canonical_entities`,
+    // so the literal never sits next to the keyword. Its first argument is still
+    // the table this repo reads, and a scan that cannot see it reports a live
+    // filter as an unreachable table — which is how `work_moods` was flagged.
+    const INDIRECT_READS: [&str; 1] = ["taxonomy_predicate("];
+
     for path in sources {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
@@ -272,6 +280,13 @@ fn scan(sources: &[PathBuf], tables: &BTreeSet<String>) -> (BTreeSet<String>, BT
             }
         }
         for prefix in READS {
+            for name in identifiers_after(text, prefix) {
+                if tables.contains(&name) {
+                    readers.insert(name);
+                }
+            }
+        }
+        for prefix in INDIRECT_READS {
             for name in identifiers_after(text, prefix) {
                 if tables.contains(&name) {
                     readers.insert(name);

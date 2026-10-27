@@ -239,3 +239,27 @@ fn a_name_is_not_inlined_into_sql() {
         );
     }
 }
+
+/// `mood:` must read `work_moods`.
+///
+/// Written because a scan cannot be trusted to notice this on its own: the
+/// predicate comes from `taxonomy_predicate`, which interpolates the relation into
+/// `SELECT 1 FROM {relation} r …`, so the table name never sits beside a keyword in
+/// the source. `reachability` was widened to read that builder's first argument;
+/// this test is what makes the widening honest — the widening alone would also
+/// silence a genuinely dead table.
+#[test]
+fn mood_reads_work_moods() {
+    let ast = parse_query("mood:wistful").expect("parse mood:");
+    let fragment = render_query(&ast).expect("render mood:");
+    assert!(
+        fragment.sql.contains("FROM work_moods"),
+        "mood: no longer reads work_moods:\n{}",
+        fragment.sql
+    );
+    assert!(
+        fragment.sql.contains("tn.kind = 'mood'"),
+        "mood: is not restricted to mood nodes:\n{}",
+        fragment.sql
+    );
+}
