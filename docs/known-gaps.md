@@ -7,6 +7,25 @@ comment in the test body is the entry's executable form.
 
 ## Open — product decisions
 
+### M16-D02 · The works ladder is stored, and nothing reads it
+
+`work_ratings` is written by the arena ballot (spec §12.4a) and no ranking consults it. In
+`crates/app/src/routes/discovery.rs` no candidate engine loads a rating, and
+`discovery::blend` does not know the table exists. A stored signal that nobody reads is the same
+fault this repository accuses kindred's tag arena of, one layer further along: there it was a
+ladder with no ratings, here it is ratings with no reader.
+
+Left open rather than half-wired on purpose. The integration is a design decision, not a plumbing
+one: the rating must arrive through `Candidate.taste_signal` and **not** through the positional
+score, because a 1600-rated work in the position canal outranks a personalised work for every
+reader on the instance, which is a global leaderboard wearing a feed's clothes. And it must be
+gated on `matches >= 3`: one ballot rates a work to `phi ≈ 253`, and a rating with that much
+uncertainty is mostly noise — presenting it as a reason would be presenting a guess as evidence.
+
+Planned as T-M16-10 in `10-Projects/darkhold-implementation-plan.md`, verified by
+`select count(*) from work_ratings where matches >= 3` being non-zero and at least one feed slot
+whose reason names the ladder.
+
 ### M21-D03 · A re-subscribe returns an id that addresses no row
 
 `subscribe_work` mints a fresh `Uuid` and returns it unconditionally, but its

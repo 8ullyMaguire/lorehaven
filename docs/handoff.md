@@ -1,5 +1,81 @@
 # Handoff
 
+## The works ladder — and why the dimension ladder could never have learned
+
+**Shipped and live on thinkcentre as `86ab12a7`.** The arena now rates *works* with Glicko-2 from
+the best/worst ballot its page already collects. The page, its four cards, its best/worst buttons
+and the dimensional weights are all unchanged: this is a second consumer of the same ballot, not a
+replacement for the first. `docs/spec-amendments/arena-work-ladder.md` (§12.4a) is the reasoning,
+`docs/spec.md` §0.4.2a points at it, and the plan ticket is T-M16-09.
+
+The decision needed a measurement, and the measurement was decisive. `work_vector_from_tags`
+(`crates/domain/src/taste_vector.rs:254`) raises a work's score on a dimension **only when the work
+carries a tag whose name is the dimension key**. This catalogue has **0 of 30,981 tags** that name
+any of the five dimensions, so every arena card's vector is `[0.5; 5]`, so
+`apply_arena_ballot`'s `actual = if best_score > worst_score { 1.0 } else { 0.0 }` recorded `0.0` —
+a **loss** — on every ballot the instance could ever receive: −16 per ballot with nothing pushing
+back, and `weights_from_elos` clamped at its 0.01 floor. The dimension ladder was not merely
+unwired (the feed reads `taste_profiles`, and `discovery::blend` takes no profile at all); it was
+provably unable to learn anything on this catalogue. It is **frozen, not deleted**: the table, the
+page's round-building code and the profile columns stay, and a ballot between cards that score the
+same now records nothing at all rather than a loss.
+
+### What the ballot buys now
+
+One four-card ballot is **five comparisons** — best over both middles and the worst, each middle
+over the worst, the middles *not* compared to each other — and **one rating period per work**: every
+rating is snapshotted at the period's start and the whole thing is one transaction, so the best and
+the worst move by equal and opposite amounts. `matches` counts comparisons (3 + 2 + 2 + 3 = 10), not
+ballots. `POST /api/v1/arena/vote` gained an optional `card_ids` and the page sends the four it
+showed; an older client still rates best against worst. The ladder write can never fail the vote —
+the ballot is the reader's judgement and a rating is recoverable from it.
+
+Live proof, after deploy, against the real catalogue:
+
+```
+POST /arena/vote (4 cards)  -> 200
+4 works, 10 comparisons
+best   1800 mu, 228 phi, 3 matches
+worst  1200 mu, 228 phi, 3 matches
+middles 1500 mu, 253 phi, 2 matches
+arena_weights matches_played sum: 0     <- the guard: the dimensional ladder recorded nothing
+```
+
+The throwaway ballot's rows were deleted afterwards; a synthetic vote must not become product
+signal.
+
+### The traps this cost
+
+- **`work_id` is UUID on PostgreSQL and TEXT on SQLite.** Binding a `&str` produced
+  `operator does not exist: uuid = text`, which names the operator rather than the missing cast;
+  `$1::uuid` in the three PG statements is the fix. Fifth dialect bug in two days here, and the
+  second found by *running* rather than reading.
+- **`frontend/dist` is embedded in the binary by `rust-embed`** (`crates/app/src/assets.rs:25`).
+  Building the frontend after the last `cargo build` ships a binary serving the previous bundle:
+  `grep card_ids` on the served `assets/index-*.js` is the only honest check that the page sends
+  what the server reads.
+- **Two checkouts had diverged.** This tree had committed `3535a19d` while the other had five
+  commits of arena work; both had fixed the same `rec_strategy` PostgreSQL bug. They were joined
+  with a bundle and a merge (`86ab12a7`), taking the superset `rec_strategy.rs` (nine CASTs plus
+  four further dialect fixes) over the narrower `id_cast()` helper it replaced.
+
+### One catalogue, not two
+
+`fic-catalogue-ingest.timer` was still folding every crawl into **both** the ascend and the
+lorehaven catalogues — "do not keep two catalogues" undone by a timer every fifteen minutes. The
+script now loads lorehaven only; ascend's rows are untouched and nothing new is written to them.
+The unit's description says so.
+
+### What is not done
+
+**Nothing reads `work_ratings` yet.** The ladder stores signal and the feed ignores it — the same
+fault this project accuses kindred's tag arena of, one layer further along. T-M16-10 is written:
+a fourth candidate engine feeding `Candidate.taste_signal` (not the positional score, or a
+1600-rated work outranks a personalised one for every reader), gated on `matches >= 3` so a work
+rated once — `phi ≈ 300`, mostly noise — cannot claim a slot, and empty rather than erroring on a
+fresh instance. The ladder also starts nearly empty here: one ballot is four rated works, so the
+first hour of arena use matters more than any tuning.
+
 ## M59 Phase C1 — the body audience, and the SQLite this project actually runs
 
 The spec'd work (`§7.7`, `docs/plans/crawling-retention-preservation.md` §C1) is

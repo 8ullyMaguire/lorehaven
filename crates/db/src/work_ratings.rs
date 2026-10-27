@@ -6,6 +6,20 @@
 //!
 //! # One ballot is one rating period per work
 //!
+//! ## Not the `rating` table
+//!
+//! `rating` already exists and holds a **reader's** judgement of a work — `account_id`, `pseud_id`,
+//! `stars`, `is_public` — one row per reader per work. This table holds the **catalogue's**
+//! aggregate judgement of a work: a Glicko-2 rating with no reader attached, built from pairwise
+//! comparisons that readers never see as numbers. They answer different questions ("what did this
+//! reader think" and "how good is this work, as far as the instance can tell"), and a ranking that
+//! reads one when it meant the other is a bug that will look like a tuning problem. Nothing here
+//! reads `rating`, and nothing in `rating`'s path writes here.
+//!
+//! The name is close, and deliberately so: both are ratings about works. `crates/db/src/taste_vectors.rs`
+//! carries a note from before this table existed, warning that a query naming `work_ratings` could
+//! only ever fail — that note is history, and this is the table it was warning about.
+//!
 //! The page asks for best and worst of four cards, which is five comparisons:
 //!
 //! ```text

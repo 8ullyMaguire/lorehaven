@@ -823,12 +823,17 @@ async fn fetch_work_tag_weights_postgres(
 /// How many live ratings this account has, which is the `old_weight_sum` the
 /// incremental update needs.
 ///
-/// The table is `rating`, not `work_ratings`. Nothing named `work_ratings` has
-/// ever existed in any migration on either dialect, so this query could only ever
-/// have returned `relation "work_ratings" does not exist` -- every call site of
-/// this function raised that, and the `?` at the call site propagated it into
-/// whatever asked for a taste update. Counting `rating` is the same question
-/// asked of the table that holds the answers.
+/// The table is `rating`, not `work_ratings`. When this was written nothing named `work_ratings`
+/// existed in any migration on either dialect, so a query naming it could only ever have returned
+/// `relation "work_ratings" does not exist` -- every call site of this function raised that, and
+/// the `?` at the call site propagated it into whatever asked for a taste update. Counting `rating`
+/// is the same question asked of the table that holds the answers: one row per reader per work,
+/// with `stars`.
+///
+/// **As of migration 0129 a `work_ratings` table does exist** (`docs/spec-amendments/arena-work-ladder.md`,
+/// §12.4a) and it is a *different* thing: the arena's aggregate Glicko-2 ladder, with no reader
+/// attached. This function must keep reading `rating`; the near-miss in the names is exactly why
+/// the distinction is written down here rather than left to the reader of the SQL.
 ///
 /// Only rows with `deleted_at IS NULL` are counted, because a soft-deleted
 /// rating no longer contributes weight: the incremental update divides by
