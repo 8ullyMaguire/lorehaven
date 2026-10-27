@@ -40,6 +40,33 @@ Three decisions are load-bearing and each has a test that fails without it:
   is to "fix" the compiler back to one bind and lose two importers' spellings.
 - **`db.sql(&format!(...), &format!(...))` does not compile** when the result outlives the call:
   it borrows the string it was given. Two `let`s, then `db.sql(&a, &b)`.
+- **The rename has readers outside SQL.** `kind_weight()` in `crates/db/src/reader_surface.rs` and
+  `NodeKind::as_str()` in `crates/domain/src/taxonomy.rs` both spelled the kind `ship`. After 0127
+  every pairing would still *resolve* and silently weigh 1 instead of 3 — no error, no failing test,
+  just pairings ranked like stray tags. Both now say `relationship`, `parse` still accepts `ship`,
+  and `kind_weight_tests` pins all six weights.
+
+### Live, on thinkcentre
+
+Applied and serving from the tree at `328439fe` (exported with `git archive`, so the deploy tree's own
+`.git` still reports `516aefa5` — the stamp says `+516aefa5.dirty`, which is the checkout's HEAD and not
+the code; `DEPLOYED-FROM.txt` in that tree names the real commit). `darkhold migrate` applied 0127 out of
+order, which `migrate::apply` permits: it iterates the catalogue and applies any version absent from
+`_migrations`.
+
+```
+_migrations 0127                                  -> recorded
+information_schema: the two tables                -> 2
+canonical_entities kind='ship' / 'relationship'   -> 0 / 410
+work_relationships                                -> 57 (0 carried a dynamics string, so the
+                                                     backfill ran against no rows)
+/health/live 200 · /api/v1/works/{id} 200 · /api/v1/search?q=harry 200
+fic-catalogue-ingest.timer                        -> active again after the DDL window
+```
+
+That last line matters twice: the backfill is **unproven against real data** because no live row had a
+dynamics string, and a green run over nothing is this project's recurring trap. What is proven is the
+schema, the rename, and the reads; the split-and-trim SQL has only been reasoned about.
 
 ### Evidence
 

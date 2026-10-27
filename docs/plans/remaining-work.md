@@ -9,28 +9,24 @@ the forward plan. Every new milestone below gets rows in
 `docs/requirements.csv` before code starts (ADR 0023: the CSV is the
 canonical feature inventory and the roadmap-board seed).
 
-## Where the build actually stands (re-derived 2026-09-30)
+## Where the build actually stands (re-derived 2026-10-27)
 
 **Re-derived from `docs/requirements.csv` and the tree, not carried forward.**
-The previous header (2026-09-25) claimed 588 implemented / 75 planned / 667
-total and "migrations to 0083"; all of those are now wrong, which is what the
-note at the top of this file exists to prevent.
 
 | | count |
 |---|---|
-| implemented (all three grades) | **611** |
-| — fully tested | 289 |
-| — locally tested | 206 |
-| — verified end-to-end | 116 |
-| planned | 60 |
-| built (not graded) | 7 |
+| implemented (all three grades) | **722** |
+| — fully tested | 361 |
+| — locally tested | 241 |
+| — verified end-to-end | 120 |
+| planned | 26 |
 | deliberately unsupported | 4 |
 | evaluated and rejected | 1 |
-| **total rows** | **683** |
+| **total rows** | **753** |
 
-Migrations: **91 per dialect**, last `0094_retention_proposals` (both
-`migrations/sqlite/` and `migrations/postgres/`, parity-tested by
-`the_two_dialects_declare_the_same_columns_and_indexes`). App test files: **118**.
+Migrations: **126 per dialect**, newest `0129_work_ratings`. `0127` landed after `0129` on purpose
+(`docs/spec-amendments/draw-slot.md` reserved the number), and `migrate::apply` applies any version
+absent from `_migrations`, so a lower number arriving late is a normal apply. App test files: **180**.
 
 To re-derive, rather than believe:
 
