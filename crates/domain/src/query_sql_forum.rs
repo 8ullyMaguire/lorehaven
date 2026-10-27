@@ -65,7 +65,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
         QueryAst::And(parts) => join(parts, " AND "),
         QueryAst::Or(parts) => join(parts, " OR "),
         // §15.3's `ExistsCharacter` and `ExistsRelationship` are WORK-scoped: they
-        // read `work_characters`, `work_relationships` and `ship_participants`, and
+        // read `work_characters`, `work_relationships` and `relationship_participants`, and
         // compile against `works.id`. There is no forum post row for them to attach to, so
         // an error is the only honest rendering.
         //

@@ -196,12 +196,12 @@ fn excluding_a_participant_stays_inside_one_relationship() {
         "one relationship EXISTS. Got:\n{sql}"
     );
     assert!(
-        sql.contains(&norm("not exists(select 1 from ship_participants sx")),
+        sql.contains(&norm("not exists(select 1 from relationship_participants sx")),
         "the exclusion must be a NOT EXISTS over participants. Got:\n{sql}"
     );
     // The participant test is likewise inside the relationship.
     assert!(
-        sql.contains("sp.ship_node_id = wr.ship_node_id"),
+        sql.contains("sp.relationship_node_id = wr.relationship_node_id"),
         "the participant test must be inside the relationship EXISTS. Got:\n{sql}"
     );
 
@@ -476,14 +476,14 @@ fn the_not_arm_negates_a_correlated_exists_without_corrupting_it() {
         sql
     );
     assert!(
-        sql.contains("sp.ship_node_id = wr.ship_node_id"),
+        sql.contains("sp.relationship_node_id = wr.relationship_node_id"),
         "the negated relationship must keep its internal correlation. Got:\n{sql}"
     );
     // No participant exclusion here: journey 12 is "Bob, and no romantic or sexual
     // relationship involving Bob", which needs none. Asserting one would be
     // asserting a clause the query does not have.
     assert!(
-        !sql.contains("ship_participants sx"),
+        !sql.contains("relationship_participants sx"),
         "journey 12 excludes no participant, so no sx subquery belongs here. Got:\n{sql}"
     );
     // An EXISTS is never NULL, so the NULL-guard coalesce must NOT be applied —

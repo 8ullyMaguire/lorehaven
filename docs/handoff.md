@@ -1,5 +1,52 @@
 # Handoff
 
+## M6-05 — the facets §6.4 names, and the rename that had to wait for them
+
+**In the tree, migration `0127`, 2026-10-27.** §6.4 defines a character assertion as
+*prominence + roles + attributes* and a relationship assertion as *participants + kind +
+prominence + dynamics*. 0103 built the prominence, the attributes, the participant set and the
+claim; it left **roles with no table at all**, and dynamics as a comma-separated string whose own
+comment admitted it was a placeholder. 0127 adds `work_character_roles` and
+`work_relationship_dynamics`, backfills the old list into rows, and drops the column.
+
+Three decisions are load-bearing and each has a test that fails without it:
+
+- **A role's character must be in the work**, enforced by a *composite* foreign key onto
+  `work_characters (work_id, character_node_id)` — the same shape 0103 used for attributes. Two
+  single-column keys would admit a role for a character the work never mentions, and every query
+  would still return a plausible answer. Mutation: drop the composite key and
+  `a_role_needs_its_character_in_the_work` fails.
+- **A dynamic belongs to the claim, not the pairing.** `work_relationships` allows one claim per
+  (work, pairing, kind), so a pairing can be claimed as *romantic* and as *platonic*; each carries
+  its own dynamics. Keying dynamics on the pairing would put `enemies_to_lovers` on both.
+- **The facets ride with the bulk read.** `characters_for_work` fills `roles` and
+  `relationships_for_work` fills `dynamics` with one extra query per work, not one per row.
+  Mutation: make `attach_roles` a no-op and the roles test reads `[]`.
+
+### What this cost
+
+- **A botched bulk rename was in the tree.** Turning `ship` into `relationship` with a plain
+  string replace also rewrote the word inside `relationship` itself (83 occurrences of
+  `relationrelationship*`), which is why the tree did not compile when this session opened. The
+  replace now goes longest-mangled-form-first, and the grep for `relationrelationship` is zero.
+- **`work_character_roles.work_id` was `TEXT` while `work_characters.work_id` is `UUID` on
+  PostgreSQL.** The migration failed with `foreign key constraint ... cannot be implemented`,
+  which names the constraint and not the type. SQLite cannot see this at all — the second engine
+  is the only place it shows.
+- **A stale domain assertion, red since `taxonomy_predicate` learned three normal forms.**
+  `character_reads_work_characters_not_work_tags` expected one bind; the compiler emits three
+  (exchange `normalise`, the importer's stripped slug, and a case-folded `canonical` fallback).
+  The statement was right and the expectation was old — worth saying plainly, because the reflex
+  is to "fix" the compiler back to one bind and lose two importers' spellings.
+- **`db.sql(&format!(...), &format!(...))` does not compile** when the result outlives the call:
+  it borrows the string it was given. Two `let`s, then `db.sql(&a, &b)`.
+
+### Evidence
+
+`crates/app/tests/work_characters_store.rs` is 17/17 on **both** engines (12 pre-existing, 5 new:
+roles as a set, the composite-key refusal, two claims with separate dynamics, clear-and-fill
+replacement, cascade on delete). `cargo test -p darkhold-domain -p darkhold-db` is green on SQLite.
+
 ## The works ladder — and why the dimension ladder could never have learned
 
 **Shipped and live on thinkcentre as `86ab12a7`.** The arena now rates *works* with Glicko-2 from

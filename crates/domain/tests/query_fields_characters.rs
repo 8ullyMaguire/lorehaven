@@ -64,10 +64,16 @@ fn character_reads_work_characters_not_work_tags() {
         sql.contains("kind = 'character'"),
         "and restricted to character nodes. Got:\n{sql}"
     );
+    // Three binds, and all three are the same name in the three normal forms this
+    // catalogue actually stores: `normalise` (the exchange form), the importer's
+    // stripped slug, and a case-folded `canonical` fallback. The assertion said one
+    // bind and the compiler had emitted three since `taxonomy_predicate` learned to
+    // match every importer's form -- a stale expectation, not a wrong statement: a
+    // reader typing `character:Alice` must find the row whichever importer wrote it.
     assert_eq!(
         binds,
-        vec!["alice".to_string()],
-        "the bind is the lowercased name"
+        vec!["alice".to_string(), "alice".to_string(), "alice".to_string()],
+        "one bind per normal form: exchange, stripped slug, case-folded canonical"
     );
 
     // Name resolution is why this can stay a `Fielded` node rather than needing a
@@ -90,7 +96,7 @@ fn relationship_reads_the_pairing_tables() {
         "`relationship:` must read the work's claims. Got:\n{sql}"
     );
     assert!(
-        sql.contains("ship_participants"),
+        sql.contains("relationship_participants"),
         "and resolve participants through the set. Got:\n{sql}"
     );
     assert!(
@@ -162,15 +168,15 @@ fn every_named_participant_is_a_real_clause() {
 
     // The three clauses, named as the compiler's comment names them.
     assert!(
-        sql.contains("and exists (select 1 from ship_participants sp"),
+        sql.contains("and exists (select 1 from relationship_participants sp"),
         "clause (a): every participant of the ship is named in the value. Got:\n{sql}"
     );
     assert!(
-        sql.contains("and not exists (select 1 from ship_participants sm"),
+        sql.contains("and not exists (select 1 from relationship_participants sm"),
         "clause (b): no participant of the ship is unnamed. Got:\n{sql}"
     );
     assert!(
-        sql.contains("exists (select 1 from ship_participants sq"),
+        sql.contains("exists (select 1 from relationship_participants sq"),
         "clause (c): every name in the value is a participant. Got:\n{sql}"
     );
 }

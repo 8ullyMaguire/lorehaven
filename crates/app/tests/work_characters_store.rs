@@ -238,6 +238,8 @@ async fn characters_persist_and_read_back() {
             prominence: "protagonist".into(),
             is_pov: true,
             added_at: "2026-01-01T00:00:00Z".into(),
+        
+            roles: Vec::new(),
         },
     )
     .await
@@ -250,6 +252,8 @@ async fn characters_persist_and_read_back() {
             prominence: "cameo".into(),
             is_pov: false,
             added_at: "2026-01-01T00:00:00Z".into(),
+        
+            roles: Vec::new(),
         },
     )
     .await
@@ -305,7 +309,9 @@ async fn prominence_orders_by_rank_not_alphabetically() {
                 prominence: prominence.into(),
                 is_pov: false,
                 added_at: "2026-01-01T00:00:00Z".into(),
-            },
+            
+            roles: Vec::new(),
+        },
         )
         .await
         .expect("upsert");
@@ -352,7 +358,9 @@ async fn one_character_does_not_satisfy_another_characters_attributes() {
                 prominence: prominence.into(),
                 is_pov: false,
                 added_at: "2026-01-01T00:00:00Z".into(),
-            },
+            
+            roles: Vec::new(),
+        },
         )
         .await
         .expect("upsert");
@@ -454,6 +462,8 @@ async fn an_attribute_needs_its_character_present() {
             prominence: "protagonist".into(),
             is_pov: true,
             added_at: "2026-01-01T00:00:00Z".into(),
+        
+            roles: Vec::new(),
         },
     )
     .await
@@ -498,17 +508,17 @@ async fn a_ship_is_a_set_so_ab_and_ba_are_one() {
     let ship = "ship-set-identity-ship-ab";
 
     // Insert in one order...
-    assert!(wc::add_ship_participant(db.db(), ship, "alice")
+    assert!(wc::add_relationship_participant(db.db(), ship, "alice")
         .await
         .expect("alice"));
-    assert!(wc::add_ship_participant(db.db(), ship, "bob")
+    assert!(wc::add_relationship_participant(db.db(), ship, "bob")
         .await
         .expect("bob"));
 
     // ...and the reverse order on a second ship node with the same participants.
     // Because identity is the set, these two rows are indistinguishable, which is
     // the property an `ord` column would destroy.
-    let participants = wc::ship_participants(db.db(), ship)
+    let participants = wc::relationship_participants(db.db(), ship)
         .await
         .expect("read participants");
     assert_eq!(
@@ -519,12 +529,12 @@ async fn a_ship_is_a_set_so_ab_and_ba_are_one() {
 
     // Idempotent: adding alice again is not a new fact.
     assert!(
-        !wc::add_ship_participant(db.db(), ship, "alice")
+        !wc::add_relationship_participant(db.db(), ship, "alice")
             .await
             .expect("re-add alice"),
         "adding an existing participant must report no change"
     );
-    assert_eq!(wc::ship_participants(db.db(), ship).await.unwrap().len(), 2);
+    assert_eq!(wc::relationship_participants(db.db(), ship).await.unwrap().len(), 2);
 
     db.cleanup().await;
 }
@@ -539,10 +549,10 @@ async fn the_relationship_type_belongs_to_the_work() {
     fixture_work(&db, &fic_one).await;
     fixture_work(&db, &fic_two).await;
     let ship = format!("{tag}-ship-ab");
-    wc::add_ship_participant(db.db(), &ship, "alice")
+    wc::add_relationship_participant(db.db(), &ship, "alice")
         .await
         .unwrap();
-    wc::add_ship_participant(db.db(), &ship, "bob")
+    wc::add_relationship_participant(db.db(), &ship, "bob")
         .await
         .unwrap();
 
@@ -553,10 +563,10 @@ async fn the_relationship_type_belongs_to_the_work() {
         &darkhold_db::work_characters::WorkRelationship {
             id: "rel-romantic".into(),
             work_id: fic_one.clone(),
-            ship_node_id: ship.clone(),
+            relationship_node_id: ship.clone(),
             rel_type: "romantic".into(),
             prominence: "primary".into(),
-            dynamics: Some("enemies_to_lovers".into()),
+            dynamics: vec!["enemies_to_lovers".to_string()],
             label: None,
             added_at: "2026-01-01T00:00:00Z".into(),
         },
@@ -568,10 +578,10 @@ async fn the_relationship_type_belongs_to_the_work() {
         &darkhold_db::work_characters::WorkRelationship {
             id: "rel-platonic".into(),
             work_id: fic_two.clone(),
-            ship_node_id: ship.clone(),
+            relationship_node_id: ship.clone(),
             rel_type: "platonic".into(),
             prominence: "secondary".into(),
-            dynamics: None,
+            dynamics: Vec::new(),
             label: None,
             added_at: "2026-01-01T00:00:00Z".into(),
         },
@@ -589,7 +599,7 @@ async fn the_relationship_type_belongs_to_the_work() {
         "the same ship, a different claim"
     );
     assert_eq!(
-        one[0].ship_node_id, two[0].ship_node_id,
+        one[0].relationship_node_id, two[0].relationship_node_id,
         "one identity, two claims"
     );
 
@@ -615,7 +625,7 @@ async fn one_work_makes_one_claim_of_a_kind_about_a_pairing() {
     let work = id("rel-one-claim-work");
     fixture_work(&db, &work).await;
     let ship = format!("{tag}-ship-ab");
-    wc::add_ship_participant(db.db(), &ship, "alice")
+    wc::add_relationship_participant(db.db(), &ship, "alice")
         .await
         .unwrap();
 
@@ -624,10 +634,10 @@ async fn one_work_makes_one_claim_of_a_kind_about_a_pairing() {
         &darkhold_db::work_characters::WorkRelationship {
             id: "rel-1".into(),
             work_id: work.clone(),
-            ship_node_id: ship.clone(),
+            relationship_node_id: ship.clone(),
             rel_type: "romantic".into(),
             prominence: "secondary".into(),
-            dynamics: None,
+            dynamics: Vec::new(),
             label: None,
             added_at: "2026-01-01T00:00:00Z".into(),
         },
@@ -642,10 +652,10 @@ async fn one_work_makes_one_claim_of_a_kind_about_a_pairing() {
         &darkhold_db::work_characters::WorkRelationship {
             id: "rel-2-different-id".into(),
             work_id: work.clone(),
-            ship_node_id: ship.clone(),
+            relationship_node_id: ship.clone(),
             rel_type: "romantic".into(),
             prominence: "primary".into(),
-            dynamics: None,
+            dynamics: Vec::new(),
             label: None,
             added_at: "2026-01-02T00:00:00Z".into(),
         },
@@ -677,10 +687,10 @@ async fn journey_twelve_excludes_only_matching_relationships() {
     let work = id("journey12-work");
     fixture_work(&db, &work).await;
     let ship = format!("{tag}-ship-ab");
-    wc::add_ship_participant(db.db(), &ship, "alice")
+    wc::add_relationship_participant(db.db(), &ship, "alice")
         .await
         .unwrap();
-    wc::add_ship_participant(db.db(), &ship, "bob")
+    wc::add_relationship_participant(db.db(), &ship, "bob")
         .await
         .unwrap();
 
@@ -693,7 +703,9 @@ async fn journey_twelve_excludes_only_matching_relationships() {
                 prominence: "supporting".into(),
                 is_pov: false,
                 added_at: "2026-01-01T00:00:00Z".into(),
-            },
+            
+            roles: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -703,10 +715,10 @@ async fn journey_twelve_excludes_only_matching_relationships() {
         &darkhold_db::work_characters::WorkRelationship {
             id: "j12-rel".into(),
             work_id: work.clone(),
-            ship_node_id: ship.clone(),
+            relationship_node_id: ship.clone(),
             rel_type: "romantic".into(),
             prominence: "primary".into(),
-            dynamics: None,
+            dynamics: Vec::new(),
             label: None,
             added_at: "2026-01-01T00:00:00Z".into(),
         },
@@ -722,7 +734,7 @@ async fn journey_twelve_excludes_only_matching_relationships() {
          WHERE wc.work_id = ?1 AND wc.character_node_id = ?2
            AND NOT EXISTS (
                SELECT 1 FROM work_relationships wr
-               JOIN ship_participants sp ON sp.ship_node_id = wr.ship_node_id
+               JOIN relationship_participants sp ON sp.relationship_node_id = wr.relationship_node_id
                WHERE wr.work_id = wc.work_id
                  AND wr.rel_type IN (?3)
                  AND sp.character_node_id = wc.character_node_id)",
@@ -730,7 +742,7 @@ async fn journey_twelve_excludes_only_matching_relationships() {
          WHERE wc.work_id = $1::uuid AND wc.character_node_id = $2
            AND NOT EXISTS (
                SELECT 1 FROM work_relationships wr
-               JOIN ship_participants sp ON sp.ship_node_id = wr.ship_node_id
+               JOIN relationship_participants sp ON sp.relationship_node_id = wr.relationship_node_id
                WHERE wr.work_id = wc.work_id
                  AND wr.rel_type IN ($3)
                  AND sp.character_node_id = wc.character_node_id)",
@@ -747,7 +759,7 @@ async fn journey_twelve_excludes_only_matching_relationships() {
          WHERE wc.work_id = ?1 AND wc.character_node_id = ?2
            AND NOT EXISTS (
                SELECT 1 FROM work_relationships wr
-               JOIN ship_participants sp ON sp.ship_node_id = wr.ship_node_id
+               JOIN relationship_participants sp ON sp.relationship_node_id = wr.relationship_node_id
                WHERE wr.work_id = wc.work_id
                  AND wr.rel_type IN (?3)
                  AND sp.character_node_id = wc.character_node_id)",
@@ -755,7 +767,7 @@ async fn journey_twelve_excludes_only_matching_relationships() {
          WHERE wc.work_id = $1::uuid AND wc.character_node_id = $2
            AND NOT EXISTS (
                SELECT 1 FROM work_relationships wr
-               JOIN ship_participants sp ON sp.ship_node_id = wr.ship_node_id
+               JOIN relationship_participants sp ON sp.relationship_node_id = wr.relationship_node_id
                WHERE wr.work_id = wc.work_id
                  AND wr.rel_type IN ($3)
                  AND sp.character_node_id = wc.character_node_id)",
@@ -786,6 +798,8 @@ async fn invalid_values_are_refused_before_the_database() {
             prominence: "main".into(),
             is_pov: false,
             added_at: "2026-01-01T00:00:00Z".into(),
+        
+            roles: Vec::new(),
         },
     )
     .await;
@@ -799,10 +813,10 @@ async fn invalid_values_are_refused_before_the_database() {
         &darkhold_db::work_characters::WorkRelationship {
             id: "bad".into(),
             work_id: work.clone(),
-            ship_node_id: "some-ship".into(),
+            relationship_node_id: "some-ship".into(),
             rel_type: "situational".into(),
             prominence: "primary".into(),
-            dynamics: None,
+            dynamics: Vec::new(),
             label: None,
             added_at: "2026-01-01T00:00:00Z".into(),
         },
@@ -859,6 +873,8 @@ async fn both_engines_report_the_same_substrate() {
             prominence: "protagonist".into(),
             is_pov: true,
             added_at: "2026-01-01T00:00:00Z".into(),
+        
+            roles: Vec::new(),
         },
     )
     .await
@@ -934,7 +950,9 @@ async fn the_query_language_finds_characters_and_pairings() {
                 prominence: prominence.into(),
                 is_pov: false,
                 added_at: "2026-01-01T00:00:00Z".into(),
-            },
+            
+            roles: Vec::new(),
+        },
         )
         .await
         .expect("upsert character");
@@ -947,7 +965,7 @@ async fn the_query_language_finds_characters_and_pairings() {
         (&poly_ship, "bob"),
         (&poly_ship, "carol"),
     ] {
-        wc::add_ship_participant(db.db(), ship, node).await.unwrap();
+        wc::add_relationship_participant(db.db(), ship, node).await.unwrap();
     }
 
     for (work, ship, kind) in [
@@ -959,10 +977,10 @@ async fn the_query_language_finds_characters_and_pairings() {
             &darkhold_db::work_characters::WorkRelationship {
                 id: format!("ql-rel-{}", &work[..8]),
                 work_id: work.clone(),
-                ship_node_id: ship.clone(),
+                relationship_node_id: ship.clone(),
                 rel_type: kind.into(),
                 prominence: "primary".into(),
-                dynamics: None,
+                dynamics: Vec::new(),
                 label: None,
                 added_at: "2026-01-01T00:00:00Z".into(),
             },
@@ -1075,4 +1093,329 @@ async fn works_matching(
         .filter(|c| rows.contains(c))
         .cloned()
         .collect()
+}
+
+// ------------------------------------------------------------------- facets (M6-05)
+//
+// §6.4: a character_assertion is *prominence + roles + attributes*, and a
+// relationship_assertion is *participants + kind + prominence + dynamics*. The two
+// facets added by 0127 are the ones below, and until these tests existed nothing
+// executed a single statement against either table.
+
+/// Insert the entity nodes a facet needs. Roles and dynamics are `canonical_entities`
+/// rows like any other named thing (§6.4), which is what keeps the vocabulary in the
+/// taxonomy rather than in a migration.
+async fn fixture_facet_nodes(db: &TestDb, kind: &str, ids: &[&str]) {
+    for node in ids {
+        exec_with_text(
+            db,
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+             VALUES (?1, ?2, ?1, ?1, '2026-01-01T00:00:00Z')",
+            "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+             VALUES ($1, $2, $1, $1, '2026-01-01T00:00:00Z')",
+            &[node.to_string(), kind.to_string()],
+        )
+        .await
+        .expect("facet node");
+    }
+}
+
+async fn seed_character(db: &TestDb, work: &str, node: &str, prominence: &str) {
+    wc::upsert_character(
+        db.db(),
+        &darkhold_db::work_characters::WorkCharacter {
+            work_id: work.to_string(),
+            character_node_id: node.to_string(),
+            prominence: prominence.to_string(),
+            is_pov: false,
+            added_at: "2026-01-01T00:00:00Z".into(),
+            roles: Vec::new(),
+        },
+    )
+    .await
+    .expect("seed character");
+}
+
+async fn seed_claim(db: &TestDb, work: &str, node: &str, rel_type: &str, id: &str) {
+    wc::upsert_relationship(
+        db.db(),
+        &darkhold_db::work_characters::WorkRelationship {
+            id: id.to_string(),
+            work_id: work.to_string(),
+            relationship_node_id: node.to_string(),
+            rel_type: rel_type.to_string(),
+            prominence: "primary".into(),
+            label: None,
+            added_at: "2026-01-01T00:00:00Z".into(),
+            dynamics: Vec::new(),
+        },
+    )
+    .await
+    .expect("seed claim");
+}
+
+#[tokio::test]
+async fn roles_are_a_set_that_rides_with_the_character() {
+    let db = scratch("roles_set").await;
+    let work = id("roles-set");
+    fixture_nodes(&db, "roles-set").await;
+    fixture_facet_nodes(&db, "role", &["mentor", "rival"]).await;
+    fixture_work(&db, &work).await;
+    seed_character(&db, &work, "alice", "protagonist").await;
+    seed_character(&db, &work, "bob", "cameo").await;
+
+    let at = "2026-01-01T00:00:00Z";
+    assert!(
+        wc::add_character_role(db.db(), &work, "alice", "rival", at)
+            .await
+            .expect("add rival"),
+        "a new role is a new claim"
+    );
+    assert!(
+        wc::add_character_role(db.db(), &work, "alice", "mentor", at)
+            .await
+            .expect("add mentor"),
+        "a second role is a second claim"
+    );
+    assert!(
+        !wc::add_character_role(db.db(), &work, "alice", "mentor", at)
+            .await
+            .expect("add mentor again"),
+        "the same role twice is not a new claim"
+    );
+
+    assert_eq!(
+        wc::roles_of_character(db.db(), &work, "alice")
+            .await
+            .expect("roles"),
+        vec!["mentor".to_string(), "rival".to_string()],
+        "sorted, so two readers see the same shape"
+    );
+
+    // The bulk read carries them, or a page would need one query per character.
+    let characters = wc::characters_for_work(db.db(), &work)
+        .await
+        .expect("characters");
+    let alice = characters
+        .iter()
+        .find(|c| c.character_node_id == "alice")
+        .expect("alice");
+    assert_eq!(alice.roles, vec!["mentor".to_string(), "rival".to_string()]);
+    let bob = characters
+        .iter()
+        .find(|c| c.character_node_id == "bob")
+        .expect("bob");
+    assert!(bob.roles.is_empty(), "roles are per character, not per work");
+
+    assert!(
+        wc::remove_character_role(db.db(), &work, "alice", "rival")
+            .await
+            .expect("remove rival")
+    );
+    assert!(
+        !wc::remove_character_role(db.db(), &work, "alice", "rival")
+            .await
+            .expect("remove rival again"),
+        "removing what is not there changes nothing"
+    );
+    assert_eq!(
+        wc::roles_of_character(db.db(), &work, "alice")
+            .await
+            .expect("roles"),
+        vec!["mentor".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn a_role_needs_its_character_in_the_work() {
+    let db = scratch("roles_fk").await;
+    let work = id("roles-fk");
+    fixture_nodes(&db, "roles-fk").await;
+    fixture_facet_nodes(&db, "role", &["mentor"]).await;
+    fixture_work(&db, &work).await;
+    seed_character(&db, &work, "alice", "protagonist").await;
+
+    // carol is a character node, but she is not in this work.
+    let refused = wc::add_character_role(db.db(), &work, "carol", "mentor", "2026-01-01T00:00:00Z")
+        .await;
+    assert!(
+        refused.is_err(),
+        "the composite foreign key must refuse a role for a character who is not in the work"
+    );
+    assert!(
+        wc::roles_of_character(db.db(), &work, "carol")
+            .await
+            .expect("roles")
+            .is_empty(),
+        "and nothing may be written"
+    );
+}
+
+#[tokio::test]
+async fn two_claims_about_one_pairing_keep_their_own_dynamics() {
+    let db = scratch("dyn_claims").await;
+    let work = id("dyn-claims");
+    fixture_nodes(&db, "dyn-claims").await;
+    fixture_facet_nodes(&db, "dynamic", &["slow_burn", "enemies_to_lovers"]).await;
+    fixture_work(&db, &work).await;
+    exec_with_text(
+        &db,
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+         VALUES ('alice-bob', 'relationship', 'Alice/Bob', 'alice/bob', '2026-01-01T00:00:00Z')",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+         VALUES ('alice-bob', 'relationship', 'Alice/Bob', 'alice/bob', '2026-01-01T00:00:00Z')",
+        &[],
+    )
+    .await
+    .expect("pairing node");
+
+    // The same pairing, claimed twice, in two kinds (§15.2 allows this).
+    seed_claim(&db, &work, "alice-bob", "romantic", "claim-romantic").await;
+    seed_claim(&db, &work, "alice-bob", "platonic", "claim-platonic").await;
+
+    let romantic = vec!["slow_burn".to_string()];
+    let platonic = vec!["enemies_to_lovers".to_string()];
+    assert_eq!(
+        wc::set_relationship_dynamics(db.db(), "claim-romantic", &romantic, "2026-01-01T00:00:00Z")
+            .await
+            .expect("romantic dynamics"),
+        1
+    );
+    assert_eq!(
+        wc::set_relationship_dynamics(db.db(), "claim-platonic", &platonic, "2026-01-01T00:00:00Z")
+            .await
+            .expect("platonic dynamics"),
+        1
+    );
+
+    assert_eq!(
+        wc::dynamics_of_relationship(db.db(), "claim-romantic")
+            .await
+            .expect("romantic read"),
+        romantic,
+        "a dynamic belongs to the claim, not the pairing"
+    );
+    assert_eq!(
+        wc::dynamics_of_relationship(db.db(), "claim-platonic")
+            .await
+            .expect("platonic read"),
+        platonic
+    );
+
+    let claims = wc::relationships_for_work(db.db(), &work)
+        .await
+        .expect("claims");
+    let romantic_row = claims.iter().find(|c| c.id == "claim-romantic").expect("romantic");
+    let platonic_row = claims.iter().find(|c| c.id == "claim-platonic").expect("platonic");
+    assert_eq!(romantic_row.dynamics, vec!["slow_burn".to_string()]);
+    assert_eq!(platonic_row.dynamics, vec!["enemies_to_lovers".to_string()]);
+}
+
+#[tokio::test]
+async fn setting_dynamics_replaces_the_set() {
+    let db = scratch("dyn_replace").await;
+    let work = id("dyn-replace");
+    fixture_nodes(&db, "dyn-replace").await;
+    fixture_facet_nodes(&db, "dynamic", &["a", "b", "c"]).await;
+    fixture_work(&db, &work).await;
+    exec_with_text(
+        &db,
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+         VALUES ('pair-ab', 'relationship', 'A/B', 'a/b', '2026-01-01T00:00:00Z')",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+         VALUES ('pair-ab', 'relationship', 'A/B', 'a/b', '2026-01-01T00:00:00Z')",
+        &[],
+    )
+    .await
+    .expect("pairing node");
+    seed_claim(&db, &work, "pair-ab", "romantic", "claim-replace").await;
+
+    let at = "2026-01-01T00:00:00Z";
+    wc::set_relationship_dynamics(db.db(), "claim-replace", &["a".into(), "b".into()], at)
+        .await
+        .expect("first set");
+    // Clear-and-fill: a set is the whole of what the claim says, so `a` must be gone.
+    assert_eq!(
+        wc::set_relationship_dynamics(db.db(), "claim-replace", &["b".into(), "c".into()], at)
+            .await
+            .expect("second set"),
+        2
+    );
+    assert_eq!(
+        wc::dynamics_of_relationship(db.db(), "claim-replace")
+            .await
+            .expect("read"),
+        vec!["b".to_string(), "c".to_string()]
+    );
+
+    assert!(
+        wc::add_relationship_dynamic(db.db(), "claim-replace", "a", at)
+            .await
+            .expect("add back")
+    );
+    assert!(
+        !wc::add_relationship_dynamic(db.db(), "claim-replace", "a", at)
+            .await
+            .expect("add twice"),
+        "a dynamic twice is one row"
+    );
+    assert!(
+        wc::remove_relationship_dynamic(db.db(), "claim-replace", "a")
+            .await
+            .expect("remove")
+    );
+    assert!(
+        !wc::remove_relationship_dynamic(db.db(), "claim-replace", "a")
+            .await
+            .expect("remove twice")
+    );
+}
+
+#[tokio::test]
+async fn dynamics_do_not_outlive_their_claim() {
+    let db = scratch("dyn_cascade").await;
+    let work = id("dyn-cascade");
+    fixture_nodes(&db, "dyn-cascade").await;
+    fixture_facet_nodes(&db, "dynamic", &["slow_burn"]).await;
+    fixture_work(&db, &work).await;
+    exec_with_text(
+        &db,
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+         VALUES ('pair-c', 'relationship', 'C/D', 'c/d', '2026-01-01T00:00:00Z')",
+        "INSERT INTO canonical_entities (id, kind, canonical, norm, created_at)
+         VALUES ('pair-c', 'relationship', 'C/D', 'c/d', '2026-01-01T00:00:00Z')",
+        &[],
+    )
+    .await
+    .expect("pairing node");
+    seed_claim(&db, &work, "pair-c", "romantic", "claim-cascade").await;
+    wc::set_relationship_dynamics(
+        db.db(),
+        "claim-cascade",
+        &["slow_burn".to_string()],
+        "2026-01-01T00:00:00Z",
+    )
+    .await
+    .expect("dynamics");
+
+    exec_with_text(
+        &db,
+        "DELETE FROM work_relationships WHERE id = 'claim-cascade'",
+        "DELETE FROM work_relationships WHERE id = 'claim-cascade'",
+        &[],
+    )
+    .await
+    .expect("delete claim");
+
+    assert_eq!(
+        count_scalar(
+            &db,
+            "SELECT count(*) FROM work_relationship_dynamics",
+            "SELECT count(*) FROM work_relationship_dynamics",
+            &[]
+        )
+        .await,
+        0,
+        "a dynamic is the claim's, so it goes when the claim goes"
+    );
 }

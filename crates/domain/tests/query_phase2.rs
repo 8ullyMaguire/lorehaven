@@ -55,7 +55,7 @@ fn a_scoped_predicate_is_one_exists_not_two() {
     );
     // Every clause lives in one pair of parentheses, i.e. one predicate.
     assert_eq!(
-        s.matches("SELECT 1 FROM ship_participants").count(),
+        s.matches("SELECT 1 FROM relationship_participants").count(),
         4,
         "three participant clauses (all-named, no-unnamed, each-named) means one \
          more than the two the uncorrelated form would need -- assert the count so a \

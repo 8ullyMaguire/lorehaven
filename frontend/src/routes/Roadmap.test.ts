@@ -92,6 +92,19 @@ describe('Roadmap board page', () => {
     expect(screen.getAllByText(/Nothing here yet/).length).toBeGreaterThan(0);
   });
 
+  it('an empty board is one empty state, not six', async () => {
+    // Measured on the live instance: six identical "Nothing here yet." sentences under one
+    // heading read as a broken page. With no cards at all the board says so once.
+    vi.mocked(fetchRoadmapBoard).mockResolvedValue({
+      board: { idea: [], up_next: [], in_progress: [], finished: [], shipped: [], rejected: [] },
+    } as never);
+    render(Roadmap);
+
+    await waitFor(() => expect(screen.getByText('No feature cards yet')).toBeInTheDocument());
+    expect(screen.getAllByText('No feature cards yet')).toHaveLength(1);
+    expect(screen.queryAllByText(/Nothing here yet/)).toHaveLength(0);
+  });
+
   it('shows Elo ratings on cards', async () => {
     render(Roadmap);
     await waitFor(() => expect(screen.getByText(/★ 1512/)).toBeInTheDocument());
