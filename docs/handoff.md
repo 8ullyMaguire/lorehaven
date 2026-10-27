@@ -2916,3 +2916,53 @@ are not.
   begins — see "What M54 is, and what it is not" in
   `docs/plans/m54-bot-core.md`. Every door its client needs is now open, so it
   would not be blocked on Darkhold.
+
+## Search is the slowest thing on the site (measured 2026-10-27)
+
+Not introduced by 0127 — found while checking the live build page by page.
+
+| measurement | value |
+|---|---|
+| `GET /api/v1/search?q=harry&limit=20` | **6.4 s** |
+| `works_index_terms` row count | **0** |
+| `count(*) FROM works` | 58,042 |
+| `count(*) FROM units` | 127,474 |
+| title-only `ILIKE '%harry%'` + lifecycle filter | 59 s |
+| title+summary `ILIKE` | 342 s |
+| the 20-row shaped query with the per-work unit sum | 77 s |
+
+Read those timings with one caveat: they were taken while the host was at load average 15 falling to 6
+with PSI `io full` around 30 %, so they measure the disk as much as the plan. The qualitative finding
+stands regardless — the term index that search is supposed to ride is **empty**, so the request falls
+back to `ILIKE` over 58 k rows whose summaries live in TOAST, and the word count re-sums `units` per
+result row instead of once.
+
+What a fix looks like, in the order the cost pays back:
+
+1. Populate `works_index_terms` (it has the right indexes already: `(term, work_id)` and `(work_id, pos)`)
+   and route the anonymous door through it — prefix `LIKE 'x%'` on an indexed `term` is the design that
+   was built and never filled.
+2. Keep the `ILIKE` path only as a fallback, and give it `pg_trgm` (`CREATE EXTENSION pg_trgm` plus GIN
+   indexes on `works.title` and `works.summary`). Without trigrams no index can serve `%needle%`.
+3. Compute word counts once per page (`LEFT JOIN LATERAL … GROUP BY`) instead of a correlated subquery
+   per row.
+
+None of this is started. It is the highest-value performance work left and it is invisible in the test
+suite, which runs against databases with tens of rows.
+
+## What the page-by-page pass did find
+
+Checked at 1440×900 and 390×844 on the deployed build: horizontal overflow (`scrollWidth` vs viewport),
+text clipped by its own box, `<img>` with `naturalWidth === 0`, and text/background contrast computed
+from `getComputedStyle` against the nearest opaque ancestor (4.5:1, or 3:1 for large or bold text).
+
+- No horizontal overflow on any route at either width.
+- No clipped text, no broken images, no failed subresource requests outside the expected 401s that
+  `/library` and `/settings` make while signed out.
+- One contrast hit, `2.26:1` on the Roadmap tab labelled "Board", sampled mid-entry; measured again after
+  the tab settled it is white on `rgb(122, 92, 70)` — 6.1:1. Transient during the transition, not a defect.
+- `/roadmap` now renders **one** "No feature cards yet" instead of one per lifecycle group.
+- `/works/{id}` first paint shows only "Loading" for 4–5 s because the work fetch takes that long under
+  the current I/O; the page resolves on its own. That is the search problem above wearing a different hat.
+
+Screenshots of ten routes after the deploy are in the session workspace as `after-*.png`.
