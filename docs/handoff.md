@@ -68,6 +68,15 @@ The unit's description says so.
 
 ### What is not done
 
+**One frontend test is red and it is not this change.** `Library.test.ts > offers taking a work off
+the shelf and deleting its copy as two actions` fails with `Unable to fire a "change" event - please
+provide a DOM element` at line 231 — after a `waitFor` that has just asserted the same element is
+not null, which means the card is re-rendered between the assertion and the event. Neither
+`Library.svelte` nor `Library.test.ts` was touched by this work or by `3535a19d` (last moved in
+M8/M4), so this predates the arena change and is recorded rather than quietly deleted. The other
+565 pass, including all nine of `Arena.test.ts` — one of which now pins the new contract: the vote
+carries all four card ids, because the server cannot derive the middles from best and worst.
+
 **Nothing reads `work_ratings` yet.** The ladder stores signal and the feed ignores it — the same
 fault this project accuses kindred's tag arena of, one layer further along. T-M16-10 is written:
 a fourth candidate engine feeding `Candidate.taste_signal` (not the positional score, or a

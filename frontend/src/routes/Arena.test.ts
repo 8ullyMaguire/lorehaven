@@ -143,7 +143,7 @@ describe('Taste Calibration Arena', () => {
     expect(screen.getByText('Vibe')).toBeInTheDocument();
   });
 
-  it('submits vote when Submit is clicked', async () => {
+  it('submits vote when Submit is clicked, carrying every card it showed', async () => {
     render(Arena);
     await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
     await screen.getAllByRole('button', { name: 'Best' })[0].click();
@@ -154,6 +154,10 @@ describe('Taste Calibration Arena', () => {
         best_work_id: 'work-1',
         worst_work_id: 'work-2',
         reason_tags: [],
+        // The server rates works from this ballot (spec §12.4a) and cannot derive the middle
+        // cards from best and worst: without them the same tap rates two works instead of four.
+        // work-3 and work-4 are the middles here, which is exactly why they are asserted.
+        card_ids: ['work-1', 'work-2', 'work-3', 'work-4'],
       }),
     );
   });
