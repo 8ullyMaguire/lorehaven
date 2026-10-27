@@ -78,6 +78,9 @@ pub async fn list_editions(
             .into_iter()
             .filter(|edition| edition.published_at.is_some())
             .collect(),
+        // A published record is not a published edition: editions are objects
+        // of their own and this door does not hand them out.
+        Reading::MetadataOnly => Vec::new(),
         Reading::Denied(error) => return Err(ApiError(error)),
     };
     Ok(Json(json!({ "editions": visible })))
@@ -166,6 +169,7 @@ pub async fn get_edition(
         Reading::Contributor => {}
         Reading::Public if edition.published_at.is_some() => {}
         Reading::Public => return Err(not_found("edition")),
+        Reading::MetadataOnly => return Err(not_found("edition")),
         Reading::Denied(error) => return Err(ApiError(error)),
     }
     let audio_checksum = darkhold_db::narration::narration_audio_checksum(db, &id).await?;
@@ -245,6 +249,7 @@ pub async fn download_audio(
     let allowed = match reading_for_work(&state, &edition.work_id, session.as_ref()).await? {
         Reading::Contributor => true,
         Reading::Public => edition.published_at.is_some(),
+        Reading::MetadataOnly => false,
         Reading::Denied(error) => return Err(ApiError(error)),
     };
     if !allowed {

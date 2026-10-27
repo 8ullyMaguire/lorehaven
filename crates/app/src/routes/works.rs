@@ -549,16 +549,30 @@ async fn read_work(
     let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
     let actor = actor_for(session.as_ref());
 
-    match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
+    let reading =
+        reading_decision_publishing_metadata(&state, actor.as_ref(), &work, &contributors).await;
+    match reading {
         Reading::Contributor => {}
-        Reading::Public => {
+        // `MetadataOnly` reaches the same view as `Public`: `PublicWorkView`
+        // carries the record and the units' titles and counts, never a unit's
+        // text — that is fetched by `read_unit`, which refuses `MetadataOnly`.
+        Reading::Public | Reading::MetadataOnly => {
             // A public reader never receives the editor document, and never
             // receives a unit that is not currently published.
             let view = public_view(&state, &work).await?;
             record_view_for_work(&state, &work_id, session.as_ref())
                 .await
                 .ok();
-            return Ok(Json(serde_json::to_value(view).map_err(internal)?));
+            let mut json = serde_json::to_value(view).map_err(internal)?;
+            // The record is served and the text is not, so the response says so.
+            // Without the flag a client sees a work with units it cannot open
+            // and no way to tell that from a broken link.
+            if matches!(reading, Reading::MetadataOnly) {
+                if let Some(object) = json.as_object_mut() {
+                    object.insert("content_withheld".to_owned(), serde_json::Value::Bool(true));
+                }
+            }
+            return Ok(Json(json));
         }
         Reading::Denied(error) => return Err(ApiError(error)),
     }
@@ -1327,6 +1341,12 @@ async fn read_unit(
         match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
             Reading::Contributor => (true, false),
             Reading::Public => (false, true),
+            // A published record does not publish the text: the same answer a
+            // reader outside the audience gets, and the same answer an absent
+            // work gets.
+            Reading::MetadataOnly => {
+                return Err(ApiError(AppError::NotFound { resource: "work" }))
+            }
             Reading::Denied(error) => return Err(ApiError(error)),
         };
     let _ = is_public;
@@ -1543,6 +1563,15 @@ pub(crate) enum Reading {
     Contributor,
     /// The actor may read the published work.
     Public,
+    /// The work's **record** is published and its **text** is not: the body is
+    /// held for a higher trust level and the instance runs with
+    /// `works.gated_metadata_public`.
+    ///
+    /// Only the routes that hand out a work's record may treat this as an
+    /// allow; every route that hands out text must refuse it. It is a distinct
+    /// variant for that reason — a route that forgot about it would otherwise
+    /// inherit whatever exhaustiveness let through.
+    MetadataOnly,
     /// Refused, with the error the caller receives.
     Denied(AppError),
 }
@@ -1579,6 +1608,32 @@ pub(crate) async fn reading_decision(
     actor: Option<&Actor>,
     work: &Work,
     contributors: &[Contributor],
+) -> Reading {
+    reading_decision_with(state, actor, work, contributors, false).await
+}
+
+/// The same decision, but a body held by the audience gate yields
+/// [`Reading::MetadataOnly`] instead of a refusal when the instance publishes
+/// gated records (`works.gated_metadata_public`).
+///
+/// Callers that hand out a work's **text** keep using [`reading_decision`];
+/// this one is for the routes that hand out the record — the work page and the
+/// public API's work endpoint.
+pub(crate) async fn reading_decision_publishing_metadata(
+    state: &AppState,
+    actor: Option<&Actor>,
+    work: &Work,
+    contributors: &[Contributor],
+) -> Reading {
+    reading_decision_with(state, actor, work, contributors, true).await
+}
+
+async fn reading_decision_with(
+    state: &AppState,
+    actor: Option<&Actor>,
+    work: &Work,
+    contributors: &[Contributor],
+    metadata_public: bool,
 ) -> Reading {
     let actor_is_contributor =
         actor.is_some_and(|actor| contributors.iter().any(|c| c.pseud_id == actor.pseud_id));
@@ -1669,7 +1724,27 @@ pub(crate) async fn reading_decision(
             }
             Reading::Public
         }
-        Decision::Deny(reason) => Reading::Denied(match reason {
+        Decision::Deny(reason) => denial(
+            reason,
+            metadata_public,
+            state.config().works.gated_metadata_public,
+        ),
+    }
+}
+
+/// What a refusal renders as, and the one place the record/text split lives.
+///
+/// **The default is spec §7.7.3's:** a gated body answers exactly as an absent
+/// work does, so a reader cannot learn from a status code that a work exists.
+/// `metadata_public` is the operator's opt-in (`works.gated_metadata_public`)
+/// and applies to `BodyNotInAudience` alone — the one denial that is about the
+/// text and not about the reader, the rating ceiling, the sign-in state or the
+/// paywall.
+fn denial(reason: DenyReason, metadata_public: bool, publish_gated: bool) -> Reading {
+    if metadata_public && publish_gated && matches!(reason, DenyReason::BodyNotInAudience) {
+        return Reading::MetadataOnly;
+    }
+    Reading::Denied(match reason {
             // Absence is reported as absence: a draft, a withheld work or a
             // work belonging to someone the actor is blocked by all look the
             // same from outside (spec §3.3).
@@ -1698,8 +1773,7 @@ pub(crate) async fn reading_decision(
             // `DenyReason` is non-exhaustive: a reason added later must not
             // silently become "allow", so the default is refusal.
             _ => AppError::ContentRestricted,
-        }),
-    }
+    })
 }
 
 /// How this caller may see a work, looked up by id.
@@ -1733,6 +1807,9 @@ pub(crate) async fn require_contributor(
     match reading_for_work(state, work_id, Some(session)).await? {
         Reading::Contributor => Ok(()),
         Reading::Public => Err(ApiError(AppError::AccessDenied)),
+        // Seeing a work's record is not contributing to it, and this is a
+        // contributor action.
+        Reading::MetadataOnly => Err(ApiError(AppError::AccessDenied)),
         Reading::Denied(error) => Err(ApiError(error)),
     }
 }

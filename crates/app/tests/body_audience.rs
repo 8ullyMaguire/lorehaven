@@ -165,6 +165,62 @@ async fn set_audience_raw(
     }
 }
 
+/// A router that publishes gated works' records (`works.gated_metadata_public`).
+fn router_publishing_records(tdb: &test_support::TestDb, dir: &std::path::Path) -> axum::Router {
+    let mut config = Config::development_defaults();
+    config.storage.root = dir.to_path_buf();
+    config.works.gated_metadata_public = true;
+    server::build_router(AppState::new(config, tdb.db().clone()))
+}
+
+/// **The record is published and the text is not** — and both halves hold.
+///
+/// A one-sided test here would pass against a door that publishes the body too:
+/// this asserts that the guest reads the work — title, summary, the unit *list* —
+/// and that the same guest's read of a unit is refused. The strict router is
+/// wired in the same test so the pair cannot drift: same fixture, same work,
+/// flag off → the record is absent as well, which is §7.7.3's default.
+#[tokio::test]
+async fn publishing_the_record_does_not_publish_the_text() {
+    let dir = test_support::scratch_dir("ba_meta_public");
+    let tdb = test_support::TestDb::connect_with_dir("ba-meta-public", &dir).await;
+
+    let mut author = test_support::TestClient::new(router_publishing_records(&tdb, &dir));
+    test_support::register(&mut author, "author-mp@test.dev", "ba_author_mp").await;
+    let work = published_work(&mut author, "Record Public, Body Held").await;
+    set_audience(&tdb, &work, Some("trust_at_least:4")).await;
+
+    // A guest reads the record: the title, and the list of units.
+    let mut guest = test_support::TestClient::new(router_publishing_records(&tdb, &dir));
+    let (status, body) = guest.get(format!("/api/v1/works/{work}")).await;
+    assert_eq!(status, StatusCode::OK, "guest reads the record: {body}");
+    assert_eq!(body["title"], "Record Public, Body Held");
+    let units = body["units"].as_array().expect("the unit list");
+    assert!(!units.is_empty(), "the record carries its units: {body}");
+    let unit = units[0]["id"].as_str().expect("unit id").to_owned();
+
+    // The same guest is refused the text of that unit.
+    let (status, body) = guest
+        .get(format!("/api/v1/works/{work}/chapters/{unit}"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the text stays held: {body}"
+    );
+
+    // The public API's work endpoint says the body is withheld rather than
+    // handing out a work that looks empty.
+    let (status, body) = guest.get(format!("/api/v1/public/works/{work}")).await;
+    assert_eq!(status, StatusCode::OK, "public record: {body}");
+    assert_eq!(body["work"]["content_withheld"], true, "{body}");
+
+    // With the flag off — the default — the same guest gets nothing at all.
+    let mut strict = test_support::TestClient::new(router_for(&tdb, &dir));
+    let (status, _) = strict.get(format!("/api/v1/works/{work}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "§7.7.3 stays the default");
+}
+
 // --- the gate ----------------------------------------------------------------
 
 /// A reader at the stated trust level reaches a body held for that threshold.

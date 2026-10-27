@@ -15,7 +15,7 @@ use darkhold_domain::WorkId;
 
 use crate::auth::{MaybeSession, MaybeToken, RequireActor};
 use crate::http::{ApiError, ApiResult};
-use crate::routes::works::{actor_for, reading_decision, Reading};
+use crate::routes::works::{actor_for, reading_decision_publishing_metadata, Reading};
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
@@ -50,11 +50,17 @@ pub async fn get_public_work(
     let contributors = collaboration::contributors_for_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
-    match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
-        Reading::Public => {}
-        Reading::Contributor => {}
-        Reading::Denied(e) => return Err(ApiError(e)),
-    }
+    let content_withheld =
+        match reading_decision_publishing_metadata(&state, actor.as_ref(), &work, &contributors)
+            .await
+        {
+            Reading::Public | Reading::Contributor => false,
+            // The record is published; the text is not. Reported rather than
+            // hidden so a client can say "available at trust level 2" instead
+            // of showing a reader an empty work and a mystery.
+            Reading::MetadataOnly => true,
+            Reading::Denied(e) => return Err(ApiError(e)),
+        };
     let work_json = json!({
         "id": work.id.to_canonical_string(),
         "title": work.title,
@@ -64,6 +70,7 @@ pub async fn get_public_work(
         "lifecycle": work.lifecycle,
         "completion": work.completion,
         "published_at": work.published_at,
+        "content_withheld": content_withheld,
     });
     Ok(Json(json!({ "work": work_json })))
 }

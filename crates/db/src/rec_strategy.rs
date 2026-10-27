@@ -294,6 +294,16 @@ async fn query_strings(db: &Database, sql: &str) -> Result<Vec<String>> {
     }
 }
 
+/// PostgreSQL hands back `uuid` where SQLite has only text, and the pair
+/// decoders in this module are `(String, …)` on both backends. sqlx will not
+/// coerce one into the other, so the id has to leave SQL as text.
+fn id_cast(db: &Database) -> &'static str {
+    match db.backend() {
+        crate::Backend::Postgres => "::text",
+        crate::Backend::Sqlite => "",
+    }
+}
+
 /// Co-occurrence strategy: "users who bookmarked X also bookmarked Y".
 pub fn cooccurrence_strategy() -> RecStrategyFn {
     Arc::new(|db, ctx| {
@@ -301,9 +311,10 @@ pub fn cooccurrence_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT b2.subject_id, COUNT(*) as score
+                SELECT b2.subject_id{id_cast}, COUNT(*) as score
                 FROM bookmarks b1
                 JOIN bookmarks b2 ON b1.account_id = b2.account_id
                     AND b1.subject_id != b2.subject_id
@@ -366,9 +377,10 @@ pub fn tag_graph_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT wt2.work_id, COUNT(*) as score
+                SELECT wt2.work_id{id_cast}, COUNT(*) as score
                 FROM bookmarks b
                 JOIN work_tags wt1 ON wt1.work_id = b.subject_id
                 JOIN work_tags wt2 ON wt1.node_id = wt2.node_id
@@ -398,9 +410,10 @@ pub fn author_graph_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT w2.id, COUNT(*) as score
+                SELECT w2.id{id_cast}, COUNT(*) as score
                 FROM bookmarks b
                 JOIN works w1 ON w1.id = b.subject_id
                 JOIN works w2 ON w1.owner_pseud_id = w2.owner_pseud_id
@@ -430,9 +443,10 @@ pub fn sequential_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT DISTINCT r.subject_id
+                SELECT DISTINCT r.subject_id{id_cast}
                 FROM reading_history_entry r
                 JOIN works w ON w.id = r.subject_id
                 WHERE r.account_id = '{}'
@@ -461,9 +475,10 @@ pub fn completion_weight_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT w.id,
+                SELECT w.id,{id_cast}
                        (CASE w.completion
                            WHEN 'completed' THEN 2
                            ELSE 1
@@ -497,9 +512,10 @@ pub fn curator_prior_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT b.subject_id, COUNT(*) as score
+                SELECT b.subject_id{id_cast}, COUNT(*) as score
                 FROM bookmarks b
                 JOIN accounts a ON a.id = b.account_id
                 WHERE b.subject_type = 'work'
@@ -528,9 +544,10 @@ pub fn bandit_strategy() -> RecStrategyFn {
         let account_id = ctx.account_id.clone();
         let cap = ctx.cap;
         Box::pin(async move {
+            let id_cast = id_cast(&db);
             let sql = format!(
                 r#"
-                SELECT w.id,
+                SELECT w.id,{id_cast}
                        COALESCE(m.views, 0) as score
                 FROM works w
                 LEFT JOIN work_metric_aggregates m ON m.work_id = w.id
@@ -615,8 +632,10 @@ pub fn hidden_classics_strategy() -> RecStrategyFn {
             //
             // Two fragments, not one: the JOIN needs `::text` on the uuid side, and the
             // SELECT needs it on the way out so the row decodes as `String` (sqlx will
-            // not coerce a uuid column into one). The sibling strategies above need
-            // neither, because they select `subject_id` out of TEXT columns.
+            // not coerce a uuid column into one). The sibling strategies above need the
+            // same cast and get it from `id_cast`; the earlier note here claimed they
+            // selected `subject_id` out of TEXT columns, and they do not — that claim is
+            // what let `/api/v1/discovery/draw` answer 500 on Postgres for weeks.
             let (view_join, id_cast) = match db.backend() {
                 crate::Backend::Postgres => ("v.work_id = w.id::text", "::text"),
                 crate::Backend::Sqlite => ("v.work_id = w.id", ""),

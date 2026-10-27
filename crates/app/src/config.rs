@@ -330,11 +330,23 @@ pub struct WorksConfig {
     /// Maximum fork chain depth. A work whose lineage chain is already this
     /// deep refuses to fork. Default 3.
     pub max_fork_depth: u32,
+    /// Publish the *record* of a work whose body is held for a higher trust
+    /// level, withholding only the text.
+    ///
+    /// The default is `false`, and that is spec §7.7.3: a gated body answers
+    /// exactly as an absent work does, so the gate cannot be used to learn that
+    /// a work exists. An operator who runs their instance as a catalogue — the
+    /// record is the public asset and the text is the prize — turns this on and
+    /// gets a work page for every work, with unit reads still refused.
+    pub gated_metadata_public: bool,
 }
 
 impl Default for WorksConfig {
     fn default() -> Self {
-        Self { max_fork_depth: 3 }
+        Self {
+            max_fork_depth: 3,
+            gated_metadata_public: false,
+        }
     }
 }
 
@@ -2628,6 +2640,11 @@ impl Config {
                 .as_ref()
                 .and_then(|w| w.max_fork_depth)
                 .unwrap_or(3),
+            gated_metadata_public: file
+                .works
+                .as_ref()
+                .and_then(|w| w.gated_metadata_public)
+                .unwrap_or(false),
         };
 
         let config = Self {
@@ -4352,6 +4369,8 @@ struct BulkExportSection {
 struct WorksSection {
     /// Maximum fork chain depth (default 3).
     max_fork_depth: Option<u32>,
+    /// Publish gated works' records while withholding their text (default false).
+    gated_metadata_public: Option<bool>,
 }
 
 /// The `[tts]` table: which engine narrates, and how an operator configured it

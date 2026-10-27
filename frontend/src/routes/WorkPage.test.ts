@@ -111,6 +111,52 @@ function review(overrides: Record<string, unknown>) {
   };
 }
 
+/**
+ * The withheld-text state (`works.gated_metadata_public`).
+ *
+ * A gated work answers the record and refuses the text. The page must not turn
+ * that into a broken site: the units are listed so a reader can see what exists,
+ * and they are **not** links, because `/units/<id>` answers 404 and an
+ * unexplained 404 reads as a bug rather than as a gate. Both halves are asserted
+ * here — a test for the notice alone would pass on a page that still offered the
+ * dead links, and a test for the links alone would pass on a page that said
+ * nothing.
+ */
+describe('WorkPage withheld text', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.status = 'anonymous';
+    session.me = null as any;
+    (fetchWorkPricing as any).mockResolvedValue({ pricing: [] });
+    (fetchReviews as any).mockResolvedValue({ items: [] });
+  });
+
+  it('lists the units without links, and says why', async () => {
+    (fetchWork as any).mockResolvedValue({ ...WORK, content_withheld: true });
+
+    render(WorkPage, { props: { workId: 'work-1' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('content-withheld')).toBeInTheDocument();
+    });
+    // The unit is named...
+    expect(screen.getByText('One — Low Tide')).toBeInTheDocument();
+    // ...and is not a link to text the server will refuse.
+    expect(screen.queryByRole('link', { name: 'One — Low Tide' })).toBeNull();
+  });
+
+  it('links the units when the text is readable', async () => {
+    (fetchWork as any).mockResolvedValue(WORK);
+
+    render(WorkPage, { props: { workId: 'work-1' } });
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'One — Low Tide' })).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('content-withheld')).toBeNull();
+  });
+});
+
 describe('WorkPage spoiler reveal', () => {
   beforeEach(() => {
     vi.clearAllMocks();

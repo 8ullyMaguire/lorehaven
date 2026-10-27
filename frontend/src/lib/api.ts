@@ -596,6 +596,12 @@ export interface PublicWork {
   metrics: WorkMetricsView | null;
   authors: PublicAuthor[];
   units: UnitSummary[];
+  /**
+   * The work's record is public but its text is not (`works.gated_metadata_public`).
+   * The unit list is here so a reader can see what exists; opening a unit would
+   * be refused, so the page must not offer a link that 404s.
+   */
+  content_withheld?: boolean;
 }
 
 /** Public engagement counts for a work card. */

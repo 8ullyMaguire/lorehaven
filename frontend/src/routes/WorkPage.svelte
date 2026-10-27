@@ -359,12 +359,37 @@
     </ul>
   {/if}
 
-  {#if progress && progress.resolution.kind !== 'no_position'}
+  <!--
+    A held resume offer is not offered: the reader would click it and the
+    server-rendered reader page would refuse the unit. The rule on this page is
+    that it does not offer what the server will refuse.
+  -->
+  {#if !work.content_withheld && progress && progress.resolution.kind !== 'no_position'}
     <ResumePrompt workId={workId} resolution={progress.resolution} firstUnitId={firstUnitId} />
   {/if}
 
   <h2>Units</h2>
-  {#if work.units.length === 0}
+  {#if work.content_withheld}
+    <!--
+      `works.gated_metadata_public`: the record is public, the text is not
+      (spec §7.7.3's default is inverted for this instance, deliberately). The
+      units stay listed with their word counts, because the list is part of the
+      record -- but they are not links, because `/units/<id>` would answer 404
+      and a 404 with no explanation reads like a broken site.
+    -->
+    <p class="note withheld" data-testid="content-withheld">
+      This work's text is available to readers at trust level 2 or above. Its
+      record — title, summary, tags and the unit list below — is public.
+    </p>
+    <ol class="units">
+      {#each work.units as unit (unit.id)}
+        <li>
+          <span>{unit.title.trim() === '' ? 'Untitled unit' : unit.title}</span>
+          <span class="note">{unit.word_count} words</span>
+        </li>
+      {/each}
+    </ol>
+  {:else if work.units.length === 0}
     <p class="note">This work has no units.</p>
   {:else}
     <ol class="units">
