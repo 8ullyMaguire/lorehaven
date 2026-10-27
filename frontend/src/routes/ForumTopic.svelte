@@ -2,11 +2,21 @@
   /**
    * One topic thread: posts, reply form, and mode-specific surfaces (spec §35).
    *
-   * Reading is public; replying needs a signed-in pseud. A locked topic shows
+   * **Reading is not public**: `get_topic` and `get_topic_replies` are both
+   * `RequireSession`, and `/community` tells a visitor so. This component's own
+   * doc comment claimed otherwise, which is what made the blank page look
+   * impossible: a signed-out visitor got `AUTH_REQUIRED`, `topic` stayed null,
+   * and the only `{#if error}` on the page was nested *inside* `{#else if
+   * topic}` — so the failure rendered nothing at all. Measured on the live
+   * instance: `<main><div class="page"></div></main>`, zero characters.
+   *
+   * The error branch is now a sibling of the loading branch, and an auth refusal
+   * is presented as the door it is. A locked topic shows
    * its posts but refuses new ones. Mode-specific surfaces (reading group
    * schedule, critique queue) render for non-plain topics. Moderation panel
    * is available to signed-in moderators.
    */
+  import { ApiError } from '../lib/api';
   import {
     fetchPosts,
     fetchTopic,
@@ -31,6 +41,9 @@
   let posts = $state<ForumPost[]>([]);
   let loading = $state(true);
   let error = $state<unknown>(null);
+
+  /* The door, not a fault: the server's stable code is the fact to test. */
+  let authRequired = $derived(error instanceof ApiError && error.isAuthRequired);
 
   async function load() {
     loading = true;
@@ -57,8 +70,19 @@
 <div class="page">
   {#if loading}
     <Skeleton lines={4} />
+  {:else if authRequired}
+    <h1>This thread is for members</h1>
+    <p>
+      Reading and replying in the forums needs an account. The
+      <a href="/community">community hub</a> explains what is behind the door.
+    </p>
+    <p>
+      <a href="/sign-in">Sign in</a> or
+      <a href="/register">register</a> to read this thread.
+    </p>
+  {:else if error}
+    <ErrorSummary {error} onretry={() => void load()} />
   {:else if topic}
-    {#if error}<ErrorSummary {error} />{/if}
 
     <h1>{topic.title}</h1>
     <p class="meta">
