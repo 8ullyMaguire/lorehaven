@@ -102,10 +102,29 @@ async fn get_draw(
     let nonce = params.nonce.unwrap_or(0);
     let hand = params.hand.unwrap_or(DEFAULT_HAND).clamp(1, MAX_HAND);
 
-    let registry = crate::rec_engine::build_registry(&state.config().discovery);
-    let pool = crate::rec_engine::generate_with_registry(state.db(), &registry, &account_id, POOL)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    // The pool is the candidate set `/discover` ranks, built by the same function
+    // and blended the same way. What it deliberately does NOT do is run the
+    // strategy registry: on this tree that path decodes work ids as `TEXT` from a
+    // `UUID` column on PostgreSQL, so a draw built on it would fail on every
+    // instance the feed happens to serve through the blend — and a draw that only
+    // worked under `rec_mode = "pluggable"` would be a second pool with a second
+    // set of bugs, which is the thing this slot exists to avoid.
+    let engines = super::discovery::build_candidate_engines(
+        &state,
+        Some(&account_id),
+        Some(viewer),
+        POOL as i64,
+    )
+    .await?;
+    let mut blended = darkhold_domain::discovery::blend(&engines);
+    // `blend` merges engines but does not order; the feed orders the merge before
+    // it serves it, and a pool is an order even when the hand is not.
+    blended.sort_by_key(|candidate| -candidate.score);
+    let pool: Vec<String> = blended
+        .iter()
+        .take(POOL)
+        .map(|candidate| candidate.work_id.to_string())
+        .collect();
 
     if pool.is_empty() {
         return Ok(Json(serde_json::json!({
@@ -209,8 +228,8 @@ async fn get_draw(
 
 /// Take one card.
 ///
-/// Idempotent: a second pick on the same hand leaves the first take in place (see
-/// `mark_chosen`). A `404` here means the slot is not the caller's — the same
+/// Idempotent, and one take per hand: a second pick leaves the first take in place
+/// and returns it (see `mark_chosen`). A `404` here means the slot is not the caller's — the same
 /// answer as a slot that was never served, because making the two distinguishable
 /// would answer "did this instance serve this work to somebody" for anyone who can
 /// guess a uuid.
@@ -229,14 +248,17 @@ async fn post_draw_pick(
         return Err(ApiError(AppError::NotFound { resource: "draw" }));
     }
 
-    let chosen_at =
+    let chosen =
         darkhold_db::recommendation_slots::mark_chosen(state.db(), viewer, &body.request_id, &body.work_id)
             .await
             .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    match chosen_at {
-        Some(chosen_at) => Ok(Json(serde_json::json!({
-            "work_id": body.work_id,
+    // The response names the card the HAND recorded, not the one that was posted:
+    // a second tap on another card is a no-op, and answering with the posted id
+    // would tell the page it changed a choice the server had already refused.
+    match chosen {
+        Some((chosen_work_id, chosen_at)) => Ok(Json(serde_json::json!({
+            "work_id": chosen_work_id,
             "chosen_at": chosen_at,
         }))),
         None => Err(ApiError(AppError::NotFound { resource: "draw" })),

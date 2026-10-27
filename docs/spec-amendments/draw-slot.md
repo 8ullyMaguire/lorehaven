@@ -11,9 +11,16 @@ candidate pool** — three by default — presented one card each. The reader ta
 another hand.
 
 A draw is **a presentation of the existing recommendation pipeline**, not a second recommender. The
-pool is `rec_engine`'s or the blended engines' — the same candidates `/discovery` serves — and the
-deal only decides *which* of them the reader sees this time. Nothing here re-ranks: a work's chance
-of appearing is its rank's chance, and a work outside the pool cannot be dealt.
+pool is built by `routes::discovery::build_candidate_engines` and merged by
+`darkhold_domain::discovery::blend` — the same candidate set `/discover` ranks, ordered by score —
+and the deal only decides *which* of them the reader sees this time. Nothing here re-ranks: a work's
+chance of appearing is its rank's chance, and a work outside the pool cannot be dealt.
+
+*Not* the strategy registry, deliberately. `rec_mode = "pluggable"` runs
+`rec_strategy`'s strategies, and on this tree their queries decode work ids as `TEXT` out of a
+`UUID` column on PostgreSQL, so that path fails on the engine the instance actually serves through.
+A draw built on it would either 500 or, worse, deal from a pool under a mode the reader's feed is not
+using — two pools with two sets of bugs is exactly what this slot must not be.
 
 ## Why it is a slot and not a page
 
@@ -23,6 +30,12 @@ why" (§12 north-star attribution). A dealt card is a served slot, so it is reco
 recorded on the same row (`chosen_at`), so the disposition is one column away from the serving
 decision it is about. A hand that was dealt and not taken is then readable as exactly that — passed
 slots carry no `chosen_at`.
+
+**One take per hand, and the first one wins.** The columns are per card, so the constraint that makes
+a hand a *choice* has to be in the statement: the update refuses when any card of the same request is
+already taken, and the route answers with the take the hand holds rather than the one that was posted.
+Without it, two taps on two cards recorded two takes — which is a second choice, not a choice, and it
+would have quietly poisoned the only signal the draw collects.
 
 ## The deterministic deal
 

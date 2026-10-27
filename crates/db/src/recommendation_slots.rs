@@ -198,44 +198,59 @@ pub async fn record_response(
     Ok(ids)
 }
 
-/// Record that the reader took one served slot (§16.10a's draw).
+/// Record that the reader took a card from one dealt hand (§16.10a's draw).
 ///
-/// Returns the take time, or `None` when the slot is not this reader's — the same
-/// answer for "never served" and "somebody else's", because §3.3 makes "does this
-/// object exist" and "may you read it" one answer.
+/// Returns the work the hand recorded and when it recorded it, or `None` when the
+/// request holds no slot for this reader — the same answer for "never served" and
+/// "somebody else's", because §3.3 makes "does this object exist" and "may you read
+/// it" one answer.
 ///
-/// **Idempotent, and the first take wins.** The `chosen_at IS NULL` in the WHERE
-/// is what makes a second pick on one hand a no-op instead of a rewrite: a reader
-/// who takes card 2 and then taps card 3 has chosen once, and moving the timestamp
-/// would make the record say the choice was card 3 while the reader's first action
-/// (which is the one that carried information) was card 2.
+/// # One take per hand, and the first one wins
+///
+/// A hand is a choice, so the database enforces the choice: the `NOT EXISTS` below
+/// refuses to mark a card when *any* card of the same request is already taken.
+/// Without it, two taps on two cards of one hand recorded **two** takes — which is
+/// not a choice but a second choice, and it corrupts the one signal this feature
+/// exists to collect. (Found by the live walk, not by a unit test: the unit test
+/// took one card, and a take that works once is exactly what a missing constraint
+/// looks like from the inside.)
+///
+/// The call stays idempotent for the caller: a second pick — the same card or
+/// another one — returns the take that was recorded, with the work it was recorded
+/// for, so the page can show what actually happened instead of what was tapped.
 pub async fn mark_chosen(
     db: &Database,
     pseud_id: Uuid,
     request_id: &str,
     work_id: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<(String, String)>> {
     let now = crate::identity::now_rfc3339();
     let update = db.sql(
         "UPDATE recommendation_slots SET chosen_at = ?
-          WHERE pseud_id = ? AND request_id = ? AND work_id = ? AND chosen_at IS NULL",
+          WHERE pseud_id = ? AND request_id = ? AND work_id = ? AND chosen_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM recommendation_slots
+                             WHERE pseud_id = ? AND request_id = ? AND chosen_at IS NOT NULL)",
         // `chosen_at` is TEXT on both engines (migration 0128), so the value binds
-        // without a cast on either arm; the three ids are UUID on PostgreSQL.
+        // without a cast on either arm; the ids are UUID on PostgreSQL.
         "UPDATE recommendation_slots SET chosen_at = ?
           WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND work_id = ?::uuid
-            AND chosen_at IS NULL",
+            AND chosen_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM recommendation_slots
+                             WHERE pseud_id = ?::uuid AND request_id = ?::uuid
+                               AND chosen_at IS NOT NULL)",
     );
 
-    let affected = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&update)
                 .bind(&now)
                 .bind(pseud_id.to_string())
                 .bind(request_id)
                 .bind(work_id)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
-                .await?
-                .rows_affected()
+                .await?;
         }
         Backend::Postgres => {
             sqlx::query(&update)
@@ -243,32 +258,28 @@ pub async fn mark_chosen(
                 .bind(pseud_id.to_string())
                 .bind(request_id)
                 .bind(work_id)
+                .bind(pseud_id.to_string())
+                .bind(request_id)
                 .execute(db.postgres_pool().expect("postgres handle"))
-                .await?
-                .rows_affected()
+                .await?;
         }
-    };
-
-    if affected > 0 {
-        return Ok(Some(now));
     }
 
-    // Nothing was updated, and there are two reasons for that: the slot is already
-    // taken (which is a success, and the reader should be told what it recorded),
-    // or it is not this reader's at all (which is a miss). One SELECT separates
-    // them, and it is scoped to the caller for the reason above.
+    // Whatever the update did, the answer is the take this hand holds — which is
+    // the one the update just made, or the one that was there before it. Reading it
+    // back rather than returning `now` is what makes a second pick honest: the page
+    // learns which card the hand recorded, not which card was tapped.
     let existing = db.sql(
-        "SELECT chosen_at FROM recommendation_slots
-          WHERE pseud_id = ? AND request_id = ? AND work_id = ?",
-        "SELECT chosen_at FROM recommendation_slots
-          WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND work_id = ?::uuid",
+        "SELECT work_id, chosen_at FROM recommendation_slots
+          WHERE pseud_id = ? AND request_id = ? AND chosen_at IS NOT NULL",
+        "SELECT work_id::text, chosen_at FROM recommendation_slots
+          WHERE pseud_id = ?::uuid AND request_id = ?::uuid AND chosen_at IS NOT NULL",
     );
-    let row: Option<(Option<String>,)> = match db.backend() {
+    let row: Option<(String, String)> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&existing)
                 .bind(pseud_id.to_string())
                 .bind(request_id)
-                .bind(work_id)
                 .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
@@ -276,12 +287,11 @@ pub async fn mark_chosen(
             sqlx::query_as(&existing)
                 .bind(pseud_id.to_string())
                 .bind(request_id)
-                .bind(work_id)
                 .fetch_optional(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
-    Ok(row.and_then(|r| r.0))
+    Ok(row)
 }
 
 /// The explanation for one slot, or `None` if the reader does not own it.
