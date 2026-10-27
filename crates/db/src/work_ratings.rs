@@ -380,6 +380,135 @@ fn opponents_for(
 ///
 /// Ordered by `mu` and then by `phi` ascending, because two works at the same rating are not
 /// equally known and the more certain one is the better answer. Nothing here filters by
+
+/// A work the ladder would put in front of a reader, with the evidence behind it.
+///
+/// `mu` and `phi` ride along because a caller deciding *whether* to show the rating has to see
+/// how uncertain it is: a work rated twice has `phi` above 250 and a rating that is mostly noise.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RatedWork {
+    pub work_id: String,
+    pub mu: f64,
+    pub phi: f64,
+    pub matches: i64,
+}
+
+/// The highest-rated works a reader may be shown (spec §12.4a, §16).
+///
+/// Four filters, and each one exists because of a way this could go wrong:
+///
+/// 1. **`min_matches`.** One ballot gives the best and worst cards three comparisons and each
+///    middle two, so a work rated once sits at `phi ~= 228` out of an initial 350. A rating with
+///    that much uncertainty is not evidence; the caller passes the floor (the plan says 3).
+/// 2. **`lifecycle = 'published' AND visibility = 'public'`**, the same pair every other engine
+///    filters on. A draft or a private work is not a candidate for anything.
+/// 3. **The reader's content filters**, through `content_filter_sql`, exactly as
+///    `public_recommendations` applies them. This engine is the one place a rating could surface a
+///    work the reader asked never to see, so the exclusion is copied rather than trusted to the
+///    route.
+/// 4. **The reader's own ballots.** A work they have just compared is a work they have just
+///    judged; recommending it back is the fastest way to make the ladder feel like a bug.
+///
+/// An empty table is not an error: a fresh instance has no ratings and its feed must still be a
+/// feed.
+pub async fn top_rated_for(
+    db: &Database,
+    account_id: Option<&str>,
+    viewer_pseud: Option<uuid::Uuid>,
+    limit: i64,
+    min_matches: i64,
+) -> Result<Vec<RatedWork>> {
+    if limit <= 0 {
+        return Err(anyhow!("limit must be positive"));
+    }
+    let rules = crate::search::content_filter_sql::for_pseud(db, viewer_pseud).await?;
+    let filter = crate::search::content_filter_sql::exclusion_for(&rules, "w.id");
+
+    // Bind order is positional and unchecked, so it has to match the text: `min_matches`, then
+    // the filter's own binds, then the account, then the limit.
+    let sqlite = format!(
+        "SELECT CAST(wr.work_id AS TEXT), wr.mu, wr.phi, wr.matches
+         FROM work_ratings wr
+         JOIN works w ON w.id = wr.work_id
+         WHERE wr.matches >= ?
+           AND w.lifecycle = 'published' AND w.visibility = 'public'
+           {filter_clause}
+           AND NOT EXISTS (
+             SELECT 1 FROM arena_ballots b
+             WHERE b.account_id = ?
+               AND (b.best_work_id = wr.work_id OR b.worst_work_id = wr.work_id)
+           )
+         ORDER BY wr.mu DESC, wr.phi ASC
+         LIMIT ?",
+        filter_clause = filter.clause()
+    );
+    // Only the account comparison differs: `arena_ballots.account_id` is UUID on PostgreSQL, and a
+    // text bind against it fails with "operator does not exist: uuid = text".
+    let postgres = format!(
+        "SELECT CAST(wr.work_id AS TEXT), wr.mu, wr.phi, wr.matches
+         FROM work_ratings wr
+         JOIN works w ON w.id = wr.work_id
+         WHERE wr.matches >= ?
+           AND w.lifecycle = 'published' AND w.visibility = 'public'
+           {filter_clause}
+           AND NOT EXISTS (
+             SELECT 1 FROM arena_ballots b
+             WHERE b.account_id = ?::uuid
+               AND (b.best_work_id = wr.work_id OR b.worst_work_id = wr.work_id)
+           )
+         ORDER BY wr.mu DESC, wr.phi ASC
+         LIMIT ?",
+        filter_clause = filter.clause()
+    );
+
+    let rows: Vec<(String, f64, f64, i64)> = match db.backend() {
+        Backend::Sqlite => {
+            let mut query = sqlx::query_as(&sqlite);
+            query = query.bind(min_matches);
+            for bind in &filter.binds {
+                query = query.bind(bind);
+            }
+            query
+                .bind(account_id)
+                .bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            let sql = crate::sql_owned(db, sqlite, postgres);
+            let mut query = sqlx::query_as(&sql);
+            query = query.bind(min_matches);
+            for bind in &filter.binds {
+                query = query.bind(bind);
+            }
+            query
+                .bind(account_id)
+                .bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|(work_id, mu, phi, matches)| RatedWork {
+            work_id,
+            mu,
+            phi,
+            matches,
+        })
+        .collect())
+}
+
+/// The probability this work beats a work rated at the ladder's origin (mu 1500).
+///
+/// Used to place a rating on a 0..1 scale without inventing a normalisation. 400 points is one
+/// order of magnitude on the Glicko scale, so this is the same logistic the rating itself is built
+/// from -- not a mapping chosen to make a particular list look reasonable.
+pub fn win_probability_against_origin(mu: f64) -> f64 {
+    1.0 / (1.0 + 10f64.powf((Rating::initial().mu - mu) / 400.0))
+}
+
 /// `matches`: a work rated once at 1600 is shown, with its wide `phi` in the row, rather than
 /// hidden behind an arbitrary floor.
 pub async fn top_rated(db: &Database, limit: i64) -> Result<Vec<(String, StoredRating)>> {

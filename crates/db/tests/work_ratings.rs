@@ -124,13 +124,19 @@ async fn drop_schema(schema: &str) {
     db.close().await;
 }
 
-/// One statement, with `?N#u` for a native uuid and `?N#t` for text that must not be cast.
+/// One statement, with `?N#u` for a native uuid and `?N#ts` for a timestamp that both engines store
+/// differently.
 ///
-/// `work_ratings.work_id` and `works.id` are uuid on PostgreSQL and TEXT on SQLite.
+/// Three columns in play disagree between dialects: `work_ratings.work_id` / `works.id` are UUID on
+/// PostgreSQL and TEXT on SQLite (hence `#u`); `arena_ballots.created_at` is TIMESTAMPTZ on
+/// PostgreSQL while `works.created_at` and `accounts.created_at` are TEXT (hence `#ts`). Binding a
+/// text timestamp into the first one fails with `column "created_at" is of type timestamp with time
+/// zone but expression is of type text` — the same class of fault, and this time the message names
+/// the column.
 async fn exec(db: &Database, tmpl: &str, args: &[&str]) {
     match db.backend() {
         Backend::Sqlite => {
-            let sql = tmpl.replace("#u", "").replace("#t", "");
+            let sql = tmpl.replace("#u", "").replace("#ts", "").replace("#t", "");
             let mut q = sqlx::query(&sql);
             for a in args {
                 q = q.bind(*a);
@@ -142,6 +148,7 @@ async fn exec(db: &Database, tmpl: &str, args: &[&str]) {
         Backend::Postgres => {
             let pg = (1..=8).fold(tmpl.to_string(), |acc, n| {
                 acc.replace(&format!("?{n}#u"), &format!("${n}::uuid"))
+                    .replace(&format!("?{n}#ts"), &format!("${n}::timestamptz"))
                     .replace(&format!("?{n}#t"), &format!("${n}::text"))
                     .replace(&format!("?{n}"), &format!("${n}"))
             });
@@ -311,6 +318,76 @@ async fn the_works_ladder_records_one_period_per_work_on_both_engines() {
         "engine {engine}: the leaderboard is not descending"
     );
     assert_eq!(board[0].0, works[0].to_string(), "engine {engine}: the best work must lead");
+
+    // 8. The engine the feed reads: the floor is `matches`, and the ordering is the ladder's.
+    //
+    // Two ballots have been cast by now (step 4), so the best and worst cards carry six comparisons
+    // and each middle four: 3+3 and 2+2. A floor of five must therefore return exactly the pair that
+    // was compared against everything.
+    let eligible = work_ratings::top_rated_for(&db, None, None, 10, 5)
+        .await
+        .expect("read the ladder for a feed");
+    let eligible_ids: Vec<&str> = eligible.iter().map(|r| r.work_id.as_str()).collect();
+    assert_eq!(
+        eligible_ids,
+        vec![works[0].as_str(), works[3].as_str()],
+        "engine {engine}: a floor of five comparisons must return the best and the worst, best first"
+    );
+    assert_eq!(eligible[0].matches, 6, "engine {engine}: two ballots are six comparisons for the best");
+    assert!(
+        eligible[0].mu > eligible[1].mu,
+        "engine {engine}: the ladder must lead with the higher rating"
+    );
+
+    // A lower floor lets the middles in, and the best still leads.
+    let looser = work_ratings::top_rated_for(&db, None, None, 10, 4)
+        .await
+        .expect("read the ladder with a lower floor");
+    assert_eq!(looser.len(), 4, "engine {engine}: a floor of four must admit the middles");
+    assert_eq!(looser[0].work_id, works[0].to_string(), "engine {engine}");
+
+    // 9. A work the reader has already compared is not offered back.
+    //
+    // `arena_ballots` is written by the route, not by `record_ballot`, so the row is inserted here.
+    let voter = uuid::Uuid::new_v4().to_string();
+    exec(
+        &db,
+        "INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?1#u, ?2, ?3, ?3)",
+        &[&voter, &format!("voter-{}@example.test", &voter[..8]), NOW],
+    )
+    .await;
+    exec(
+        &db,
+        "INSERT INTO arena_ballots (account_id, best_work_id, worst_work_id, created_at)
+         VALUES (?1#u, ?2#u, ?3#u, ?4#ts)",
+        &[&voter, &works[0], &works[3], NOW],
+    )
+    .await;
+    let after_vote = work_ratings::top_rated_for(&db, Some(&voter), None, 10, 4)
+        .await
+        .expect("read the ladder for a reader who has voted");
+    assert!(
+        after_vote
+            .iter()
+            .all(|r| r.work_id != works[0] && r.work_id != works[3]),
+        "engine {engine}: a work the reader just judged must not be recommended back"
+    );
+    assert_eq!(after_vote.len(), 2, "engine {engine}: the unjudged middles remain");
+
+    // 10. A private work is not a candidate, however well it is rated.
+    exec(
+        &db,
+        "UPDATE works SET visibility = 'private' WHERE id = ?1#u",
+        &[&works[1]],
+    )
+    .await;
+    let after_private = work_ratings::top_rated_for(&db, None, None, 10, 4)
+        .await
+        .expect("read the ladder with a private work in it");
+    assert!(
+        after_private.iter().all(|r| r.work_id != works[1]),
+        "engine {engine}: a private work must never be a feed candidate"
+    );
 
     if let Some(schema) = schema {
         drop_schema(&schema).await;

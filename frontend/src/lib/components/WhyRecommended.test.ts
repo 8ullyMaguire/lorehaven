@@ -80,6 +80,22 @@ describe('WhyRecommended', () => {
     expect(fetchSlotExplanation).toHaveBeenCalledWith('slot-1', expect.anything());
   });
 
+  it('names the works ladder in words, and does not claim a taste match', async () => {
+    // The ladder's reason is new and its label lives in SLOT_REASON_LABEL. Without an entry,
+    // `slotReasonLabel` falls back to the wire code and the reader is shown
+    // "rated_by_readers" — the fallback exists so a vocabulary change never blanks the panel,
+    // which means it fails silently rather than loudly.
+    fetchSlotExplanation.mockImplementation(async () => slot(['rated_by_readers']));
+    render(WhyRecommended, { props: { slotId: 'slot-1' } });
+    await screen.getByTestId('why-trigger').click();
+    await waitFor(() => expect(screen.getByTestId('why-reasons')).toBeTruthy());
+    const text = screen.getByTestId('why-reasons').textContent ?? '';
+    expect(text).toContain('readers rated this highly against others');
+    expect(text).not.toContain('rated_by_readers');
+    // It is a statement about the work, not about the reader: no "you", no taste claim.
+    expect(text.toLowerCase()).not.toContain('your taste');
+  });
+
   it('does not re-request a slot it has already explained', async () => {
     // The recording is immutable once written, so a second click answers from memory.
     render(WhyRecommended, { props: { slotId: 'slot-1' } });

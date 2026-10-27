@@ -38,6 +38,16 @@ pub enum SlotReason {
     ReadingHistory,
     /// The work matches a saved search or alert.
     SavedSearch,
+    /// Readers have compared this work against others and it came out ahead
+    /// (spec §12.4a, the works ladder).
+    ///
+    /// **About the work, not about the reader.** The arena ballot rates works with
+    /// Glicko-2, and the rating is the catalogue's aggregate judgement rather than
+    /// a claim about anyone's taste — which is why the engine that carries this
+    /// reason leaves `taste_signal` unset. A reader shown "strong signal" because a
+    /// work has a high rating would be told their own taste is strong when what
+    /// happened is that other readers liked the work.
+    RatedByReaders,
 }
 
 /// Which surface surfaced a slot, for the north-star attribution (spec §53.5,
@@ -132,6 +142,7 @@ impl SlotReason {
             SlotReason::Strategy => "strategy",
             SlotReason::ReadingHistory => "reading_history",
             SlotReason::SavedSearch => "saved_search",
+            SlotReason::RatedByReaders => "rated_by_readers",
         }
     }
 
@@ -145,6 +156,7 @@ impl SlotReason {
             "strategy" => SlotReason::Strategy,
             "reading_history" => SlotReason::ReadingHistory,
             "saved_search" => SlotReason::SavedSearch,
+            "rated_by_readers" => SlotReason::RatedByReaders,
             _ => return None,
         })
     }
@@ -161,6 +173,9 @@ impl SlotReason {
             "popular" => Some(SlotReason::Popular),
             "media_ref_collab" => Some(SlotReason::MediaReferenceCollaborative),
             "strategy" => Some(SlotReason::Strategy),
+            // The works ladder's engine reason. Deliberately not "taste": the rating says
+            // nothing about this reader.
+            "ladder" | "rated_by_readers" => Some(SlotReason::RatedByReaders),
             _ => None,
         }
     }
@@ -174,6 +189,10 @@ impl SlotReason {
             SlotReason::Strategy,
             SlotReason::ReadingHistory,
             SlotReason::SavedSearch,
+            // Last, deliberately: `SlotExplanation::normalized` orders reasons by this
+            // list, and a work matched by tags *and* rated highly should lead with the
+            // personal reason. Appending keeps every existing order unchanged.
+            SlotReason::RatedByReaders,
         ]
     }
 
@@ -192,6 +211,7 @@ impl SlotReason {
             SlotReason::Strategy => "matched by your recommendation settings",
             SlotReason::ReadingHistory => "similar to something you read",
             SlotReason::SavedSearch => "matches a search you saved",
+            SlotReason::RatedByReaders => "readers rated this highly against others",
         }
     }
 }
@@ -595,6 +615,29 @@ pub fn validate_dimensions(dimensions: &[TasteDimension]) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ladder_engine_maps_to_its_own_reason_and_never_to_taste() {
+        // The engine in `routes/discovery.rs` sets `reason: "ladder"`. If that string stopped
+        // mapping, the slot would fall back to `strategy` and tell the reader their recommendation
+        // settings produced a work that readers rated -- a different claim, and one that is wrong.
+        assert_eq!(
+            SlotReason::from_engine_reason("ladder"),
+            Some(SlotReason::RatedByReaders)
+        );
+        assert_eq!(SlotReason::RatedByReaders.as_str(), "rated_by_readers");
+        assert_ne!(
+            SlotReason::from_engine_reason("ladder"),
+            Some(SlotReason::TasteTags),
+            "a quality rating is not a taste match"
+        );
+        // Last in `all()`, so a work matched by tags *and* rated highly leads with the personal
+        // reason: `normalized` orders by this list.
+        assert_eq!(
+            SlotReason::all().last(),
+            Some(&SlotReason::RatedByReaders)
+        );
+    }
 
     #[test]
     fn every_reason_round_trips_through_its_wire_form() {

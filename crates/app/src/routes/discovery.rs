@@ -402,7 +402,71 @@ pub(crate) async fn build_candidate_engines(
         );
     }
 
-    // Engine 2: popularity-based (public engine).
+    // Engine 2: the works ladder (spec §12.4a). The arena's best/worst ballot rates works with
+    // Glicko-2, and this is the engine that finally *reads* those ratings.
+    //
+    // **Position is the ranking decision.** `blend` sorts by the first engine that produced a
+    // work, so this order says: what this reader's own taste points at, then what readers have
+    // judged good, then what is merely popular. Putting the ladder last would have been the safe
+    // choice and the wrong one -- `popular` returns a full page, so a ladder-only candidate would
+    // be sliced off the end of every feed and the ratings would never reach anybody. Putting it
+    // first would let a global rating outrank personalisation for every reader, which is a
+    // leaderboard wearing a feed's clothes. Between the two is a quality prior, which is what a
+    // rating is.
+    //
+    // Two properties are load-bearing:
+    //
+    //   * `taste_signal` stays 0.0. The rating is evidence about the work, not about this
+    //     reader's taste, and the slot explanation renders a non-zero signal as "strong signal" --
+    //     a sentence that would be a lie told in the reader's own language.
+    //   * `matches >= 3` is the floor: one ballot rates the best and worst cards three times and
+    //     each middle twice, so a single comparison is not evidence and is not offered as such.
+    //
+    // A ladder failure is fatal here, unlike the ballot write: a partial feed is a feed this code
+    // has no business serving silently, so the error goes up.
+    const LADDER_MIN_MATCHES: i64 = 3;
+    let ladder = darkhold_db::work_ratings::top_rated_for(
+        state.db(),
+        account_id,
+        viewer_pseud,
+        limit,
+        LADDER_MIN_MATCHES,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    if !ladder.is_empty() {
+        engines.push(
+            ladder
+                .into_iter()
+                .filter_map(|rated| {
+                    // The id came out of `CAST(uuid AS TEXT)`, so a parse failure means the ladder
+                    // and `works` disagree about what an id is. Skipping with a log beats inventing
+                    // a nil id, which would be a candidate naming no work.
+                    match darkhold_domain::ids::WorkId::from_str(&rated.work_id) {
+                        Ok(work_id) => Some(work_id),
+                        Err(error) => {
+                            tracing::warn!(
+                                work_id = %rated.work_id,
+                                ?error,
+                                "the works ladder returned an id that is not a work id"
+                            );
+                            None
+                        }
+                    }
+                })
+                .enumerate()
+                .map(|(idx, work_id)| darkhold_domain::discovery::Candidate {
+                    work_id,
+                    score: (limit - idx as i64),
+                    reason: "ladder".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.5,
+                })
+                .collect(),
+        );
+    }
+
+    // Engine 3: popularity-based (public engine).
     let popular = darkhold_db::discovery::public_recommendations(state.db(), viewer_pseud, limit)
         .await
         .map_err(|e| ApiError(AppError::Internal(e)))?;
@@ -420,7 +484,7 @@ pub(crate) async fn build_candidate_engines(
             .collect(),
     );
 
-    // Engine 3: media-reference collaborative (signed-in users only).
+    // Engine 4: media-reference collaborative (signed-in users only).
     // Finds works sharing media references (faceclaims, moodboards, playlists)
     // with the user's bookmarked works. Spec §32.7.3, §9.10.
     if let Some(account_id) = account_id {

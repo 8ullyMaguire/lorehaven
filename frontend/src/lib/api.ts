@@ -2555,7 +2555,7 @@ export interface DiscoveryItem {
  *
  * `reasons` is the server's closed vocabulary (`SlotReason`), so the wire forms are the
  * lower-snake enum names: `taste_tags`, `popular`, `media_reference_collaborative`,
- * `strategy`, `reading_history`, `saved_search`. Unknown values are passed through rather
+ * `strategy`, `reading_history`, `saved_search`, `rated_by_readers`. Unknown values are passed through rather
  * than dropped, because the server normalises and the set may grow.
  *
  * This is a READ of the recorded slot, never a recomputation — see
@@ -2580,6 +2580,10 @@ const SLOT_REASON_LABEL: Record<string, string> = {
   strategy: 'a recommendation strategy chose this',
   reading_history: 'followed from something you bookmarked',
   saved_search: 'matches a search you saved',
+  // The works ladder (spec §12.4a): readers compared this work against others in the arena and it
+  // came out ahead. About the work, not about this reader's taste — the server leaves
+  // `taste_signal` unset for exactly that reason, so the label must not imply a personal match.
+  rated_by_readers: 'readers rated this highly against others',
 };
 
 export interface DiscoveryFeed {
