@@ -15,6 +15,18 @@
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
+  /*
+   * An empty board is one empty state, not six.
+   *
+   * With no cards at all, every stage column rendered the same "Nothing here
+   * yet." — measured on the live instance: six identical sentences under one
+   * heading, which reads as a broken page rather than as a board waiting for
+   * its first idea. The columns come back as soon as there is one card.
+   */
+  let boardIsEmpty = $derived(
+    board !== null && STAGES.every((stage) => (board.board[stage]?.length ?? 0) === 0),
+  );
+
   // Stage columns in canonical order.
   const STAGES = ['idea', 'up_next', 'in_progress', 'finished', 'shipped', 'rejected'] as const;
   const STAGE_LABELS: Record<string, string> = {
@@ -174,6 +186,22 @@
   {#if activeTab === 'board'}
     {#if loading}
       <Skeleton lines={8} label="Loading roadmap board" />
+    {:else if board && boardIsEmpty}
+      <section class="board-empty" aria-label="Roadmap board">
+        <h2>No feature cards yet</h2>
+        <p class="empty">
+          The board fills as readers suggest ideas and vote on them. Nothing has been suggested on
+          this instance so far, so every stage is empty.
+        </p>
+        <p>
+          {#if session.isSignedIn}
+            Suggest one below, or
+          {:else}
+            <a href="/sign-in">Sign in</a> to suggest one, or
+          {/if}
+          <a href="/arena">vote in the arena</a> to move what others have suggested.
+        </p>
+      </section>
     {:else if board}
       <section class="board" aria-label="Roadmap board">
         {#each STAGES as stage}
