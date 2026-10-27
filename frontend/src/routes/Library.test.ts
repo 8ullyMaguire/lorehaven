@@ -218,18 +218,22 @@ describe('the library page', () => {
     expect(referenceOnly?.body).toMatchObject({ delete_copy: false });
 
     // The second action says the other thing, because the difference is
-    // invisible afterwards. The checkbox is re-queried: the removal replaced the
-    // card, so the element captured before it is detached and firing on it would
-    // reach nothing.
-    // Waited for, not merely queried: the removal puts the grid back into its
-    // loading state, so the card is briefly absent and a bare query would
-    // capture nothing.
-    await waitFor(() =>
-      expect(document.querySelector('.card input[type="checkbox"]')).not.toBeNull(),
-    );
-    const afterReload = document.querySelector('.card input[type="checkbox"]') as HTMLInputElement;
-    await fireEvent.change(afterReload, { target: { checked: true } });
-    await waitFor(() => expect(document.body.textContent).toContain('1 selected'));
+    // invisible afterwards. Selecting again cannot be a capture-then-fire: the
+    // removal puts the grid back through its loading state, so the card that
+    // exists now may be the one about to be replaced by the reloaded list.
+    // Capturing it, waiting for *a* checkbox to exist, and then firing on the
+    // captured node is exactly the race this test kept losing — the wait passed
+    // on the stale card and the event landed on a detached element, which reads
+    // as "Unable to fire a change event".
+    //
+    // So the selection is attempted *inside* the wait: a stale card produces no
+    // "1 selected", which fails the assertion and retries against a fresh query.
+    await waitFor(async () => {
+      const box = document.querySelector('.card input[type="checkbox"]') as HTMLInputElement | null;
+      expect(box, 'the reloaded card must be in the grid').not.toBeNull();
+      await fireEvent.change(box!, { target: { checked: true } });
+      expect(document.body.textContent).toContain('1 selected');
+    });
     await fireEvent.click(buttonWith('Delete copies too')!);
 
     await waitFor(() =>

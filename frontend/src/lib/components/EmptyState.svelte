@@ -58,7 +58,7 @@
     margin-bottom: var(--space-2);
   }
 
-  h3 {
+  h2 {
     margin: 0;
   }
 
