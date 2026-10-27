@@ -2980,8 +2980,10 @@ Confirmed by measurement rather than by the reviewer's eye:
   Perceptual on a 2x dark screenshot; no change made.
 - **Tap targets "cramped"** — true and quantified. `nav.mobile a` rendered **22px tall** with no padding.
   Fixed in `App.svelte` with `padding: var(--space-3) 0` and an equal negative margin, so the hit area is
-  **46px** while the layout contribution stays 22px. Verified live: link box 46, text still at y=69..91,
-  header still **109px** — unchanged, so `--header-height` (scroll-padding-top) keeps holding.
+  **46px** while the layout contribution stays 22px. The "More" button in the same row was 32px and took
+  the same treatment, with one correction: `.mobile :global(.btn)` loses to the shared `.btn.quiet.sm`
+  (three classes beat two), so the selector has to be `button.btn.sm`. Verified live: links 46, More 44,
+  header still **109px**, desktop header still 65px with 43px nav links and no overflow.
 - **Roadmap** was pure skeleton bars with no explanation in the pre-deploy capture; after the deploy it is
   one empty state that says why the board is empty and what to do. Found by the review, fixed before it
   was described.
