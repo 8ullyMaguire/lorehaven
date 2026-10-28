@@ -1,7 +1,8 @@
 # Darkhold: Complete Implementation Specification
 
-**North star:** maximise the amount of quality system / progression-fantasy fanfiction the operator
-would actually enjoy reading. The specification is the means; that sentence is the end.
+**North star:** maximise the amount of quality fanfiction the operator would actually enjoy reading.
+The specification is the means; that sentence is the end. (Ascend, the build site, has the narrower
+target: quality progression-fantasy fiction *with a system*.)
 
 This is a dependency-ordered specification for building the entire platform—not a prototype. It defines architecture, data structures, workflows, implementation milestones, and verification requirements.
 
