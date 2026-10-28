@@ -3018,3 +3018,10 @@ The probe was proved able to fail before its clean result was believed: a plante
 `color:#fefefe` on `background:#f6f3ec` measures **1.1** and is flagged. Without that canary, "0
 findings in both light themes" would be indistinguishable from a probe that measures nothing — which is
 the failure mode this project has hit before with scans that stopped matching.
+
+
+### Suite state at the end of this pass
+
+`cargo test -p darkhold-app --no-fail-fast` — **183 binaries, 2 481 passed, 0 failed**, exit 0. Run with
+`--no-fail-fast` and the full log kept, because the earlier `| tail -20` summary showed twenty green
+binaries and would have hidden a failure in any of the other 163.
