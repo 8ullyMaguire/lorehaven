@@ -56,7 +56,10 @@ fn row_to_entity(row: RawRow) -> EntityRow {
     }
 }
 
+/// SQLite hands back whatever it stored; PostgreSQL is strict about INT4 vs INT8, and `work_count` is INT4.
+/// The cast is in the statement rather than in a second column list so the two dialects stay one line apart.
 const COLUMNS: &str = "id, kind, canonical, canonical_name, norm, slug, parent_id, status, node_state, work_count";
+const COLUMNS_PG: &str = "id, kind, canonical, canonical_name, norm, slug, parent_id, status, node_state, CAST(work_count AS BIGINT)";
 
 /// One page of the vocabulary, plus the total so a caller knows when to stop.
 pub async fn page(
@@ -78,9 +81,9 @@ pub async fn page(
     };
     let page_postgres = match kind {
         Some(_) => format!(
-            "SELECT {COLUMNS} FROM canonical_entities WHERE kind = $1 ORDER BY canonical, id LIMIT $2 OFFSET $3"
+            "SELECT {COLUMNS_PG} FROM canonical_entities WHERE kind = $1 ORDER BY canonical, id LIMIT $2 OFFSET $3"
         ),
-        None => format!("SELECT {COLUMNS} FROM canonical_entities ORDER BY canonical, id LIMIT $1 OFFSET $2"),
+        None => format!("SELECT {COLUMNS_PG} FROM canonical_entities ORDER BY canonical, id LIMIT $1 OFFSET $2"),
     };
     let (count_sql, page_sql) = match kind {
         Some(_) => (
