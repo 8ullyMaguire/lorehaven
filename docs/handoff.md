@@ -2992,3 +2992,29 @@ Confirmed by measurement rather than by the reviewer's eye:
   viewport with no boundary cue.
 
 The last two are design decisions, not defects with a one-line fix, and are left alone deliberately.
+
+## Whole-site sweep: 3 themes × 2 widths × 17 routes
+
+Re-run as a measurement rather than a look, after the phone-header fix. Route list, probe and raw
+results are kept in the session workspace as `sweep-results.json` so the next deploy repeats the same
+audit instead of re-reading prose.
+
+| theme | 1280 | 390 |
+|---|---|---|
+| after-hours (default, dark) | 17 routes, 0 findings | 17 routes, 1 finding (see below) |
+| reading-room (cream) | 17 routes, 0 findings | 17 routes, 0 findings |
+| clear-day (white) | 17 routes, 0 findings | 17 routes, 0 findings |
+
+Measured per page: contrast of every leaf text node against the nearest painted ancestor (4.4 body /
+2.95 large), horizontal overflow, elements past the viewport edge, blank main, empty interactive
+elements, `h1` count, image alt, `lang`.
+
+The single finding is `/settings` at 390px: the tab labels ("Notifications", "Recommendations",
+"Linked applications") report `right` values of 483/669/860 against a 390px viewport. They sit inside
+`.tablist` with `overflow-x: auto` (scrollWidth 828, clientWidth 326), which is a scrolling tab strip,
+not a page that overflows — `document.documentElement.scrollWidth - clientWidth` is 0.
+
+The probe was proved able to fail before its clean result was believed: a planted span with
+`color:#fefefe` on `background:#f6f3ec` measures **1.1** and is flagged. Without that canary, "0
+findings in both light themes" would be indistinguishable from a probe that measures nothing — which is
+the failure mode this project has hit before with scans that stopped matching.
