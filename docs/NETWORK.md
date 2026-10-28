@@ -53,5 +53,23 @@ inventing an address for them.
 same handle and a password set on each site. Real SSO is an OIDC provider and belongs to T5 in
 `~/code-local/rust/ascend/docs/PLAN-network.md`; nothing here pretends otherwise.
 
-*Status: landed in `71ae5254`, compiles, **no test and not deployed** — the darkhold integration harness has
-no shared module, and this needs one written before the change can be called proven.*
+*Status: **proven live, 2026-10-28** — deployed, and `Critical_Nexus` signs in here with the same credentials
+as on Ascend (handle only, no address typed). Two tests in `crates/app/tests/login_by_handle.rs`: the first was
+checked against the old behaviour (email-only routing makes it fail), the second pins the property that
+matters more — a wrong password and an unknown handle are both a plain `401`, so the endpoint is not an
+oracle for which handles exist.*
+
+### The account on this side
+
+`Critical_Nexus` (`25e8fe74-…`) holds everything this instance defines:
+
+| privilege | where | value |
+|---|---|---|
+| operator | `darkhold.toml` `[administration] operator_account_id` | this account |
+| trust | `accounts.trust_level` | `6` = `TRUST_MAX` (`TL_TRUSTEE`) |
+| admin role | `operator_role` | `admin` |
+| capabilities | session | `can_read`, `can_write`, `can_message`, `can_be_listed`, `max_rating: explicit` |
+
+Its password had to be reset by writing an Argon2id PHC string into `password_credentials` (there is no
+reset CLI): the account predates this work and was the operator placeholder. Worth adding a
+`reset-password` subcommand — a person who forgets their password currently cannot be helped at all.
