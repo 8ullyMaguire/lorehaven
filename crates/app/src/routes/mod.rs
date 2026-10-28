@@ -74,6 +74,7 @@ pub mod spoilers;
 pub mod subscriptions;
 pub mod tasting;
 pub mod taxonomy;
+pub mod taxonomy_export;
 pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;

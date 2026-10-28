@@ -638,6 +638,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // The vocabulary as a document (T2.1): public, read-only, no session — the other site has none.
+        .merge(classified(
+            routes::taxonomy_export::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Audience warmth panel (spec §41.2).
         .merge(classified(
             routes::audience::router(),
