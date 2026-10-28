@@ -13,6 +13,10 @@ happening. Anything that serves none of the three is scope, not progress.
 distinction matters — this platform is judged on everything the operator would enjoy, Ascend only on the
 slice its builds can produce. A story that is excellent but has no system belongs here and not there.)*
 
+Its sibling is **Ascend** (the build site for system fiction). How a work and a build point at each
+other is written in `docs/NETWORK.md`: a seed out of Ascend, a URL back, no shared database and no
+cross-service calls.
+
 Darkhold is built from a written plan rather than by accretion. The plan, the
 architecture decisions, and an honest log of what has actually been *executed*
 all live in this repository.

@@ -280,6 +280,39 @@ pub async fn find_account_by_email(db: &Database, email: &str) -> Result<Option<
     Ok(row.map(decode_account))
 }
 
+/// Find an account by a pseud's handle, case-insensitively.
+///
+/// Handles are per-pseud and an account may hold several; the oldest one wins, because that is the face the
+/// account was created with and the one a person types. Login accepts either an address or a handle, so a
+/// second site on the same network can share a name without sharing an email address (§ login).
+pub async fn find_account_by_handle(db: &Database, handle: &str) -> Result<Option<Account>> {
+    let sql = db.sql(
+        "SELECT a.id, a.email, a.status, a.age_state, a.email_verified_at, a.created_at, a.version
+           FROM accounts a JOIN pseuds p ON p.account_id = a.id
+          WHERE lower(p.handle) = lower(?) AND a.deleted_at IS NULL
+          ORDER BY p.created_at LIMIT 1",
+        "SELECT a.id::text, a.email, a.status, a.age_state, a.email_verified_at, a.created_at, a.version
+           FROM accounts a JOIN pseuds p ON p.account_id = a.id
+          WHERE lower(p.handle) = lower(?) AND a.deleted_at IS NULL
+          ORDER BY p.created_at LIMIT 1",
+    );
+
+    let row: Option<AccountRow> = match db.backend() {
+        crate::Backend::Sqlite => sqlx::query_as(&sql)
+            .bind(handle)
+            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+            .await
+            .context("looking up account by handle")?,
+        crate::Backend::Postgres => sqlx::query_as(&sql)
+            .bind(handle)
+            .fetch_optional(db.postgres_pool().expect("postgres handle"))
+            .await
+            .context("looking up account by handle")?,
+    };
+
+    Ok(row.map(decode_account))
+}
+
 /// Find an account by identifier.
 pub async fn find_account(db: &Database, id: AccountId) -> Result<Option<Account>> {
     let sql = db.sql(

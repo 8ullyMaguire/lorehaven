@@ -248,9 +248,16 @@ async fn login(
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Response> {
-    let email = request.email.trim().to_ascii_lowercase();
-
-    let account = identity::find_account_by_email(state.db(), &email).await?;
+    // The `email` field is an identifier, not an address: an `@` means a mailbox, anything else means the
+    // handle of one of the account's pseuds. People on this network know each other by handle, and a second
+    // site sharing that name should not force an address onto them.
+    let identifier = request.email.trim().to_ascii_lowercase();
+    let account = if identifier.contains('@') {
+        identity::find_account_by_email(state.db(), &identifier).await?
+    } else {
+        identity::find_account_by_handle(state.db(), &identifier).await?
+    };
+    let email = identifier;
 
     // Always hash, even with no account, so a wrong address and a wrong
     // password take the same time.
