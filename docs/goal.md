@@ -9,6 +9,15 @@
 
 ## The goal
 
+**North star:** the goal is not a feature count — it is to maximise the amount of *quality
+system / progression-fantasy fanfiction the operator would actually enjoy reading*. Every feature below
+serves one of three jobs: more of those stories being written, the right ones finding the right reader,
+or the trust machinery that keeps both happening. Anything that serves none of the three is scope, not
+progress.
+
+Everything in this brief is in service of that sentence: the platform, the bots, the desktop
+reader and the extension are all ways of getting more of those stories written and read.
+
 Act as a senior product-minded full-stack engineer and UI/UX designer. Continue
 implementing Darkhold until it is fully complete — **no stubs** — with full unit,
 integration and E2E test coverage, and a polished, verified result that a real

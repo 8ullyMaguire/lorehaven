@@ -1,5 +1,8 @@
 # Darkhold: Complete Implementation Specification
 
+**North star:** maximise the amount of quality system / progression-fantasy fanfiction the operator
+would actually enjoy reading. The specification is the means; that sentence is the end.
+
 This is a dependency-ordered specification for building the entire platform—not a prototype. It defines architecture, data structures, workflows, implementation milestones, and verification requirements.
 
 This document specifies intended behavior. It does not claim that any feature, adapter, integration, or performance target has already been implemented or verified.

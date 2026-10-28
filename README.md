@@ -4,6 +4,12 @@ A self-hosted home for fanfiction: read without an account, write without a
 publishing queue, import the library you already have, and take it offline when
 you want it.
 
+**North star:** the goal is not a feature count — it is to maximise the amount of *quality
+system / progression-fantasy fanfiction the operator would actually enjoy reading*. Every feature below
+serves one of three jobs: more of those stories being written, the right ones finding the right reader,
+or the trust machinery that keeps both happening. Anything that serves none of the three is scope, not
+progress.
+
 Darkhold is built from a written plan rather than by accretion. The plan, the
 architecture decisions, and an honest log of what has actually been *executed*
 all live in this repository.
