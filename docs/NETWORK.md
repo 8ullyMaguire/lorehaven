@@ -41,3 +41,17 @@ direction a reader travels.
 
 The loop closes when both directions exist: Ascend shows *who wrote it*, Darkhold shows *what it was built
 from*. Neither is complete alone, and neither needs the other's database.
+
+## 4. One person, two sites: signing in by handle
+
+`POST /api/v1/auth/login` takes an **identifier**, not an address: a value containing `@` is looked up as a
+mailbox, anything else is looked up as a pseud handle (`identity::find_account_by_handle`, oldest pseud
+first, case-insensitive). So `Critical_Nexus` signs in here the same way they sign in on Ascend, without
+inventing an address for them.
+
+**Not single sign-on.** The two sites hash passwords independently, so "the same account" today means the
+same handle and a password set on each site. Real SSO is an OIDC provider and belongs to T5 in
+`~/code-local/rust/ascend/docs/PLAN-network.md`; nothing here pretends otherwise.
+
+*Status: landed in `71ae5254`, compiles, **no test and not deployed** — the darkhold integration harness has
+no shared module, and this needs one written before the change can be called proven.*
