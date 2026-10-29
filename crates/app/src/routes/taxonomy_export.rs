@@ -48,6 +48,11 @@ pub struct ExportBody {
 }
 
 async fn export(
+    // `MaybeSession` is here for the route table's sake, not for this handler's: darkhold's contract of
+    // record requires every route to name the extractor its audience means, and a route that takes no
+    // session extractor at all cannot be declared `Public` — `Public` IS `MaybeSession`. An anonymous
+    // caller is unaffected (the value is ignored), which is exactly what the declaration says.
+    _maybe: crate::auth::MaybeSession,
     State(state): State<AppState>,
     Query(query): Query<ExportQuery>,
 ) -> ApiResult<Json<ExportBody>> {

@@ -2221,6 +2221,27 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/sanctions",
         audience: Audience::Authenticated,
     },
+    // The two-phase permanent sanction (item 3.4, ported from gravity's
+    // `/discipline/permanent-ban` + `/permanent-ban/execute`). Both are `Operator`: the extractor is
+    // `RequireSession`, and the body refuses a caller without the scoped-ban capability — so an
+    // anonymous call is a 401 and an authenticated non-operator is a 403, which is what `Operator`
+    // means in this table. They were added to the router before they were added here, and
+    // `registered_routes_are_tabled` failed by name until they were: the hole this table exists to
+    // make impossible.
+    RouteEntry {
+        file: "governance.rs",
+        handler: "file_sanction",
+        method: "POST",
+        path: "/sanctions/file",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "governance.rs",
+        handler: "execute_sanction",
+        method: "POST",
+        path: "/sanctions/{id}/execute",
+        audience: Audience::Operator,
+    },
     RouteEntry {
         file: "governance.rs",
         handler: "lift_sanction",
@@ -4638,5 +4659,20 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
         method: "POST",
         path: "/admin/monetization/settle",
         audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Taxonomy export
+    //
+    // `Public` because the handler takes no session extractor: `export` reads `State` and `Query`
+    // and nothing else, so an anonymous caller gets the same catalogue a member does. Declared
+    // with that reason rather than omitted, because "no session extractor" is a fact about the
+    // binary that a reader of the route deserves to know before they assume otherwise.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "taxonomy_export.rs",
+        handler: "export",
+        method: "GET",
+        path: "/taxonomy/export",
+        audience: Audience::Public,
     },
 ];
