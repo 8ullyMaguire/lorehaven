@@ -59,6 +59,25 @@ pub enum Audience {
 }
 
 impl Audience {
+    /// The audience CLASS, for the published contract.
+    ///
+    /// Distinct from [`Audience::as_str`], which names the EXTRACTOR a handler takes. Publishing that
+    /// name was wrong in two ways: `Operator` and `Authenticated` both take `RequireSession`, so the
+    /// document collapsed two different doors into one value, and `MaybeSession` describes a type
+    /// rather than telling a reader who may call the path. Measured after the first version shipped:
+    /// 158 operations, every one saying `MaybeSession`.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Audience::Public => "public",
+            Audience::Authenticated => "authenticated",
+            Audience::Pseudonymous => "pseudonymous",
+            Audience::Operator => "operator",
+            Audience::Actor => "actor",
+            Audience::Scoped => "scoped",
+        }
+    }
+
+    /// The extractor's name — what `route_inventory` and the route table use.
     pub fn as_str(&self) -> &'static str {
         match self {
             Audience::Public => "MaybeSession",
