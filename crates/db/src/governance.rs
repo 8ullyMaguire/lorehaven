@@ -1239,6 +1239,101 @@ pub async fn issue_sanction(
     Ok(id)
 }
 
+/// File a sanction WITHOUT applying it — the first of the two phases (capability ledger 3.4,
+/// ported from gravity's `/discipline/permanent-ban`).
+///
+/// The row exists immediately and is auditable, and it changes nothing about the account until
+/// [`execute_sanction`] runs. That separation is the whole point: an irreversible decision
+/// needs two deliberate acts by (possibly) two different people, and the record must show both.
+pub async fn file_sanction(
+    db: &Database,
+    account: &str,
+    kind: &str,
+    reason_ref: &str,
+    issued_by: &str,
+    ends_at: Option<&str>,
+) -> Result<String, sqlx::Error> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO sanctions (id, account, kind, reason_ref, starts_at, ends_at, issued_by, state)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+            )
+            .bind(&id).bind(account).bind(kind).bind(reason_ref).bind(&now).bind(ends_at).bind(issued_by)
+            .execute(db.sqlite_pool().expect("sqlite")).await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO sanctions (id, account, kind, reason_ref, starts_at, ends_at, issued_by, state)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')",
+            )
+            .bind(&id).bind(account).bind(kind).bind(reason_ref).bind(&now).bind(ends_at).bind(issued_by)
+            .execute(db.postgres_pool().expect("postgres")).await?;
+        }
+    }
+    Ok(id)
+}
+
+/// Execute a filed sanction. `false` when the case is not pending — unknown, already executed, or
+/// lifted before it ran — so a caller can answer "this is not a case you can execute" instead of
+/// re-applying an irreversible action twice.
+///
+/// The `state = 'pending'` predicate is IN THE UPDATE rather than in a preceding SELECT: two
+/// officers clicking execute at the same moment would both read `pending` and both write
+/// `active`, and the second audit row would claim an execution that changed nothing.
+pub async fn execute_sanction(
+    db: &Database,
+    sanction_id: &str,
+    executor: &str,
+) -> Result<bool, sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    let affected = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "UPDATE sanctions SET state = 'active', starts_at = ? WHERE id = ? AND state = 'pending'",
+            )
+            .bind(&now)
+            .bind(sanction_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected()
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "UPDATE sanctions SET state = 'active', starts_at = $1 WHERE id = $2 AND state = 'pending'",
+            )
+            .bind(&now)
+            .bind(sanction_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected()
+        }
+    };
+    let _ = executor;
+    Ok(affected == 1)
+}
+
+/// The state of one sanction, for the execute path to report what it found.
+pub async fn sanction_state(db: &Database, sanction_id: &str) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as("SELECT state FROM sanctions WHERE id = ?")
+                .bind(sanction_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as("SELECT state FROM sanctions WHERE id = $1")
+                .bind(sanction_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.map(|r| r.0))
+}
+
 pub async fn lift_sanction(
     db: &Database,
     sanction_id: &str,
@@ -1273,7 +1368,7 @@ pub async fn active_sanctions(db: &Database, account: &str) -> Result<Vec<Value>
         Backend::Sqlite => {
             let rows = sqlx::query(
                 "SELECT id, kind, reason_ref, starts_at, ends_at, issued_by FROM sanctions
-                 WHERE account = ? AND lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?)",
+                 WHERE account = ? AND state = 'active' AND lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?)",
             )
             .bind(account)
             .bind(&now)
@@ -1293,7 +1388,7 @@ pub async fn active_sanctions(db: &Database, account: &str) -> Result<Vec<Value>
         Backend::Postgres => {
             let rows = sqlx::query(
                 "SELECT id, kind, reason_ref, starts_at, ends_at, issued_by FROM sanctions
-                 WHERE account = $1 AND lifted_at IS NULL AND (ends_at IS NULL OR ends_at > now())",
+                 WHERE account = $1 AND state = 'active' AND lifted_at IS NULL AND (ends_at IS NULL OR ends_at > now())",
             )
             .bind(account)
             .fetch_all(db.postgres_pool().expect("postgres"))

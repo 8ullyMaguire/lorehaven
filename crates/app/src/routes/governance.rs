@@ -25,6 +25,11 @@ fn routes() -> Router<AppState> {
         .route("/moderation/reports/{id}/assign", post(assign_task))
         .route("/moderation/tasks/{id}/decide", post(decide_task))
         .route("/sanctions", post(issue_sanction))
+        // Two-phase for the IRREVERSIBLE case (capability ledger 3.4): filing creates a pending
+        // case and changes nothing, executing applies it. Ported from gravity's
+        // `/discipline/permanent-ban` + `/permanent-ban/execute` pair.
+        .route("/sanctions/file", post(file_sanction))
+        .route("/sanctions/{id}/execute", post(execute_sanction))
         .route("/sanctions/{id}/lift", post(lift_sanction))
         .route("/me/sanctions", get(my_sanctions))
         .route("/appeals", post(open_appeal))
@@ -274,26 +279,19 @@ async fn issue_sanction(
     Json(body): Json<IssueSanctionBody>,
 ) -> ApiResult<Json<Value>> {
     let issuer = user.account_id.to_string();
+    require_scoped_bans(&state, &issuer).await?;
 
-    // Spec §14.4: a **scoped ban** is a senior reviewer's privilege.
+    // THE IRREVERSIBLE CASE IS NOT ONE CALL (ledger 3.4).
     //
-    // **The nominal level is 5 and the elastic allocation is what keeps a
-    // small site governable** (spec §14.4): on an instance with no senior
-    // reviewer the requirement falls to the level that actually has somebody
-    // in it, and it returns to 5 on the next evaluation once a senior
-    // reviewer appears.
-    let (level, required) = crate::auth::privilege_check(
-        &state,
-        &issuer,
-        darkhold_domain::trust::Privilege::ScopedBans,
-    )
-    .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if level < required {
-        return Err(ApiError(AppError::TrustLevelInsufficient {
-            level,
-            required,
-        }));
+    // A sanction with no `duration_days` never expires, and `lift` is the only thing that can
+    // undo it. Sending it through this one-shot route is exactly the accident the two-phase
+    // exists to prevent, so it is refused with a message that names the route to use instead —
+    // a refusal a caller cannot read is indistinguishable from a bug.
+    if body.duration_days.is_none() {
+        return Err(ApiError(AppError::field(
+            "duration_days",
+            "a sanction with no expiry is irreversible, so it takes two calls: POST /sanctions/file, then POST /sanctions/{id}/execute with the returned id",
+        )));
     }
 
     let ends_at = body.duration_days.map(|d| {
@@ -330,6 +328,144 @@ async fn issue_sanction(
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     Ok(Json(json!({ "id": id })))
+}
+
+/// The one door for "may this account issue a scoped ban?" (spec §14.4).
+///
+/// A helper rather than three copies: the two-phase routes and the one-shot route must not be
+/// able to drift into different privilege requirements, and the drift would be invisible —
+/// each handler reads correctly on its own.
+async fn require_scoped_bans(state: &AppState, issuer: &str) -> ApiResult<()> {
+    // Spec §14.4: a **scoped ban** is a senior reviewer's privilege.
+    //
+    // **The nominal level is 5 and the elastic allocation is what keeps a small site governable**
+    // (spec §14.4): on an instance with no senior reviewer the requirement falls to the level that
+    // actually has somebody in it, and it returns to 5 on the next evaluation once a senior
+    // reviewer appears.
+    let (level, required) = crate::auth::privilege_check(
+        state,
+        issuer,
+        darkhold_domain::trust::Privilege::ScopedBans,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level < required {
+        return Err(ApiError(AppError::TrustLevelInsufficient { level, required }));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct FileSanctionBody {
+    account: String,
+    kind: String,
+    reason_ref: String,
+    /// Absent means permanent. That is allowed HERE and refused on the one-shot route: filing a
+    /// permanent case is reversible (a pending case bites nobody), executing it is not.
+    duration_days: Option<i64>,
+}
+
+/// `POST /sanctions/file` — phase one. Audited, pending, and inert.
+async fn file_sanction(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<FileSanctionBody>,
+) -> ApiResult<Json<Value>> {
+    let filer = user.account_id.to_string();
+    require_scoped_bans(&state, &filer).await?;
+
+    let ends_at = body.duration_days.map(|d| {
+        let end = time::OffsetDateTime::now_utc() + time::Duration::days(d);
+        format_rfc3339(end)
+    });
+
+    let id = darkhold_db::governance::file_sanction(
+        state.db(),
+        &body.account,
+        &body.kind,
+        &body.reason_ref,
+        &filer,
+        ends_at.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    darkhold_db::governance::audit_append(
+        state.db(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &filer,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: Some(&body.reason_ref),
+            action: "sanction.filed",
+            subject_type: "account",
+            subject_id: &body.account,
+            document: &json!({
+                "sanction_id": id,
+                "kind": body.kind,
+                "days": body.duration_days,
+                "state": "pending",
+            })
+            .to_string(),
+        },
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "id": id,
+        "state": "pending",
+        // Said out loud because a client that treats this as done will never call execute, and the
+        // account would stay unsanctioned while the operator believes otherwise.
+        "next": "POST /sanctions/{id}/execute",
+    })))
+}
+
+/// `POST /sanctions/{id}/execute` — phase two. Applies a filed case, once.
+async fn execute_sanction(
+    State(state): State<AppState>,
+    Path(sanction_id): Path<String>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<Value>> {
+    let executor = user.account_id.to_string();
+    require_scoped_bans(&state, &executor).await?;
+
+    let applied = darkhold_db::governance::execute_sanction(state.db(), &sanction_id, &executor)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    if !applied {
+        // Not pending: unknown, already executed, or lifted before it ran. A conflict rather than a
+        // quiet success, because "executed" is a claim an operator will rely on.
+        let state_now = darkhold_db::governance::sanction_state(state.db(), &sanction_id)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        return Err(ApiError(AppError::field(
+            "sanction",
+            match state_now {
+                Some(s) => format!(
+                    "sanction {sanction_id} is not pending (state: {s}); it was already executed or lifted, and executing twice would record an action that changed nothing"
+                ),
+                None => format!("sanction {sanction_id} does not exist"),
+            },
+        )));
+    }
+
+    darkhold_db::governance::audit_append(
+        state.db(),
+        &darkhold_db::governance::AuditEntry {
+            actor: &executor,
+            actor_pseud: user.pseud_id.map(|id| id.to_string()).as_deref(),
+            reason: Some("executed a filed sanction"),
+            action: "sanction.executed",
+            subject_type: "sanction",
+            subject_id: &sanction_id,
+            document: &json!({ "state": "active" }).to_string(),
+        },
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({ "id": sanction_id, "state": "active" })))
 }
 
 async fn lift_sanction(
