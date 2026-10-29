@@ -76,7 +76,7 @@ pub fn document() -> Value {
             //
             // Emitting it is what makes the published contract an answer to "what may I call",
             // rather than a list of paths and a hope.
-            "x-audience": entry.audience.as_str(),
+            "x-audience": entry.audience.label(),
             "tags": [tag_for(entry.path)],
             "responses": {
                 "200": { "description": "the response" },
