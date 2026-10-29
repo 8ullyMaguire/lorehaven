@@ -159,3 +159,64 @@ fn the_document_is_served_at_the_path_the_table_names() {
     assert_eq!(served.method, "GET");
     assert_eq!(served.audience, Audience::Public);
 }
+
+/// Every operation in the served document states who may call it.
+///
+/// WHY THIS IS A DOCUMENT TEST AND NOT A TABLE TEST
+/// ------------------------------------------------
+/// `route_inventory::every_route_has_correct_audience` already asserts the table's audiences, and it
+/// was green while the published document carried none of them: `document()` builds operations by
+/// hand, so a field the table has is not a field the document has. The document is the artifact a
+/// third party reads, and it is the one that was wrong.
+///
+/// Measured against the deployed instance before this change: 153 paths, 158 operations, **0** with
+/// `x-audience` — against gravity's 353/353. A contract that does not say who may call a path is a
+/// contract that every consumer has to guess at.
+#[test]
+fn every_operation_states_its_audience() {
+    let doc = darkhold_app::routes::openapi::document();
+    let paths = doc["paths"].as_object().expect("paths");
+    let methods = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+    let mut ops = 0usize;
+    let mut missing: Vec<String> = Vec::new();
+
+    for (path, item) in paths {
+        for (method, op) in item.as_object().expect("path item") {
+            if !methods.contains(&method.as_str()) {
+                continue;
+            }
+            ops += 1;
+            match op.get("x-audience").and_then(|v| v.as_str()) {
+                Some(a) if !a.is_empty() => {}
+                _ => missing.push(format!("{} {}", method.to_ascii_uppercase(), path)),
+            }
+        }
+    }
+
+    assert!(ops > 0, "the document must document something");
+    assert!(
+        missing.is_empty(),
+        "{} of {ops} operations carry no x-audience: {:?}",
+        missing.len(),
+        &missing[..missing.len().min(8)]
+    );
+}
+
+/// The value is the table's own vocabulary, not a second spelling of it.
+#[test]
+fn the_audience_in_the_document_is_the_tables_word() {
+    let doc = darkhold_app::routes::openapi::document();
+    let paths = doc["paths"].as_object().expect("paths");
+    let allowed: Vec<&str> = ROUTE_TABLE.iter().map(|e| e.audience.as_str()).collect();
+
+    for (path, item) in paths {
+        for (method, op) in item.as_object().expect("path item") {
+            if let Some(a) = op.get("x-audience").and_then(|v| v.as_str()) {
+                assert!(
+                    allowed.contains(&a),
+                    "{method} {path} says {a:?}, which is not a table audience"
+                );
+            }
+        }
+    }
+}

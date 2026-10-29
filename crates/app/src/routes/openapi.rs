@@ -66,6 +66,17 @@ pub fn document() -> Value {
         let operation = json!({
             "operationId": format!("{}_{}", method, entry.handler),
             "summary": format!("{} {}", entry.method, entry.path),
+            // WHO MAY CALL THIS, in the document itself.
+            //
+            // The route table has carried an audience per entry for as long as it has existed, and
+            // `every_route_has_correct_audience` asserts it — but that test reads the TABLE. The
+            // document built from the table left the field out, so the one artifact a third party
+            // reads said nothing about who may call what. Measured against the deployed instance:
+            // 158 operations, 0 carrying `x-audience`, while gravity's document annotated 353/353.
+            //
+            // Emitting it is what makes the published contract an answer to "what may I call",
+            // rather than a list of paths and a hope.
+            "x-audience": entry.audience.as_str(),
             "tags": [tag_for(entry.path)],
             "responses": {
                 "200": { "description": "the response" },
