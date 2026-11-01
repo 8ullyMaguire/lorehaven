@@ -227,3 +227,48 @@ Error mapping, which is the part users actually experience:
   does not have (`chapters`, `bodies`, `chapter_revisions`, `import_chapters`, `ship_participants`,
   the five pre-rename `taxonomy_*`). Everything this milestone touches is present, so the milestone
   is verifiable, but a reconciliation is a separate item and is filed as such.
+
+## What landed (`f13597f3`)
+
+| piece | where |
+|---|---|
+| fandom filter | `CatalogueQuery.fandom`, one `EXISTS` predicate, both dialects |
+| coverage | `catalogue_fandom` + the page's `fandom_tagged_rows` / `catalogue_rows` |
+| suggestion | `suggest()` in the catalogue route: prefix, then substring, then edit distance |
+| fandom list | `GET /api/v1/catalogue/fandoms` (top 500 by item count) |
+| engines | `GET /api/v1/rec/run`, session-authed, `catalogue`/`legacy`/`rrf`/`<strategy>` |
+| CLI | `crates/cli`, binary `dh`, `dh rec` with every flag this plan listed |
+
+Two things the plan said that the code does differently, both deliberate:
+
+- **`--engine` defaults to the catalogue route, not to `rec.mode`.** `dh rec --fandom naruto`
+  should not need a token, and a token-less request cannot reach an engine. So the flag's absence
+  means "the public metric order", the flag's presence means "run this engine, with a session", and
+  `--explain` without `--engine` asks for `rrf` — because there is nothing to explain about a plain
+  metric ordering, and answering "no strategies ran" to a request that asked for an explanation is
+  worse than running the default engine and showing it.
+- **`explain=1` is parsed as text, not as a bool.** `#[serde(default)] explain: Option<bool>` makes
+  axum answer `400 Failed to deserialize query string: explain: provided string was not true or
+  false`, which reads as a syntax error. `1`/`true`/`yes`/`on`/bare are now all accepted.
+
+### Verification
+
+| claim | command | output |
+|---|---|---|
+| the filter works on both engines | `cargo test -p darkhold-db --test catalogue_fandom` | 5 passed on SQLite, 5 passed on PostgreSQL |
+| the routes work on both engines | `cargo test -p darkhold-app --test m63_01_rec` | 9 passed on SQLite, 9 passed on PostgreSQL |
+| the CLI's parsing and rendering | `cargo test -p darkhold-cli` | 10 passed |
+| nothing else moved | `cargo test -p darkhold-db -p darkhold-app --lib` | 236 + 157 + 784 passed |
+| clippy | `cargo clippy -p darkhold-db -p darkhold-app -p darkhold-cli --all-targets` | no new warning (the three in `work_ratings.rs` are pre-existing) |
+
+Mutations, both reverted:
+
+- bind the fandom name **upper-cased** → `a_fandom_filter_returns_only_that_fandom`,
+  `one_matching_work_is_one_row` and `the_filter_is_case_insensitive…` fail on both engines. That is
+  what proves the `norm` match is load-bearing rather than incidental.
+- never **suggest** a near name (`suggest("zzzznomatchzzzz", …)`) → exactly one test fails, with the
+  message a user would have seen: `fandom: no fandom called "narut". (1 fandoms known)`.
+
+A first attempt at the second mutation removed the `suggest()` call outright; that fails the build on
+`dead_code` (warnings are denied), which is not a verdict about the test. The mutation has to keep
+the code compiling to say anything.

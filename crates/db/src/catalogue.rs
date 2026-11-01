@@ -280,30 +280,43 @@ pub async fn total_rows(db: &Database) -> Result<i64> {
     Ok(count.0)
 }
 
-/// How many catalogue rows carry any fandom tag at all.
+/// What the fandom tagging actually covers.
 ///
-/// The denominator of the coverage line the CLI prints whenever `--fandom` is
-/// used. It exists because the honest answer to "Naruto fics" is "265 tagged
-/// ones", and a reader who is not told that 94.6 % of the catalogue is untagged
-/// will read a short page as a bad ranking rather than missing metadata.
+/// Two numbers, because one of them is the honest one. On the live catalogue all
+/// 7,626 tagged rows come from `pawchive` and **none of them publishes a like
+/// count**, so `--fandom naruto --sort likes` orders 265 rows that all have zero
+/// likes: correct, and meaningless to a reader who is not told. `tagged` says how
+/// much of the catalogue has a fandom at all; `with_likes` says how much of that
+/// can be ranked by anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FandomCoverage {
+    /// Rows carrying at least one fandom tag.
+    pub tagged: i64,
+    /// Of those, how many have a non-zero imported like count.
+    pub with_likes: i64,
+}
+
+/// How much of the catalogue the fandom tags cover.
 ///
 /// # Errors
 ///
 /// Returns the store's error when the query fails.
-pub async fn fandom_tagged_rows(db: &Database) -> Result<i64> {
+pub async fn fandom_coverage(db: &Database) -> Result<FandomCoverage> {
     let sql = db.sql(
-        "SELECT COUNT(DISTINCT li.id) AS count \
+        "SELECT COUNT(DISTINCT li.id) AS tagged, \
+                COUNT(DISTINCT CASE WHEN li.likes > 0 THEN li.id END) AS with_likes \
            FROM library_items li \
            JOIN work_tags wt ON wt.work_id = li.work_id \
            JOIN canonical_entities ce ON ce.id = wt.node_id \
           WHERE ce.kind = 'fandom'",
-        "SELECT COUNT(DISTINCT li.id)::bigint AS count \
+        "SELECT COUNT(DISTINCT li.id)::bigint AS tagged, \
+                COUNT(DISTINCT li.id) FILTER (WHERE li.likes > 0)::bigint AS with_likes \
            FROM library_items li \
            JOIN work_tags wt ON wt.work_id = li.work_id \
            JOIN canonical_entities ce ON ce.id = wt.node_id \
           WHERE ce.kind = 'fandom'",
     );
-    let count: (i64,) = match db.backend() {
+    let row: (i64, i64) = match db.backend() {
         crate::Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .fetch_one(db.sqlite_pool().expect("sqlite handle"))
@@ -315,7 +328,10 @@ pub async fn fandom_tagged_rows(db: &Database) -> Result<i64> {
                 .await?
         }
     };
-    Ok(count.0)
+    Ok(FandomCoverage {
+        tagged: row.0,
+        with_likes: row.1,
+    })
 }
 
 /// The same story's likes across every source, plus its darkhold kudos.

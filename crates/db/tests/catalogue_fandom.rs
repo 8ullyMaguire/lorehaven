@@ -397,8 +397,11 @@ async fn the_coverage_denominator_counts_tagged_rows_only() {
 
     // `two-fandoms` carries two tags and must be one row here, or the CLI's
     // "2 of 4 carry a fandom" line disagrees with the page it explains.
-    let tagged = catalogue::fandom_tagged_rows(&db).await.expect("tagged");
-    assert_eq!(tagged, 2);
+    let coverage = catalogue::fandom_coverage(&db).await.expect("coverage");
+    assert_eq!(coverage.tagged, 2);
+    // Every fixture row has five likes, so both numbers agree here. The live
+    // catalogue is the case where they do not, and the field exists for it.
+    assert_eq!(coverage.with_likes, 2);
     let total = catalogue::total_rows(&db).await.expect("total");
     assert_eq!(total, 4);
 

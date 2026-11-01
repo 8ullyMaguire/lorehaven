@@ -91,6 +91,13 @@ pub struct CataloguePage {
     /// ranking instead of a missing tag.
     #[serde(skip_serializing_if = "Option::is_none")]
     fandom_tagged_rows: Option<i64>,
+    /// Of those tagged rows, how many publish a like count at all.
+    ///
+    /// The second half of the coverage line, and the one that explains a page of
+    /// zeros: on the live catalogue the fandom tags come from one source whose
+    /// rows carry no endorsements, so an ordered page is ordered by nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fandom_tagged_with_likes: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     catalogue_rows: Option<i64>,
 }
@@ -152,12 +159,16 @@ async fn search(
             }
         }
     };
-    let (tagged, total) = match fandom.is_some() {
-        true => (
-            Some(catalogue::fandom_tagged_rows(state.db()).await?),
-            Some(catalogue::total_rows(state.db()).await?),
-        ),
-        false => (None, None),
+    let (tagged, rankable, total) = match fandom.is_some() {
+        true => {
+            let coverage = catalogue::fandom_coverage(state.db()).await?;
+            (
+                Some(coverage.tagged),
+                Some(coverage.with_likes),
+                Some(catalogue::total_rows(state.db()).await?),
+            )
+        }
+        false => (None, None, None),
     };
     let query = CatalogueQuery {
         source: params.source.clone(),
@@ -183,6 +194,7 @@ async fn search(
         sources,
         fandom: query.fandom.clone(),
         fandom_tagged_rows: tagged,
+        fandom_tagged_with_likes: rankable,
         catalogue_rows: total,
     }))
 }

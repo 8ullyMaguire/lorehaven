@@ -291,8 +291,17 @@ pub fn coverage(page: &Value) -> Option<String> {
         0 => 0.0,
         total => tagged as f64 * 100.0 / total as f64,
     };
+    let rankable = page
+        .get("fandom_tagged_with_likes")
+        .and_then(Value::as_i64)
+        .unwrap_or(tagged);
+    let ranking = match rankable {
+        0 => " — and none of them publishes a like count, so this order is ties only".to_owned(),
+        n if n < tagged => format!(", {n} of them with a like count"),
+        _ => String::new(),
+    };
     Some(format!(
-        "{fandom}: {tagged} of {total} catalogue rows carry a fandom tag ({share:.1}%)"
+        "{fandom}: {tagged} of {total} catalogue rows carry a fandom tag ({share:.1}%){ranking}"
     ))
 }
 
@@ -544,6 +553,27 @@ mod tests {
         let line = coverage(&with).expect("coverage");
         assert!(line.contains("7626 of 141317"), "{line}");
         assert!(line.contains("5.4%"), "{line}");
+    }
+
+    #[test]
+    fn the_coverage_line_says_when_the_tagged_rows_cannot_be_ranked() {
+        // The live catalogue's shape: 7,626 tagged rows, every one from a source
+        // that publishes no endorsements. A page of zeros without this sentence
+        // reads as a broken ranking.
+        let with = serde_json::json!({
+            "items": [], "fandom": "Naruto", "fandom_tagged_rows": 7626,
+            "fandom_tagged_with_likes": 0, "catalogue_rows": 141317
+        });
+        let line = coverage(&with).expect("coverage");
+        assert!(line.contains("none of them publishes a like count"), "{line}");
+
+        // When every tagged row can be ranked, the sentence is not printed.
+        let rankable = serde_json::json!({
+            "items": [], "fandom": "Naruto", "fandom_tagged_rows": 100,
+            "fandom_tagged_with_likes": 100, "catalogue_rows": 1000
+        });
+        let line = coverage(&rankable).expect("coverage");
+        assert!(!line.contains("like count"), "{line}");
     }
 
     #[test]

@@ -381,6 +381,10 @@ async fn the_catalogue_route_filters_by_fandom_and_reports_coverage() {
     assert_eq!(item_keys(&body), vec!["naruto-fic"], "only the tagged row");
     assert_eq!(body["fandom"], "Naruto", "the resolved spelling is echoed");
     assert_eq!(body["fandom_tagged_rows"], 1);
+    assert_eq!(
+        body["fandom_tagged_with_likes"], 1,
+        "the fixture row has likes, so both coverage numbers agree"
+    );
     assert_eq!(body["catalogue_rows"], 2);
     assert!(!tagged.is_empty());
 
