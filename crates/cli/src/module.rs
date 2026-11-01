@@ -105,7 +105,7 @@ struct ServerCatalogue {
     ideas: Vec<ServerIdea>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ServerIdea {
     id: String,
     name: String,
@@ -250,15 +250,28 @@ async fn show(cli: &Cli, id: &str) -> Result<(), Failure> {
     })?;
 
     let server = catalogue(cli).await?;
-    let state = match &server {
-        Some(catalogue) => catalogue
-            .modules
-            .iter()
-            .find(|row| row.id == id)
-            .map_or("unknown (the instance did not list it)".to_owned(), |row| {
-                (if row.enabled { "on" } else { "off" }).to_owned()
-            }),
-        None => "(instance unreachable; compiled default below)".to_owned(),
+    // An idea is not a module, and saying "unknown" for one is the CLI confusing
+    // two catalogues the API keeps apart.
+    let idea = server.as_ref().and_then(|catalogue| {
+        catalogue.ideas.iter().find(|row| row.id == id).cloned()
+    });
+    let state = if let Some(idea) = &idea {
+        format!(
+            "planned — idea, relevance {} (from {})",
+            idea.relevance,
+            idea.source.split(',').next().unwrap_or("an unknown document").trim()
+        )
+    } else {
+        match &server {
+            Some(catalogue) => catalogue
+                .modules
+                .iter()
+                .find(|row| row.id == id)
+                .map_or("unknown (the instance did not list it)".to_owned(), |row| {
+                    (if row.enabled { "on" } else { "off" }).to_owned()
+                }),
+            None => "(instance unreachable; compiled default below)".to_owned(),
+        }
     };
 
     if cli.json {
@@ -307,6 +320,8 @@ async fn show(cli: &Cli, id: &str) -> Result<(), Failure> {
         println!("  requires   {}", compiled.requires.join(", "));
     }
     println!("  spec       {}", compiled.spec);
+    println!("  relevance  {} / 10", compiled.relevance);
+    println!("  source     {}", compiled.source);
     println!("  {}", compiled.summary);
     if !compiled.nav.is_empty() {
         println!("  nav");

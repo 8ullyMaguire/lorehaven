@@ -200,7 +200,7 @@ with `quiz` in `disabled`, then 401 with it removed.
 where `alice` toggles `quiz` off and gets 404 while `bob` gets 401; `PATCH` on a `fixed` row → 403
 naming §59.4.
 
-### Phase 3 — planned catalogue and the operator's verbs
+### Phase 3 — planned catalogue and the operator's verbs (SHIPPED as M65-05)
 
 `dh ext list --planned` prints the roadmap's unbuilt surfaces from the registry; `dh ext disable`
 refuses a planned row with its milestone. Rows come from `docs/requirements.csv` grouped by area,
@@ -218,3 +218,26 @@ rendered from the same payload. Not this milestone.
   milestone rather than pretending a flag is a build.
 - No per-pseud toggles (§59.6: one row per account, because a matrix of toggles is a settings page
   nobody finishes).
+
+---
+
+## What Phase 3 landed, and the two rules it cost
+
+`scripts/ideas_catalogue.py` reads eight sources and writes `crates/domain/src/modules/ideas.rs`
+(191 rows) plus `docs/ideas-catalogue.json`; `the_idea_catalogue_matches_its_json` is the drift
+gate. Relevance (§59.10) orders the queue and, for built surfaces, decides the default: six are
+opt-in by design and off (`arena`, `quiz`, `tasting`, `concierge`, `narration`, `vanguard`), so a
+fresh instance is 68 on / 29 off, and `[modules] enabled` turns one back on — the m65 test drives
+that path, which is the instance layer proven rather than described.
+
+The first generator run produced **375 rows that were mostly furniture**: a spec amendment's
+internal headings ("4 Acceptance", "Config", "Storage") became ideas, and the relevance score
+sorted "5 Acceptance" above the brainstorm it came from. Two rules fixed it, and both are the kind
+of thing that only shows up when you look at the output instead of the count:
+
+- **A spec amendment or a design is one idea** — its title. Its headings are its sections.
+- **A brainstorm is a list**, so its `###` headings are the ideas and its `##` tiers are not.
+
+Concord's darkhold entry was checked: it is a forge seed (`slug`, `repo_url`) and contributes no
+ideas. Saying so is the honest result; inventing a feature from it would have added a row to a
+catalogue whose whole value is that every row can be traced.
