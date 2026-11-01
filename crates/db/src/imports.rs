@@ -2137,7 +2137,8 @@ pub(crate) const LIBRARY_COLUMNS: &str =
 pub(crate) const LIBRARY_COLUMNS_PG: &str = "id::text AS id, account_id::text AS account_id, \
     work_id::text AS work_id, source_key, source_work_key, title, author_text, author_url, \
     summary, language, word_count, status, source_url, source_updated_at, last_synced_at, \
-    provenance_json, likes, views, created_at, updated_at, version";
+    provenance_json, likes::bigint AS likes, views::bigint AS views, created_at, updated_at, \
+    version";
 
 const IMPORT_JOB_COLUMNS: &str = "id, job_id, account_id, pseud_id, source_key, source_url, \
     destination_type, dry_run, state, library_item_id, report_json, created_at, updated_at";

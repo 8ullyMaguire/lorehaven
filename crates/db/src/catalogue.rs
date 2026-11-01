@@ -14,6 +14,15 @@
 //! normalises all of them onto `library_items.likes`. That number is *imported*,
 //! and the row says so in its provenance.
 //!
+//! One caveat the response cannot fix and the UI must not hide: on a XenForo
+//! board the crawler sums `data-likes` over every threadmark, so a XenForo number
+//! is *total engagement across chapters* while an AO3 number is kudos for the
+//! work as a whole. Ordering the catalogue by `likes` therefore rewards long
+//! serials, which is also what a board reader means by a popular fic — but it is
+//! not the same question as "best per chapter". That is why the row carries
+//! `word_count` and `status` too: a caller that wants quality-per-length has the
+//! inputs to compute it, and nothing is silently rescaled here.
+//!
 //! `total_likes` adds two things that `likes` alone cannot answer:
 //!
 //! 1. the same story's likes from every source it appears on, matched on
@@ -172,15 +181,15 @@ pub async fn sources(db: &Database) -> Result<Vec<SourceCount>> {
 /// Correlated rather than joined because it has to be evaluated once per
 /// returned row, not once per candidate row: a search returns twenty rows and
 /// this must cost twenty index lookups, not twenty over the whole catalogue.
-const TOTAL_LIKES_SQLITE: &str = "(SELECT COALESCE(SUM(l2.likes), 0) \
+const TOTAL_LIKES_SQLITE: &str = "COALESCE((SELECT SUM(l2.likes) \
      FROM library_items l2 \
     WHERE lower(trim(l2.title)) = lower(trim(library_items.title)) \
-      AND lower(trim(l2.author_text)) = lower(trim(library_items.author_text)))";
+      AND lower(trim(l2.author_text)) = lower(trim(library_items.author_text))), 0)";
 
-const TOTAL_LIKES_PG: &str = "(SELECT COALESCE(SUM(l2.likes), 0) \
+const TOTAL_LIKES_PG: &str = "COALESCE((SELECT SUM(l2.likes) \
      FROM library_items l2 \
     WHERE lower(btrim(l2.title)) = lower(btrim(library_items.title)) \
-      AND lower(btrim(l2.author_text)) = lower(btrim(library_items.author_text)))";
+      AND lower(btrim(l2.author_text)) = lower(btrim(library_items.author_text))), 0)";
 
 const SOURCE_COUNT_SQLITE: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
      FROM library_items l3 \
@@ -193,13 +202,17 @@ const SOURCE_COUNT_PG: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
       AND lower(btrim(l3.author_text)) = lower(btrim(library_items.author_text)))";
 
 /// Kudos earned on darkhold itself, for the work this catalogue row became.
-const DARKHOLD_KUDOS_SQLITE: &str = "(SELECT COALESCE(wma.kudos, 0) \
+///
+/// `COALESCE` wraps the whole subquery, not its inner column: a row with no
+/// `work_id`, or a work with no aggregate, returns *no rows* — and an aggregate
+/// over no rows is `NULL`, which the decoder refuses for an `i64`.
+const DARKHOLD_KUDOS_SQLITE: &str = "COALESCE((SELECT wma.kudos \
      FROM work_metric_aggregates wma \
-    WHERE wma.work_id = library_items.work_id)";
+    WHERE wma.work_id = library_items.work_id), 0)";
 
-const DARKHOLD_KUDOS_PG: &str = "(SELECT COALESCE(wma.kudos, 0) \
+const DARKHOLD_KUDOS_PG: &str = "COALESCE((SELECT wma.kudos \
      FROM work_metric_aggregates wma \
-    WHERE wma.work_id = library_items.work_id)";
+    WHERE wma.work_id = library_items.work_id), 0)";
 
 fn order_by(sort: CatalogueSort) -> &'static str {
     // The tie-breaker is the id so paging is stable; without it two rows with
@@ -241,51 +254,125 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
          {DARKHOLD_KUDOS_SQLITE} AS darkhold_kudos, {SOURCE_COUNT_SQLITE} AS source_count"
     );
     let columns_pg = format!(
-        "id::text AS id, source_key, source_work_key, title, author_text, summary, word_count, \
-         status, likes, views, source_url, provenance_json, {TOTAL_LIKES_PG} AS total_likes, \
-         {DARKHOLD_KUDOS_PG} AS darkhold_kudos, {SOURCE_COUNT_PG} AS source_count"
+        "id::text AS id, source_key, source_work_key, title, author_text, summary, \
+         word_count::bigint AS word_count, status, likes::bigint AS likes, \
+         views::bigint AS views, source_url, provenance_json, \
+         {TOTAL_LIKES_PG}::bigint AS total_likes, \
+         {DARKHOLD_KUDOS_PG}::bigint AS darkhold_kudos, \
+         {SOURCE_COUNT_PG}::bigint AS source_count"
     );
 
     let base_sqlite = format!(
         "SELECT {columns_sqlite} FROM library_items \
-         WHERE (?1 IS NULL OR source_key = ?1) \
-           AND likes >= ?2 \
-           AND (?3 IS NULL OR lower(title) LIKE '%' || ?3 || '%' \
-                          OR lower(author_text) LIKE '%' || ?3 || '%') \
-         ORDER BY {order} LIMIT ?4 OFFSET ?5"
+         WHERE (? IS NULL OR source_key = ?) \
+           AND likes >= ? \
+           AND (? IS NULL OR lower(title) LIKE '%' || ? || '%' \
+                          OR lower(author_text) LIKE '%' || ? || '%') \
+         ORDER BY {order} LIMIT ? OFFSET ?"
     );
     let base_pg = format!(
         "SELECT {columns_pg} FROM library_items \
-         WHERE (?1::text IS NULL OR source_key = ?1::text) \
-           AND likes >= ?2 \
-           AND (?3::text IS NULL OR lower(title) LIKE '%' || ?3::text || '%' \
-                          OR lower(author_text) LIKE '%' || ?3::text || '%') \
-         ORDER BY {order} LIMIT ?4 OFFSET ?5"
+         WHERE (?::text IS NULL OR source_key = ?::text) \
+           AND likes >= ? \
+           AND (?::text IS NULL OR lower(title) LIKE '%' || ?::text || '%' \
+                          OR lower(author_text) LIKE '%' || ?::text || '%') \
+         ORDER BY {order} LIMIT ? OFFSET ?"
     );
     let sql = sql_owned(db, base_sqlite, base_pg);
+
+    // Bind order is the placeholders' order, repeated where a value is used
+    // twice: `?` is positional in both engines and sqlx rewrites it to `$n`.
+    let bind_all = |source: Option<&str>, needle: Option<&str>| {
+        (
+            source.map(str::to_owned),
+            source.map(str::to_owned),
+            min_likes,
+            needle.map(str::to_owned),
+            needle.map(str::to_owned),
+            needle.map(str::to_owned),
+            limit,
+            offset,
+        )
+    };
+    let (b1, b2, b3, b4, b5, b6, b7, b8) = bind_all(source, needle.as_deref());
 
     match db.backend() {
         crate::Backend::Sqlite => {
             let rows: Vec<CatalogueRow> = sqlx::query_as(&sql)
-                .bind(source)
-                .bind(min_likes)
-                .bind(needle.as_deref())
-                .bind(limit)
-                .bind(offset)
+                .bind(b1)
+                .bind(b2)
+                .bind(b3)
+                .bind(b4)
+                .bind(b5)
+                .bind(b6)
+                .bind(b7)
+                .bind(b8)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?;
             Ok(rows)
         }
         crate::Backend::Postgres => {
             let rows: Vec<CatalogueRow> = sqlx::query_as(&sql)
-                .bind(source)
-                .bind(min_likes)
-                .bind(needle.as_deref())
-                .bind(limit)
-                .bind(offset)
+                .bind(b1)
+                .bind(b2)
+                .bind(b3)
+                .bind(b4)
+                .bind(b5)
+                .bind(b6)
+                .bind(b7)
+                .bind(b8)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?;
             Ok(rows)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_is_likes_because_that_is_what_the_operator_called_it() {
+        assert_eq!(CatalogueSort::parse("quality"), Some(CatalogueSort::Likes));
+        assert_eq!(CatalogueSort::parse("LIKES"), Some(CatalogueSort::Likes));
+        assert_eq!(CatalogueSort::parse("  "), Some(CatalogueSort::Likes));
+    }
+
+    #[test]
+    fn every_documented_sort_parses_and_round_trips() {
+        for sort in [
+            CatalogueSort::Likes,
+            CatalogueSort::Aggregate,
+            CatalogueSort::Views,
+            CatalogueSort::Words,
+            CatalogueSort::Updated,
+        ] {
+            assert_eq!(CatalogueSort::parse(sort.as_str()), Some(sort));
+        }
+    }
+
+    #[test]
+    fn an_unknown_sort_is_refused_rather_than_silently_reordered() {
+        assert_eq!(CatalogueSort::parse("kudos"), None);
+        assert_eq!(CatalogueSort::parse("likes desc; drop table"), None);
+    }
+
+    #[test]
+    fn aggregate_ordering_breaks_ties_on_the_raw_count_then_the_id() {
+        // A tie on total_likes must still page stably, so the ordering has to be
+        // total: description order alone would let rows swap between pages.
+        assert_eq!(
+            order_by(CatalogueSort::Aggregate),
+            "total_likes DESC, likes DESC, id DESC"
+        );
+        assert_eq!(order_by(CatalogueSort::Likes), "likes DESC, id DESC");
+    }
+
+    #[test]
+    fn a_nullable_sort_column_sinks_without_hiding_rows() {
+        // `views` is null for every board row; NULLS LAST keeps them on the page
+        // instead of dropping them, which a bare DESC on a null column would do.
+        assert!(order_by(CatalogueSort::Views).starts_with("views DESC NULLS LAST"));
     }
 }

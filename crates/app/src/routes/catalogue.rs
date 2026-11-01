@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use darkhold_db::catalogue::{self, CatalogueQuery, CatalogueRow, CatalogueSort};
+use darkhold_db::catalogue::{self, CatalogueQuery, CatalogueRow, CatalogueSort, SourceCount};
 use darkhold_domain::AppError;
 
 /// A query string the route cannot honour: a `422` that names the field.
@@ -111,13 +111,4 @@ async fn search(
 async fn sources(State(state): State<AppState>) -> ApiResult<Json<Vec<SourceCount>>> {
     let rows = catalogue::sources(state.db()).await?;
     Ok(Json(rows))
-}
-
-/// One source and its row count.
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub struct SourceCount {
-    /// The source key (`sb`, `sv`, …).
-    pub source_key: String,
-    /// How many catalogue rows it contributed.
-    pub count: i64,
 }

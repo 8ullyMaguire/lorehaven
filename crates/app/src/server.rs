@@ -522,7 +522,7 @@ pub fn build_router(state: AppState) -> Router {
         // module docs for why that is safe while library_items stays metadata-only.
         .merge(classified(
             routes::catalogue::router(),
-            RouteClass::Read,
+            RouteClass::Search,
             &state,
         ))
         // The job queue: a caller's own jobs, and the cancel action.
