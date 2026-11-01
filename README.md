@@ -175,6 +175,30 @@ with the test above it — so it could never pass, and the failure read as a
 product bug. Assert the specific thing you changed, using a stable per-row
 handle, and count rows before and after.
 
+## The terminal, `dh`
+
+`crates/cli` is a query tool over `/api/v1`, not a GUI over the site's screens:
+
+```
+dh rec --fandom naruto --updated 7d --sort likes --limit 10
+dh rec --fandom naruto --updated 7d --engine rrf --explain
+```
+
+The window grammar is the server's, so a window typed here cannot mean something
+different from the same window in a URL: `7d`, `>30d`, `@2026-10-27`,
+`2026-01-01..2026-10-15`. Naming an engine (`--engine rrf|legacy|<strategy>`)
+needs `DARKHOLD_TOKEN`, because the engines rank against what the calling account
+has already read; a plain catalogue query does not.
+
+`--explain` prints each strategy's production and its match inside the filtered
+set, which is how a strategy that contributes nothing becomes visible.
+
+**The catalogue's fandom coverage is partial, and `dh rec --fandom` says so.**
+On the live instance 7,626 of 141,317 rows carry a fandom tag (5.4 %, 233
+fandoms), so "Naruto" answers 265 rows — those are the tagged ones, not every
+Naruto fic in the catalogue. The coverage line is printed with every fandom
+query for exactly that reason.
+
 ## Where this lives
 
 | | |

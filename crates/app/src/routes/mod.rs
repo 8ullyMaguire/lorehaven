@@ -10,6 +10,7 @@ pub mod auth;
 pub mod author_media;
 pub mod browse;
 pub mod catalogue;
+pub mod rec_run;
 pub mod collaborators;
 pub mod community;
 // M45-22 (§54): the personal concierge.

@@ -146,6 +146,14 @@ pub struct CatalogueQuery {
     pub refreshed: Option<darkhold_domain::window::Bounds>,
     /// Window on `created_at`: when it entered this catalogue.
     pub added: Option<darkhold_domain::window::Bounds>,
+    /// Restrict to one fandom, as the catalogue spells it.
+    ///
+    /// Matched against `canonical_entities.norm` (the lowercased canonical name)
+    /// for `kind = 'fandom'`; the route resolves the name first so an unknown
+    /// fandom is a `422` with a suggestion rather than an empty page. The store
+    /// deliberately takes the name rather than the node id: a caller that knows
+    /// only "naruto" should not have to run a second query to filter by it.
+    pub fandom: Option<String>,
 }
 
 /// One source key and how many catalogue rows it contributed.
@@ -180,6 +188,134 @@ pub async fn sources(db: &Database) -> Result<Vec<SourceCount>> {
         }
     };
     Ok(rows)
+}
+
+/// One fandom and how many catalogue rows carry it.
+///
+/// The count is over distinct library items, not over tags: a work tagged with
+/// the same fandom twice (an author's typo, an import of two editions) is one
+/// row in the catalogue and must be one here, or the number the CLI prints as
+/// "265 fics" disagrees with the page it returns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct FandomCount {
+    /// The fandom as the catalogue spells it (`Naruto`, `Harry Potter`).
+    pub name: String,
+    /// How many catalogue rows are tagged with it.
+    pub count: i64,
+}
+
+/// Every fandom the catalogue knows, largest first.
+///
+/// Used by `GET /catalogue/fandoms` and, more importantly, by the route's
+/// suggestion when someone types `--fandom narut`: the useful answer to an
+/// unknown name is the nearest known one, and it has to come from the same
+/// query that lists them or the two can disagree.
+///
+/// # Errors
+///
+/// Returns the store's error when the query fails.
+pub async fn fandoms(db: &Database, limit: i64) -> Result<Vec<FandomCount>> {
+    let sql = db.sql(
+        "SELECT ce.canonical AS name, COUNT(DISTINCT li.id) AS count \
+           FROM canonical_entities ce \
+           JOIN work_tags wt ON wt.node_id = ce.id \
+           JOIN library_items li ON li.work_id = wt.work_id \
+          WHERE ce.kind = 'fandom' \
+          GROUP BY ce.canonical \
+          ORDER BY count DESC, name ASC \
+          LIMIT ?",
+        "SELECT ce.canonical AS name, COUNT(DISTINCT li.id)::bigint AS count \
+           FROM canonical_entities ce \
+           JOIN work_tags wt ON wt.node_id = ce.id \
+           JOIN library_items li ON li.work_id = wt.work_id \
+          WHERE ce.kind = 'fandom' \
+          GROUP BY ce.canonical \
+          ORDER BY count DESC, name ASC \
+          LIMIT ?",
+    );
+    let rows: Vec<FandomCount> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// How many rows the catalogue holds.
+///
+/// The denominator of the coverage line. Read on fandom-scoped requests only,
+/// which is why it is its own query rather than a field on every page: a count
+/// over 141k rows costs a scan, and a caller who did not ask about fandoms has
+/// no use for it.
+///
+/// # Errors
+///
+/// Returns the store's error when the query fails.
+pub async fn total_rows(db: &Database) -> Result<i64> {
+    let sql = db.sql(
+        "SELECT COUNT(*) AS count FROM library_items",
+        "SELECT COUNT(*)::bigint AS count FROM library_items",
+    );
+    let count: (i64,) = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(count.0)
+}
+
+/// How many catalogue rows carry any fandom tag at all.
+///
+/// The denominator of the coverage line the CLI prints whenever `--fandom` is
+/// used. It exists because the honest answer to "Naruto fics" is "265 tagged
+/// ones", and a reader who is not told that 94.6 % of the catalogue is untagged
+/// will read a short page as a bad ranking rather than missing metadata.
+///
+/// # Errors
+///
+/// Returns the store's error when the query fails.
+pub async fn fandom_tagged_rows(db: &Database) -> Result<i64> {
+    let sql = db.sql(
+        "SELECT COUNT(DISTINCT li.id) AS count \
+           FROM library_items li \
+           JOIN work_tags wt ON wt.work_id = li.work_id \
+           JOIN canonical_entities ce ON ce.id = wt.node_id \
+          WHERE ce.kind = 'fandom'",
+        "SELECT COUNT(DISTINCT li.id)::bigint AS count \
+           FROM library_items li \
+           JOIN work_tags wt ON wt.work_id = li.work_id \
+           JOIN canonical_entities ce ON ce.id = wt.node_id \
+          WHERE ce.kind = 'fandom'",
+    );
+    let count: (i64,) = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(count.0)
 }
 
 /// The same story's likes across every source, plus its darkhold kudos.
@@ -276,7 +412,7 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
     // backfilled them to one canonical shape and the database now refuses any other,
     // so the predicate is a plain range -- which is what makes the index usable.
     // docs/plans/m63-31-timestamp-normalisation.md is the record.
-    let windows = windows_sql(query);
+    let filters = filters_sql(query);
 
     let base_sqlite = format!(
         "SELECT {columns_sqlite} FROM library_items \
@@ -285,7 +421,7 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
            AND (? IS NULL OR lower(title) LIKE '%' || ? || '%' \
                           OR lower(author_text) LIKE '%' || ? || '%'){windows_sqlite} \
          ORDER BY {order} LIMIT ? OFFSET ?",
-        windows_sqlite = windows.sqlite
+        windows_sqlite = filters.sqlite
     );
     let base_pg = format!(
         "SELECT {columns_pg} FROM library_items \
@@ -294,7 +430,7 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
            AND (?::text IS NULL OR lower(title) LIKE '%' || ?::text || '%' \
                           OR lower(author_text) LIKE '%' || ?::text || '%'){windows_pg} \
          ORDER BY {order} LIMIT ? OFFSET ?",
-        windows_pg = windows.postgres
+        windows_pg = filters.postgres
     );
     let sql = sql_owned(db, base_sqlite, base_pg);
 
@@ -315,7 +451,7 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
     let (b1, b2, b3, b4, b5, b6, b7, b8) = bind_all(source, needle.as_deref());
     // Window placeholders sit in the WHERE clause, so their binds come before
     // LIMIT/OFFSET in both engines' positional order.
-    let windows_binds = windows.binds.clone();
+    let windows_binds = filters.binds.clone();
 
     match db.backend() {
         crate::Backend::Sqlite => {
@@ -357,15 +493,15 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
     }
 }
 
-/// The window predicates, in one place, with the binds in the order the
+/// The filter predicates, in one place, with the binds in the order the
 /// placeholders appear.
-struct WindowsSql {
+struct FilterSql {
     sqlite: String,
     postgres: String,
     binds: Vec<String>,
 }
 
-fn windows_sql(query: &CatalogueQuery) -> WindowsSql {
+fn filters_sql(query: &CatalogueQuery) -> FilterSql {
     let mut sqlite = String::new();
     let mut postgres = String::new();
     let mut binds = Vec::new();
@@ -391,7 +527,28 @@ fn windows_sql(query: &CatalogueQuery) -> WindowsSql {
             binds.push(to);
         }
     }
-    WindowsSql {
+    // The fandom arm is an `EXISTS`, not a join, and that is load-bearing: a work
+    // tagged with two fandoms that share a name would otherwise appear twice in a
+    // page whose `limit` the caller asked for once. `work_id` is nullable on rows
+    // the estate import could not link to a work, and `EXISTS` drops those for
+    // free instead of needing a second predicate.
+    if let Some(fandom) = query
+        .fandom
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let predicate = " AND EXISTS (\
+             SELECT 1 FROM work_tags wt \
+               JOIN canonical_entities ce ON ce.id = wt.node_id \
+              WHERE wt.work_id = library_items.work_id \
+                AND ce.kind = 'fandom' \
+                AND ce.norm = ?)";
+        sqlite.push_str(predicate);
+        postgres.push_str(predicate);
+        binds.push(fandom.to_lowercase());
+    }
+    FilterSql {
         sqlite,
         postgres,
         binds,

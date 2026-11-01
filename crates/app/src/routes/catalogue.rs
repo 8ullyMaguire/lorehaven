@@ -30,7 +30,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use darkhold_db::catalogue::{self, CatalogueQuery, CatalogueRow, CatalogueSort, SourceCount};
+use darkhold_db::catalogue::{
+    self, CatalogueQuery, CatalogueRow, CatalogueSort, FandomCount, SourceCount,
+};
 use darkhold_domain::AppError;
 
 /// A query string the route cannot honour: a `422` that names the field.
@@ -60,6 +62,9 @@ pub struct CatalogueParams {
     refreshed: Option<String>,
     /// Window on entry age: when it entered this catalogue.
     added: Option<String>,
+    /// Restrict to one fandom, e.g. `naruto`. Case-insensitive; an unknown name
+    /// is a `422` that names the field and suggests the nearest known fandom.
+    fandom: Option<String>,
 }
 
 /// What the route answers.
@@ -71,6 +76,23 @@ pub struct CataloguePage {
     offset: i64,
     /// The sources present in this page, so a UI can label the filter honestly.
     sources: Vec<String>,
+    /// The fandom this page answered for, spelled as the catalogue has it.
+    ///
+    /// Present only when the request carried `fandom=`. Echoing the resolved
+    /// spelling back is what lets a caller that typed `naruto` show `Naruto`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fandom: Option<String>,
+    /// How many catalogue rows carry any fandom tag at all, and how many rows
+    /// there are.
+    ///
+    /// Together they are the coverage line. `--fandom naruto` returning 265 rows
+    /// is a complete answer only if the caller learns that 94.6% of the
+    /// catalogue has no fandom metadata — otherwise a short page reads as a bad
+    /// ranking instead of a missing tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fandom_tagged_rows: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalogue_rows: Option<i64>,
 }
 
 /// Mount the catalogue's read routes.
@@ -78,6 +100,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/catalogue", get(search))
         .route("/catalogue/sources", get(sources))
+        .route("/catalogue/fandoms", get(fandoms))
         .route("/catalogue/export", get(export_manifest))
         .route("/catalogue/export.sqlite", get(export_sqlite))
 }
@@ -103,6 +126,39 @@ async fn search(
             .map(Some)
             .map_err(|e| invalid(format!("{field}: {e}"))),
     };
+    // Resolve the fandom before the page query. An unknown name that fell
+    // through to the store would answer 200 with an empty list, which reads as
+    // "this fandom has nothing" rather than "you spelled it differently".
+    let fandom = match params
+        .fandom
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        None => None,
+        Some(raw) => {
+            let known = catalogue::fandoms(state.db(), FANDOM_LIST_LIMIT).await?;
+            match known.iter().find(|f| f.name.eq_ignore_ascii_case(raw)) {
+                Some(found) => Some(found.name.clone()),
+                None => {
+                    let hint = suggest(raw, &known)
+                        .map(|name| format!("; did you mean \"{name}\"?"))
+                        .unwrap_or_else(|| ".".to_owned());
+                    return Err(invalid(format!(
+                        "fandom: no fandom called \"{raw}\"{hint} ({} fandoms known)",
+                        known.len()
+                    )));
+                }
+            }
+        }
+    };
+    let (tagged, total) = match fandom.is_some() {
+        true => (
+            Some(catalogue::fandom_tagged_rows(state.db()).await?),
+            Some(catalogue::total_rows(state.db()).await?),
+        ),
+        false => (None, None),
+    };
     let query = CatalogueQuery {
         source: params.source.clone(),
         min_likes: params.min_likes,
@@ -113,6 +169,7 @@ async fn search(
         updated: window(&params.updated, "updated")?,
         refreshed: window(&params.refreshed, "refreshed")?,
         added: window(&params.added, "added")?,
+        fandom,
     };
     let items = catalogue::search(state.db(), &query).await?;
     let mut sources: Vec<String> = items.iter().map(|row| row.source_key.clone()).collect();
@@ -124,7 +181,80 @@ async fn search(
         limit,
         offset: query.offset.unwrap_or(0),
         sources,
+        fandom: query.fandom.clone(),
+        fandom_tagged_rows: tagged,
+        catalogue_rows: total,
     }))
+}
+
+/// How many fandoms the suggestion list is built from.
+///
+/// 500 covers the live catalogue's 233 with room for the tag backfill; a name
+/// outside the top 500 is still an exact match, it just cannot be *suggested*.
+const FANDOM_LIST_LIMIT: i64 = 500;
+
+/// Every fandom the catalogue holds, largest first.
+async fn fandoms(State(state): State<AppState>) -> ApiResult<Json<Vec<FandomCount>>> {
+    Ok(Json(
+        catalogue::fandoms(state.db(), FANDOM_LIST_LIMIT).await?,
+    ))
+}
+
+/// The nearest known fandom to what someone typed.
+///
+/// Prefix and substring first, because those are what a truncated name looks
+/// like (`narut`), then edit distance, because those are what a typo looks like
+/// (`naruot`). Returns `None` rather than a bad guess: a suggestion nobody
+/// recognises costs more attention than no suggestion.
+fn suggest<'a>(raw: &str, known: &'a [FandomCount]) -> Option<&'a str> {
+    let needle = raw.trim().to_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    if let Some(hit) = known
+        .iter()
+        .filter(|f| f.name.to_lowercase().starts_with(&needle))
+        .min_by_key(|f| f.name.len())
+    {
+        return Some(hit.name.as_str());
+    }
+    if let Some(hit) = known
+        .iter()
+        .filter(|f| f.name.to_lowercase().contains(&needle))
+        .min_by_key(|f| f.name.len())
+    {
+        return Some(hit.name.as_str());
+    }
+    let budget = (needle.chars().count() / 3).max(2);
+    known
+        .iter()
+        .map(|f| (edit_distance(&needle, &f.name.to_lowercase()), f))
+        .filter(|(distance, _)| *distance <= budget)
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, f)| f.name.as_str())
+}
+
+/// Levenshtein distance, insertion/deletion/substitution, no transposition.
+///
+/// Written out rather than pulled in: it is twelve lines, it is used only for a
+/// suggestion, and a dependency for it would be the largest thing in the crate's
+/// tree for the smallest feature in it.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    let mut current = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        current[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            current[j + 1] = (previous[j] + cost)
+                .min(previous[j + 1] + 1)
+                .min(current[j] + 1);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[b.len()]
 }
 
 /// The distinct source keys the catalogue holds, with how many rows each has.

@@ -525,6 +525,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Search,
             &state,
         ))
+        // The recommendation engines over a filtered catalogue (M63-01). The
+        // search class rather than the default one: it ranks a pool of up to 500
+        // rows with every enabled strategy, which is the heaviest read in the
+        // application. It is not public — every strategy reads the caller's own
+        // history, so it needs a session.
+        .merge(classified(
+            routes::rec_run::router(),
+            RouteClass::Search,
+            &state,
+        ))
         // The job queue: a caller's own jobs, and the cancel action.
         .merge(classified(
             routes::jobs::router(),

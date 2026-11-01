@@ -1,0 +1,22 @@
+[package]
+name = "darkhold-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "dh — a query tool over a Darkhold instance's catalogue"
+
+[[bin]]
+name = "dh"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util"] }

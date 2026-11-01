@@ -6,6 +6,7 @@ members = [
     "crates/domain",
     "crates/db",
     "crates/app",
+    "crates/cli",
     "crates/scrapers",
     "crates/taste",
     "crates/test-support",
