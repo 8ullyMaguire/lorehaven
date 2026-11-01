@@ -12,12 +12,28 @@
 //!
 //! This module is pure: no database, no clock. The caller passes
 //! `freshness_days`, and the store fills the candidates.
+//!
+//! # Why sample size is a separate signal and not a correction inside the rank
+//!
+//! Shrinking a percentile toward the midpoint by its sample size
+//! (`0.5 + (pct−0.5)·n/(n+10)`) looks like the obvious guardrail and it is wrong
+//! here: it makes the **achievable maximum depend on `n`**, so the best row of a
+//! source with 209 engaged rows can never score above 0.977 while one with 884
+//! can reach 0.994. Measured on the live catalogue 2026-11-01, that put 34 of the
+//! top 40 `source_pct` rows in the single largest archive — the archive-size bias
+//! this whole vocabulary exists to remove, reintroduced by its own guardrail.
+//!
+//! So the percentile is raw (a source's best row is 1.0 whatever the source's
+//! size), and evidence is a signal of its own: [`Signals::confidence`], worth
+//! `n/(n+10)`, which the composite weighs instead of the ranking distorting.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// How many pseudo-rows of "average for this archive" every percentile carries.
+/// How many unobserved rows `confidence` assumes. Chosen against the live
+/// engaged populations (209, 154, 884): it discounts a source with a handful of
+/// engaged rows without touching the large ones.
 ///
 /// A percentile computed from four engaged rows is not worth the same as one
 /// computed from eight hundred: the first says "best of four", which is what a
@@ -62,6 +78,8 @@ pub enum Metric {
     CohortPct,
     /// `exp(-days / 180)` on `source_updated_at`.
     Recency,
+    /// How much the source's engaged population is worth, on its own.
+    Confidence,
     /// Triage for rows with no endorsement data: which to check first.
     Unmeasured,
     /// Raw imported likes, descending.
@@ -111,6 +129,7 @@ impl Metric {
         Self::SourceCoverage,
         Self::CohortPct,
         Self::Recency,
+        Self::Confidence,
         Self::Unmeasured,
         Self::Likes,
         Self::Aggregate,
@@ -145,6 +164,7 @@ impl Metric {
             "source_coverage" | "coverage" => Some(Self::SourceCoverage),
             "cohort_pct" | "tag_cohort_pct" | "cohort" => Some(Self::CohortPct),
             "recency" | "freshness" => Some(Self::Recency),
+            "confidence" | "evidence" => Some(Self::Confidence),
             "unmeasured" | "triage" => Some(Self::Unmeasured),
             "likes" | "like" => Some(Self::Likes),
             "aggregate" | "total" => Some(Self::Aggregate),
@@ -173,6 +193,7 @@ impl Metric {
             Self::SourceCoverage => "source_coverage",
             Self::CohortPct => "cohort_pct",
             Self::Recency => "recency",
+            Self::Confidence => "confidence",
             Self::Unmeasured => "unmeasured",
             Self::Likes => "likes",
             Self::Aggregate => "aggregate",
@@ -209,7 +230,8 @@ impl Metric {
             | Self::WordsMaturity
             | Self::SourceCoverage
             | Self::CohortPct
-            | Self::Recency => Support::Ranked,
+            | Self::Recency
+            | Self::Confidence => Support::Ranked,
         }
     }
 
@@ -220,7 +242,7 @@ impl Metric {
             Self::Quality => {
                 "0.45 source_pct + 0.30 consensus + 0.15 density + 0.10 crosspost, renormalised"
             }
-            Self::SourcePct => "percentile of likes among the source's engaged rows, by sample size",
+            Self::SourcePct => "percentile of likes among the source's engaged rows (raw)",
             Self::SourceZ => "logistic z-score of ln(1+likes) within the source",
             Self::EngagementDensity => "percentile of likes per 1k words within the source",
             Self::Consensus => "source_pct plus a bonus for other archives carrying it",
@@ -229,6 +251,7 @@ impl Metric {
             Self::SourceCoverage => "min(source_count, 5) / 5",
             Self::CohortPct => "source_pct inside the --fandom cohort",
             Self::Recency => "exp(-days/180) on the source's last update",
+            Self::Confidence => "n/(n+10): how much the source's engaged population is worth",
             Self::Unmeasured => "0.4 coverage + 0.3 maturity + 0.3 cross-archive presence",
             Self::Likes => "raw imported likes (what the catalogue did before)",
             Self::Aggregate => "total likes across every source plus darkhold kudos",
@@ -297,6 +320,12 @@ pub struct Signals {
     /// [`Metric::Recency`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recency: Option<f64>,
+    /// How much the source's engaged population is worth: `n/(n+10)`.
+    ///
+    /// Separate from [`Signals::source_pct`] on purpose: the percentile says how
+    /// good the row is *for its archive*, this says how much that claim is worth.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
     /// [`Metric::Unmeasured`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triage: Option<f64>,
@@ -352,30 +381,40 @@ impl SourceStats {
     }
 }
 
-/// Mid-rank percentile of `value` inside `sorted`: 0.5 for the only element, 1.0
-/// for the largest, and ties share a position instead of being ordered by
-/// whatever the sort happened to do.
+/// Where `value` sits in `sorted`: 0 at the bottom, 1 at the top.
+///
+/// The divisor is `len - 1`, not `len`, and that is the whole point: a mid-rank
+/// percentile over `n` rows tops out at `(n − 0.5)/n`, so the best of a four-row
+/// archive would score 0.875 while the best of a four-hundred-row one scores
+/// 0.9988 — an n-dependent ceiling, which is the same archive-size bias in a
+/// milder dress. Anchoring both ends makes "the best row of this archive" mean
+/// the same thing everywhere, and leaves the size question to
+/// [`Signals::confidence`], where it belongs.
+///
+/// Ties share a position: `below + 0.5·(equal − 1)` over `len − 1`. A single row
+/// has no order to express and scores 0.5.
 fn percentile_of(value: f64, sorted: &[f64]) -> Option<f64> {
     if sorted.is_empty() {
         return None;
     }
-    let below = sorted.iter().filter(|&&v| v < value).count();
-    let equal = sorted.iter().filter(|&&v| v == value).count();
-    let n = sorted.len();
-    Some(((below as f64) + 0.5 * (equal as f64)) / (n as f64))
+    if sorted.len() == 1 {
+        return Some(0.5);
+    }
+    let below = sorted.iter().filter(|&&v| v < value).count() as f64;
+    let equal = sorted.iter().filter(|&&v| v == value).count() as f64;
+    let position = below + 0.5 * (equal - 1.0);
+    Some((position / (sorted.len() as f64 - 1.0)).clamp(0.0, 1.0))
 }
 
-/// Pull a percentile toward the midpoint by its sample size.
+/// How much a percentile from `n` rows is worth: `n / (n + k)`.
 ///
-/// `0.5 + (pct - 0.5) · n/(n + k)`. A percentile is a statement about how many
-/// rows are below a value, and it is exactly as trustworthy as there are rows: at
-/// `n = 4` the best row is p0.875 by construction, which is not evidence. Shrinking
-/// by sample size keeps the *order* inside a source and removes the confidence it
-/// has not earned.
-fn shrink_percentile(pct: f64, n: usize) -> f64 {
+/// Deliberately *outside* the percentile. A percentile is a statement about how
+/// many rows are below a value, and it is as trustworthy as there are rows; that
+/// is a separate fact from the value itself, and folding it in makes the top of a
+/// small source unreachable instead of merely less certain.
+fn confidence(n: usize) -> f64 {
     let n = n as f64;
-    let confidence = n / (n + PERCENTILE_PRIOR_ROWS);
-    0.5 + (pct - 0.5) * confidence
+    n / (n + PERCENTILE_PRIOR_ROWS)
 }
 
 /// Bucket score on length. `None` when the source publishes no word count.
@@ -460,8 +499,8 @@ pub fn rank(
 
         if candidate.likes > 0 {
             if let Some(s) = s {
-                signals.source_pct = percentile_of(candidate.likes as f64, &s.raw)
-                    .map(|pct| shrink_percentile(pct, s.raw.len()));
+                signals.source_pct = percentile_of(candidate.likes as f64, &s.raw);
+                signals.confidence = Some(confidence(s.raw.len()));
                 let n = s.log_likes.len() as f64;
                 if n >= 2.0 {
                     let mean = s.log_sum / n;
@@ -481,8 +520,7 @@ pub fn rank(
                 }
                 if let Some(words) = candidate.word_count.filter(|w| *w > 0) {
                     let density = (candidate.likes as f64) * 1_000.0 / (words as f64);
-                    signals.density = percentile_of(density, &s.density)
-                        .map(|pct| shrink_percentile(pct, s.density.len()));
+                    signals.density = percentile_of(density, &s.density);
                 }
             }
             let cross_bonus = 0.10 * ((candidate.source_count.clamp(1, 3) - 1) as f64)
@@ -569,11 +607,14 @@ pub fn rank(
 fn score_of(metric: Metric, signals: &Signals) -> f64 {
     match metric {
         Metric::Quality => {
-            let parts: [(Option<f64>, f64); 4] = [
-                (signals.source_pct, 0.45),
-                (signals.consensus, 0.30),
+            let parts: [(Option<f64>, f64); 5] = [
+                (signals.source_pct, 0.40),
+                (signals.consensus, 0.25),
                 (signals.density, 0.15),
                 (signals.crosspost, 0.10),
+                // Evidence, not quality: a row that leads a four-row archive is
+                // not worth the same as one that leads eight hundred.
+                (signals.confidence, 0.10),
             ];
             let mut weighted = 0.0;
             let mut weight = 0.0;
@@ -597,6 +638,7 @@ fn score_of(metric: Metric, signals: &Signals) -> f64 {
         Metric::WordsMaturity => signals.words_maturity.unwrap_or(0.0),
         Metric::SourceCoverage => signals.source_coverage.unwrap_or(0.0),
         Metric::Recency => signals.recency.unwrap_or(0.0),
+        Metric::Confidence => signals.confidence.unwrap_or(0.0),
         Metric::Unmeasured => signals.triage.unwrap_or(0.0),
         Metric::Likes
         | Metric::Aggregate
@@ -675,10 +717,12 @@ mod tests {
             .any(|h| h.id == "weak" && h.score > 0.5));
     }
 
-    /// The guardrail: a percentile from four engaged rows is worth less than one
-    /// from four hundred, so the tiny source's top row cannot claim 0.99.
+    /// The reason the guardrail is *not* inside the percentile: shrinking it by
+    /// sample size caps the achievable score at `0.5 + 0.5·n/(n+10)`, so a source
+    /// with 4 engaged rows could never reach 1.0. On the live catalogue that put
+    /// 34 of the top 40 rows in the largest archive.
     #[test]
-    fn a_percentile_from_four_rows_cannot_claim_the_confidence_of_one_from_four_hundred() {
+    fn the_best_row_of_any_source_reaches_one_whatever_the_source_size() {
         let mut candidates = vec![candidate("tiny-top", "qq", 2, Some(20_000))];
         for i in 0..3 {
             candidates.push(candidate(&format!("tiny-{i}"), "qq", 1, Some(20_000)));
@@ -689,16 +733,47 @@ mod tests {
         candidates.push(candidate("big-top", "sb", 4_000, Some(20_000)));
 
         let ranked = rank(Metric::SourcePct, &candidates, 500, 0);
+        let score = |id: &str| {
+            ranked
+                .hits
+                .iter()
+                .find(|h| h.id == id)
+                .unwrap_or_else(|| panic!("{id} ranked"))
+                .score
+        };
+        assert!((score("tiny-top") - 1.0).abs() < 1e-9, "best of its own archive");
+        assert!((score("big-top") - 1.0).abs() < 1e-9, "best of its own archive");
+    }
+
+    /// Evidence is its own signal, and it is what discounts a small population —
+    /// in the composite, not by capping the rank.
+    #[test]
+    fn confidence_is_what_discounts_a_small_engaged_population() {
+        let mut candidates = vec![candidate("tiny-top", "qq", 2, Some(20_000))];
+        for i in 0..3 {
+            candidates.push(candidate(&format!("tiny-{i}"), "qq", 1, Some(20_000)));
+        }
+        for i in 0..400 {
+            candidates.push(candidate(&format!("big{i}"), "sb", 10 + i as i64, Some(20_000)));
+        }
+        candidates.push(candidate("big-top", "sb", 4_000, Some(20_000)));
+
+        let ranked = rank(Metric::Confidence, &candidates, 500, 0);
         let tiny = ranked.hits.iter().find(|h| h.id == "tiny-top").expect("ranked");
         let big = ranked.hits.iter().find(|h| h.id == "big-top").expect("ranked");
+        assert!(tiny.score < 0.3, "four rows are worth little: {}", tiny.score);
+        assert!(big.score > 0.9, "four hundred are worth a lot: {}", big.score);
+
+        // And the composite, which weighs it, prefers the better-evidenced row
+        // even though both lead their own archive.
+        let quality = rank(Metric::Quality, &candidates, 500, 0);
+        let q = |id: &str| quality.hits.iter().find(|h| h.id == id).expect("ranked").score;
         assert!(
-            big.score > tiny.score + 0.15,
-            "the 400-row top ({}) must beat the 4-row top ({})",
-            big.score,
-            tiny.score
+            q("big-top") > q("tiny-top"),
+            "quality must prefer evidence: {} vs {}",
+            q("big-top"),
+            q("tiny-top")
         );
-        // Still the best row of its own archive, just not a confident one.
-        assert!(tiny.score > 0.5, "a source's own best row stays above the midpoint");
     }
 
     /// Unmeasured rows never mingle with measured ones, whatever the metric.

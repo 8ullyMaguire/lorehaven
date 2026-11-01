@@ -267,10 +267,15 @@ async fn a_metric_page_carries_scores_the_gate_and_a_marked_unmeasured_block() {
         sb["score"].as_f64().expect("score"),
         qq["score"].as_f64().expect("score"),
     );
+    // The ranks differ by fixture design (the sb copy sits 5th of 6 engaged rows,
+    // the qq copy is 1st of 3), so the scores are close rather than equal; the
+    // rigorous version of this claim, with the live ranks, is in
+    // `crates/db/tests/quality_metrics.rs`.
     assert!(
-        (sb_score - qq_score).abs() < 0.2,
+        (sb_score - qq_score).abs() < 0.25,
         "archive size must not decide the ranking: sb {sb_score}, qq {qq_score}"
     );
+    assert!(sb_score > 0.7 && qq_score > 0.7, "both lead their own archive: {sb_score} / {qq_score}");
 }
 
 #[tokio::test]
