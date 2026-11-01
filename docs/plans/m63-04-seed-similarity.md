@@ -159,7 +159,7 @@ for a name. Measured against the running instance:
 |---|---|---|
 | `Ghost in the City` | `422`, "2 rows match" and both were titled `Ghost in the City` — two `archive` rows by the same author with **0 likes** | resolves to the `sb` row with **602,176** likes, `Ghost in the City. Cyberpunk Gamer SI` |
 | `With This Ring` | resolved to an `archive` stub (0 likes); neighbours shared only the token `ring` | resolves to the `qq` thread with **483,770** likes |
-| `Worm` | resolved to a `pawchive` row with 0 likes | resolves to the row carrying **431,719** likes |
+| `Worm` | resolved to a `pawchive` row with 0 likes | **refuses**, naming the 20 rows: 431,719 / 113,511 / 81,506 … — `Worm` is a fandom, not a title, and nothing here is 10× the next |
 | `Twin Story` (a fixture tie) | — | `422` naming both rows with archive, likes and id |
 
 The lesson generalises: **on this catalogue the exact title is usually the dead
