@@ -517,6 +517,14 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // The public catalogue: metadata-only search across every source. A read
+        // class because it touches no session and no writer's row — see the
+        // module docs for why that is safe while library_items stays metadata-only.
+        .merge(classified(
+            routes::catalogue::router(),
+            RouteClass::Read,
+            &state,
+        ))
         // The job queue: a caller's own jobs, and the cancel action.
         .merge(classified(
             routes::jobs::router(),

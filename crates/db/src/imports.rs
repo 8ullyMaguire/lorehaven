@@ -149,6 +149,14 @@ pub struct LibraryItem {
     /// the work and this is a fact about the copy. They differ whenever an
     /// import is partial, which is the state a reader most needs to be told.
     pub unit_count: i64,
+    /// The community-endorsement signal, normalised across sources: threadmark
+    /// likes on the XenForo boards, kudos on AO3, followers on Royal Road.
+    ///
+    /// Imported, not organic: darkhold's own `work_kudos` is a different fact and
+    /// the two are summed only in the catalogue's aggregate, never confused.
+    pub likes: i64,
+    /// The source's view count, when it publishes one.
+    pub views: Option<i64>,
     /// Which import produced this and from where.
     pub provenance_json: String,
     /// When this copy was created.
@@ -2123,12 +2131,13 @@ pub(crate) const LIBRARY_UNIT_COUNT: &str = "(SELECT COUNT(*) FROM import_units 
 pub(crate) const LIBRARY_COLUMNS: &str =
     "id, account_id, work_id, source_key, source_work_key, title, \
     author_text, author_url, summary, language, word_count, status, source_url, \
-    source_updated_at, last_synced_at, provenance_json, created_at, updated_at, version";
+    source_updated_at, last_synced_at, provenance_json, likes, views, created_at, updated_at, \
+    version";
 
 pub(crate) const LIBRARY_COLUMNS_PG: &str = "id::text AS id, account_id::text AS account_id, \
     work_id::text AS work_id, source_key, source_work_key, title, author_text, author_url, \
     summary, language, word_count, status, source_url, source_updated_at, last_synced_at, \
-    provenance_json, created_at, updated_at, version";
+    provenance_json, likes, views, created_at, updated_at, version";
 
 const IMPORT_JOB_COLUMNS: &str = "id, job_id, account_id, pseud_id, source_key, source_url, \
     destination_type, dry_run, state, library_item_id, report_json, created_at, updated_at";
@@ -2199,6 +2208,8 @@ pub(crate) struct LibraryItemRow {
     pub(crate) source_updated_at: Option<String>,
     pub(crate) last_synced_at: Option<String>,
     pub(crate) provenance_json: String,
+    pub(crate) likes: i64,
+    pub(crate) views: Option<i64>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
     pub(crate) version: i64,
@@ -2287,6 +2298,8 @@ pub(crate) fn decode_library_item(row: LibraryItemRow) -> Result<LibraryItem> {
         last_synced_at: row.last_synced_at,
         unit_count: row.unit_count,
         provenance_json: row.provenance_json,
+        likes: row.likes,
+        views: row.views,
         created_at: row.created_at,
         updated_at: row.updated_at,
         version: row.version,
