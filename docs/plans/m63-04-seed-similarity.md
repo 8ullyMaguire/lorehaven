@@ -136,6 +136,38 @@ that id, see below), handoff, session note.
   one `reading_progress` row, so the live proof can only show the route refusing the flag without a
   session. Reported as measured, not claimed.
 
+## What landed — commit `05981e80`
+
+Seven unit tests in `crates/domain/src/similar.rs`, six store tests in
+`crates/db/tests/catalogue_similar.rs` (6 SQLite, 6 PostgreSQL), six route tests in
+`crates/app/tests/m63_04_seed.rs`. Five mutations, each caught by the test that names it:
+
+| mutation | caught by |
+|---|---|
+| `TITLE_WEIGHT` 3.0 → 1.0 | `a_shared_title_token_outweighs_a_shared_summary_token` |
+| `AUTHOR_BONUS` 0.15 → 0.0 | `the_same_author_breaks_a_similarity_tie` |
+| `lower(trim(author_text))` → `author_text` | `the_author_filter_is_case_insensitive` |
+| `rp.account_id = ?` → `rp.account_id = rp.account_id` | `an_accounts_reading_is_excluded_and_nobody_elses_is` |
+| route: `if false && exclude_read` | `excluding_read_without_a_session_is_refused_by_name` |
+
+Three things diverged from this plan, all recorded here rather than silently:
+
+1. **`--sort` with `--seed` is refused, not a tiebreak.** The plan said the metric
+   would break ties inside equal similarity. Doing that means running the metric
+   ranker over the same population and threading its scores into the similarity
+   sort — for a tiebreak nobody can see. A `422` that says "a seed already decides
+   the order" is the honest version.
+2. **`exclude_read` is a text flag, not a `bool`.** `Option<bool>` answers
+   `400 Failed to deserialize query string` for `exclude_read=1`, which is exactly
+   what a shell types. `rec_run` had already learned this for `explain=1`; the
+   route now accepts `1|true|yes|on|0|false|no|off` and refuses anything else by
+   name.
+3. **`total` counts the preselection, not just the user's other filters.** The
+   token `LIKE` arm is a filter, so `ranked 1 of 2` on a five-row fixture is
+   correct: two rows carry the seed's words. `scanned` is the same number here
+   because the cap (5,000) was not reached, and the two diverge only on a
+   catalogue-wide seed.
+
 ## A defect this row surfaced: two rows share the id `M63-04`
 
 `docs/requirements.csv` holds **two** rows per id for `M63-03`, `M63-04` and `M63-05` — one under

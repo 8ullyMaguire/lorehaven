@@ -117,6 +117,10 @@ const ROWS: &[Row] = &[
         "Osh",
         900,
     ),
+    // Two rows with the same title and the same like count: no rule can pick
+    // between them, so `--seed "Twin Story"` must refuse and name both.
+    ("twin-a", "Twin Story", "Rival edition one", "Nobody", 100),
+    ("twin-b", "Twin Story", "Rival edition two", "Somebody", 100),
 ];
 
 async fn insert(db: &Database, account: &str, row: Row, work: Option<&str>) {
@@ -482,18 +486,24 @@ async fn a_seed_spec_resolves_by_id_url_title_and_refuses_an_ambiguous_title() {
     let missing = metrics::resolve_seed(&db, "nothing called this").await.expect("missing");
     assert_eq!(missing, metrics::SeedMatch::None);
 
-    // "Ghost in the City" is a prefix of "Ghost in the City (rewrite)", so the
-    // substring pass finds two and must refuse rather than pick one.
-    let ambiguous = metrics::resolve_seed(&db, "Ghost in the City").await.expect("ambiguous");
-    assert!(
-        matches!(ambiguous, metrics::SeedMatch::One(_)),
-        "the exact-title pass runs before the substring pass, got {ambiguous:?}"
-    );
-    let ambiguous = metrics::resolve_seed(&db, "Ghost").await.expect("ambiguous");
+    // Three rows carry the word "Ghost" (the two titles and `Neon Ghost
+    // Protocol`) and one of them has 120x the likes of the next: that is the copy
+    // people read, and picking it is the documented rule rather than a coin toss.
+    let popular = metrics::resolve_seed(&db, "Ghost").await.expect("popular");
+    match popular {
+        metrics::SeedMatch::One(row) => assert_eq!(row.title, "Ghost in the City"),
+        other => panic!("the dominant copy must be chosen, got {other:?}"),
+    }
+
+    // Two rows, same title, same likes: nothing can choose, so the caller is
+    // given both with the archive and the count.
+    let ambiguous = metrics::resolve_seed(&db, "Twin Story").await.expect("twin");
     match ambiguous {
-        // Three rows carry the word: the two `Ghost in the City` titles and
-        // `Neon Ghost Protocol`.
-        metrics::SeedMatch::Many(rows) => assert_eq!(rows.len(), 3, "every ghost, got {rows:?}"),
-        other => panic!("a shared substring must be refused, got {other:?}"),
+        metrics::SeedMatch::Many(rows) => {
+            assert_eq!(rows.len(), 2, "both twins, got {rows:?}");
+            assert!(rows.iter().all(|row| row.title == "Twin Story"));
+            assert!(rows.iter().all(|row| row.source_key == "sb"));
+        }
+        other => panic!("a tie must be refused with both rows, got {other:?}"),
     }
 }

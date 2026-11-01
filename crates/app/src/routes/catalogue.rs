@@ -487,15 +487,18 @@ async fn similar_page(
             }))
         }
         darkhold_db::metrics::SeedMatch::Many(rows) => {
+            // A refusal has to be actionable: two identical titles with no
+            // archive and no like count is a dead end, and it is exactly what the
+            // first version printed for `--seed "Ghost in the City"`.
             let named: Vec<String> = rows
                 .iter()
-                .take(5)
-                .map(|(_, title)| format!("\"{title}\""))
+                .take(6)
+                .map(|row| format!("{} [{}] {}L ({})", row.title, row.source_key, row.likes, row.id))
                 .collect();
             return Err(invalid(format!(
-                "seed: {} rows match \"{spec}\" — name one of them, or use its id: {}",
+                "seed: {} rows match \"{spec}\" and none is dominant — pick one by id: {}",
                 rows.len(),
-                named.join(", ")
+                named.join("; ")
             )));
         }
     };

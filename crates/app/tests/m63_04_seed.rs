@@ -85,32 +85,39 @@ impl Harness {
     }
 }
 
-/// `(source_work_key, title, summary, author)`.
-const ROWS: &[(&str, &str, &str, &str)] = &[
+/// `(source_work_key, title, summary, author, likes)`.
+const ROWS: &[(&str, &str, &str, &str, i64)] = &[
     (
         "ghost",
         "Ghost in the City",
         "A cyberpunk gamer wakes up in Night City with a system",
         "ZFighter18",
+        120_000,
     ),
     (
         "rewrite",
         "Ghost in the City (rewrite)",
         "The same Night City gamer story, retold",
         "Someone Else",
+        9_900,
     ),
     (
         "mech",
         "Battletech Mercenary Tales",
         "A mechwarrior story about contracts and dropships",
         "Oshha",
+        3_000,
     ),
     (
         "mech-two",
         "Aurigan Battleship",
         "Another mechwarrior contract story",
         "Oshha",
+        2_900,
     ),
+    // A deliberate tie: same title, same like count, nothing to choose between.
+    ("twin-a", "Twin Story", "Rival edition one", "Nobody", 100),
+    ("twin-b", "Twin Story", "Rival edition two", "Somebody", 100),
 ];
 
 async fn seed(db: &Database) {
@@ -128,7 +135,7 @@ async fn seed(db: &Database) {
             .execute(pool)
             .await
             .expect("account");
-            for (index, (key, title, summary, author)) in ROWS.iter().enumerate() {
+            for (key, title, summary, author, likes) in ROWS.iter() {
                 sqlx::query(
                     "INSERT INTO library_items
                      (id, account_id, source_key, source_work_key, title, author_text, summary,
@@ -144,7 +151,7 @@ async fn seed(db: &Database) {
                 .bind(*author)
                 .bind(*summary)
                 .bind(T0)
-                .bind(10_000 - (index as i64 * 100))
+                .bind(*likes)
                 .execute(pool)
                 .await
                 .expect("library item");
@@ -163,7 +170,7 @@ async fn seed(db: &Database) {
             .execute(pool)
             .await
             .expect("account");
-            for (index, (key, title, summary, author)) in ROWS.iter().enumerate() {
+            for (key, title, summary, author, likes) in ROWS.iter() {
                 sqlx::query(
                     "INSERT INTO library_items
                      (id, account_id, source_key, source_work_key, title, author_text, summary,
@@ -182,7 +189,7 @@ async fn seed(db: &Database) {
                 .bind(T0)
                 .bind(T0)
                 .bind(T0)
-                .bind(10_000 - (index as i64 * 100))
+                .bind(*likes)
                 .execute(pool)
                 .await
                 .expect("library item");
@@ -234,13 +241,25 @@ async fn an_unknown_seed_is_a_404_not_an_empty_page() {
 #[tokio::test]
 async fn an_ambiguous_seed_names_the_candidates() {
     let harness = Harness::new("ambiguous").await;
-    let (status, body) = harness.get("/api/v1/catalogue?seed=Ghost").await;
+    let (status, body) = harness.get("/api/v1/catalogue?seed=Twin%20Story").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "ambiguous seed: {body}");
     let message = body["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        message.contains("rows match") && message.contains("Ghost in the City"),
-        "the refusal names the rows, was {message:?}"
+        message.contains("rows match")
+            && message.contains("Twin Story [sb]")
+            && message.contains("none is dominant"),
+        "the refusal names the rows, the archive and the count, was {message:?}"
     );
+}
+
+/// A short name is what a reader types, and on this catalogue it is usually a
+/// prefix of the story people mean rather than its exact title.
+#[tokio::test]
+async fn a_short_name_resolves_to_the_copy_people_read() {
+    let harness = Harness::new("short-name").await;
+    let (status, body) = harness.get("/api/v1/catalogue?seed=Ghost").await;
+    assert_eq!(status, StatusCode::OK, "short name: {body}");
+    assert_eq!(body["seed"]["title"], "Ghost in the City", "{body}");
 }
 
 #[tokio::test]

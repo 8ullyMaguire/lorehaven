@@ -3025,3 +3025,44 @@ the failure mode this project has hit before with scans that stopped matching.
 `cargo test -p darkhold-app --no-fail-fast` — **183 binaries, 2 481 passed, 0 failed**, exit 0. Run with
 `--no-fail-fast` and the full log kept, because the earlier `| tail -20` summary showed twenty green
 binaries and would have hidden a failure in any of the other 163.
+
+## M63-04 — "similar to this one", and the premise the milestone row got wrong
+
+**Shipped `05981e80`, 2026-11-01.** `dh rec --seed <work>`, `--author <pseud>`,
+`--exclude-read`; `GET /api/v1/catalogue?seed=&author=&exclude_read=`.
+
+The row's note said "tag/cooccurrence vectors already power the strategies; attention
+records are the implicit negative set. No new ranking code." Both halves were wrong, and
+the numbers are worth carrying: `work_tags` joins **0** of the 1,247 rows that carry likes
+(all 7,626 tagged rows are `pawchive` with none), and `reading_progress` holds **1 row** in
+the whole instance. A tag-based neighbour list for any row a reader can rank is empty, so
+similarity is idf-weighted cosine over title and summary — the only fields every source
+publishes — and the tag arm is deferred to M63-32.
+
+Four things that cost time and will cost it again:
+
+- **A `bool` query parameter breaks on `=1`.** `Option<bool>` answers `400 Failed to
+  deserialize query string: provided string was not \`true\` or \`false\`` — a message that
+  reads as a syntax error rather than as the accepted spellings of a flag. `rec_run` had
+  already learned this for `explain=1`; both routes now take the flag as text and parse
+  `1|true|yes|on|0|false|no|off`, refusing anything else by name.
+- **`--sort` alongside a seed is refused, not merged.** A metric tiebreak inside equal
+  similarity means running the metric ranker over the same population and threading its
+  scores into the sort, for something nobody can see. A `422` that says "a seed already
+  decides the order" is the honest version, and the route and the CLI both make it.
+- **The token preselection is a filter, so it moves `total`.** `ranked 1 of 2` on a
+  five-row fixture is correct: two rows carry the seed's words and one of them is the seed.
+  `scanned` (the 5,000-row cap) equals `total` until a seed is catalogue-wide.
+- **`exclude_read` matches through `library_items.work_id`, which is null on 83,283 rows.**
+  The predicate is right and tested on both engines, but a reading record can only ever
+  hide a row the estate import linked. Do not read a small exclusion count as a bug.
+
+Gates on this pass: `cargo test -p darkhold-domain -p darkhold-db --lib` 803 + 159;
+`catalogue_similar` 6 SQLite / 6 PostgreSQL; `m63_04_seed` 6; `catalogue_fandom` 5;
+`quality_metrics` 5; `catalogue_window` 4. Five mutations (title weight, author bonus,
+author case-folding, the exclusion predicate, the route dropping the flag) each failed the
+test that names it.
+
+Two pre-existing clippy failures now block `--all-targets` on `darkhold-app` as well as
+`darkhold-db`: `crates/app/src/routes/draw.rs:191` and `:254` report a useless conversion to
+the same type. They are not this item's and were left alone (M63-35 records them).

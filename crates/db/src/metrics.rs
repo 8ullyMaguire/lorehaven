@@ -464,7 +464,7 @@ pub struct SimilarPage {
     pub items: Vec<SimilarRow>,
 }
 
-/// A resolved seed row: the fields similarity needs, nothing else.
+/// A resolved seed row: the fields similarity needs, plus how to name it back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeedLookup {
     /// Library item id.
@@ -475,6 +475,34 @@ pub struct SeedLookup {
     pub author: String,
     /// Summary as the source shows it.
     pub summary: String,
+    /// The archive it came from, so a refusal can say which copy.
+    pub source_key: String,
+    /// Imported endorsement count, which is how "the copy people read" is decided.
+    pub likes: i64,
+}
+
+/// One row a `--seed` spec could have meant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedCandidate {
+    /// Library item id.
+    pub id: String,
+    /// Title as the source shows it.
+    pub title: String,
+    /// The archive it came from.
+    pub source_key: String,
+    /// Imported endorsement count.
+    pub likes: i64,
+}
+
+impl From<&SeedLookup> for SeedCandidate {
+    fn from(row: &SeedLookup) -> Self {
+        Self {
+            id: row.id.clone(),
+            title: row.title.clone(),
+            source_key: row.source_key.clone(),
+            likes: row.likes,
+        }
+    }
 }
 
 /// What a `--seed` spec resolved to.
@@ -482,59 +510,72 @@ pub struct SeedLookup {
 pub enum SeedMatch {
     /// Exactly one row.
     One(SeedLookup),
-    /// Several rows match a title substring: the caller must disambiguate rather
-    /// than be given the first, because the first is alphabetical and arbitrary.
-    Many(Vec<(String, String)>),
+    /// Several rows could be meant and none is dominant: the caller must choose.
+    Many(Vec<SeedCandidate>),
     /// Nothing matches.
     None,
 }
 
-/// How many ambiguous titles a `--seed` refusal names.
-const AMBIGUOUS_LIMIT: i64 = 10;
+/// How many candidates a `--seed` search looks at.
+const AMBIGUOUS_LIMIT: i64 = 20;
 
 /// One lookup, on either engine, with the id cast each engine needs.
+///
+/// `where_*` may use `?` more than once; every bind is passed in order.
 async fn seed_rows(
     db: &Database,
     where_sqlite: &str,
     where_postgres: &str,
-    bind: &str,
+    binds: &[String],
+    order: &str,
     limit: i64,
 ) -> Result<Vec<SeedLookup>> {
     let (columns_sqlite, columns_pg) = (
-        "id, title, author_text, coalesce(summary, '')",
-        "id::text AS id, title, author_text, coalesce(summary, '')::text AS summary",
+        "id, title, author_text, coalesce(summary, ''), source_key, likes",
+        "id::text AS id, title, author_text, coalesce(summary, '')::text AS summary, \
+         source_key, likes::bigint AS likes",
     );
-    let sqlite = format!("SELECT {columns_sqlite} FROM library_items WHERE {where_sqlite} LIMIT {limit}");
-    let postgres = format!("SELECT {columns_pg} FROM library_items WHERE {where_postgres} LIMIT {limit}");
+    let sqlite = format!(
+        "SELECT {columns_sqlite} FROM library_items WHERE {where_sqlite} ORDER BY {order} LIMIT {limit}"
+    );
+    let postgres = format!(
+        "SELECT {columns_pg} FROM library_items WHERE {where_postgres} ORDER BY {order} LIMIT {limit}"
+    );
     let sql = crate::sql_owned(db, sqlite, postgres);
     match db.backend() {
         Backend::Sqlite => {
-            let rows: Vec<(String, String, String, String)> = sqlx::query_as(&sql)
-                .bind(bind.to_owned())
-                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-                .await?;
-            Ok(rows
+            let mut q = sqlx::query_as::<_, (String, String, String, String, String, i64)>(&sql);
+            for bind in binds {
+                q = q.bind(bind.clone());
+            }
+            Ok(q.fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
                 .into_iter()
-                .map(|(id, title, author, summary)| SeedLookup {
+                .map(|(id, title, author, summary, source_key, likes)| SeedLookup {
                     id,
                     title,
                     author,
                     summary,
+                    source_key,
+                    likes,
                 })
                 .collect())
         }
         Backend::Postgres => {
-            let rows: Vec<(String, String, String, String)> = sqlx::query_as(&sql)
-                .bind(bind.to_owned())
-                .fetch_all(db.postgres_pool().expect("postgres handle"))
-                .await?;
-            Ok(rows
+            let mut q = sqlx::query_as::<_, (String, String, String, String, String, i64)>(&sql);
+            for bind in binds {
+                q = q.bind(bind.clone());
+            }
+            Ok(q.fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
                 .into_iter()
-                .map(|(id, title, author, summary)| SeedLookup {
+                .map(|(id, title, author, summary, source_key, likes)| SeedLookup {
                     id,
                     title,
                     author,
                     summary,
+                    source_key,
+                    likes,
                 })
                 .collect())
         }
@@ -543,11 +584,25 @@ async fn seed_rows(
 
 /// Resolve a `--seed` argument to the row it names.
 ///
-/// Four attempts, in the order that cannot be wrong: an id (the only exact
-/// identity a caller can hold), the story's source URL (what a reader copies out
-/// of a browser), the exact title, then a substring — and a substring that matches
-/// more than one row is [`SeedMatch::Many`] rather than the first hit, because
-/// "the first alphabetically" is not what the caller meant by a title.
+/// # The order, and why it is not "exact title first"
+///
+/// An id or a source URL is an identity and wins outright. A **title** is not: on
+/// this catalogue the exact title is usually the *dead* copy. Measured on the live
+/// instance 2026-11-01, `--seed "Ghost in the City"` matches two `archive` rows
+/// with **0 likes** by the same author, while the story a reader means is
+/// `Ghost in the City. Cyberpunk Gamer SI` on `sb` with 602,176. An exact-title
+/// rule sends every reader to the stub, and an "ambiguous" refusal that lists two
+/// identical titles tells them nothing.
+///
+/// So the title pass ranks by likes and accepts a row when either
+///
+/// * every candidate is the same story — same title, same author, several archives
+///   (the cross-post case, which `total_likes` already treats as one story), or
+/// * the most-read candidate is well ahead of the next one: strictly more than
+///   zero likes and at least ten times the runner-up's.
+///
+/// Otherwise the caller is given the candidates with their archive, likes and id,
+/// which is a refusal they can act on.
 ///
 /// # Errors
 ///
@@ -560,56 +615,50 @@ pub async fn resolve_seed(db: &Database, spec: &str) -> Result<SeedMatch> {
     // `id` is `uuid` on PostgreSQL and `TEXT` on SQLite: the cast has to be on the
     // column, or PostgreSQL compares a uuid to a text bind and answers a type
     // error that surfaces as a 500 with no SQL in it.
-    let by_id = seed_rows(db, "id = ?", "id::text = ?", spec, 1).await?;
+    let by_id = seed_rows(db, "id = ?", "id::text = ?", &[spec.to_owned()], "id", 1).await?;
     if let Some(found) = by_id.into_iter().next() {
         return Ok(SeedMatch::One(found));
     }
     if spec.starts_with("https://") || spec.starts_with("http://") {
-        let by_url = seed_rows(db, "source_url = ?", "source_url = ?", spec, 1).await?;
+        let by_url = seed_rows(
+            db,
+            "source_url = ?",
+            "source_url = ?",
+            &[spec.to_owned()],
+            "id",
+            1,
+        )
+        .await?;
         if let Some(found) = by_url.into_iter().next() {
             return Ok(SeedMatch::One(found));
         }
     }
-    let exact = seed_rows(
+    let rows = seed_rows(
         db,
-        "lower(trim(title)) = lower(trim(?))",
-        "lower(btrim(title)) = lower(btrim(?))",
-        spec,
-        2,
-    )
-    .await?;
-    // Two rows can share a title (a re-post, two authors, the same story on two
-    // boards) and picking either is picking at random.
-    match exact.len() {
-        0 => {}
-        1 => return Ok(SeedMatch::One(exact.into_iter().next().expect("one"))),
-        _ => {
-            return Ok(SeedMatch::Many(
-                exact.into_iter().map(|row| (row.id, row.title)).collect(),
-            ))
-        }
-    }
-    // A substring search is capped and its hits are returned with their titles: a
-    // caller told "three rows match, here they are" can ask again; a caller handed
-    // the first one silently gets the wrong story.
-    let partial = seed_rows(
-        db,
-        "lower(title) LIKE '%' || lower(?) || '%'",
-        "lower(title) LIKE '%' || lower(?::text) || '%'",
-        spec,
+        "lower(title) = lower(trim(?)) OR lower(title) LIKE '%' || lower(?) || '%'",
+        "lower(btrim(title)) = lower(btrim(?)) OR lower(title) LIKE '%' || lower(?::text) || '%'",
+        &[spec.to_owned(), spec.to_owned()],
+        "likes DESC, id DESC",
         AMBIGUOUS_LIMIT,
     )
     .await?;
-    match partial.len() {
-        0 => Ok(SeedMatch::None),
-        1 => Ok(SeedMatch::One(partial.into_iter().next().expect("one"))),
-        _ => Ok(SeedMatch::Many(
-            partial
-                .into_iter()
-                .map(|row| (row.id, row.title))
-                .collect(),
-        )),
+
+    let Some(top) = rows.first() else {
+        return Ok(SeedMatch::None);
+    };
+    if rows.len() == 1 {
+        return Ok(SeedMatch::One(top.clone()));
     }
+    let second = &rows[1];
+    let same_story = rows.iter().all(|row| {
+        row.title.trim().eq_ignore_ascii_case(top.title.trim())
+            && row.author.trim().eq_ignore_ascii_case(top.author.trim())
+    });
+    let dominant = top.likes > 0 && (second.likes == 0 || top.likes >= second.likes.saturating_mul(10));
+    if same_story || dominant {
+        return Ok(SeedMatch::One(top.clone()));
+    }
+    Ok(SeedMatch::Many(rows.iter().map(SeedCandidate::from).collect()))
 }
 
 /// Rank the filtered catalogue by similarity to `seed_row` (M63-04).
