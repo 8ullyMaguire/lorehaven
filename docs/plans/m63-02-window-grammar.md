@@ -106,3 +106,81 @@ column comparison safe (filed as M63-31).
   they have something to consume.
 - **No expression index.** Written above, waiting on M63-31, which is the fix that makes it
   unnecessary.
+
+## What landed, and the two things that changed on the way
+
+Shipped `b5f5b9cf` (the item's second commit; `9b1bb539` was the grammar itself). Two findings
+rewrote the plan's own claim about how bad the timestamp problem was:
+
+### 1. The formats are four, not three
+
+Measured on the live database by shape:
+
+| shape | rows | example |
+|---|---|---|
+| `YYYY-MM-DD` | 63,947 | `2026-10-13` |
+| `YYYY-MM-DDTHH:MM:SS` (**no zone**) | 27,461 | `2026-10-27T01:04:45` |
+| `…Z` | 60 | `2026-09-20T00:00:00Z` |
+| `…SS.NNNNNN` (no zone) | 3 | `2025-04-04T15:18:27.394000` |
+
+The zone-less majority is the one that matters, and it does not "drop rows" — it **moves the
+window**. PostgreSQL's live session runs with `timezone = Europe/Madrid` (measured), so a plain
+`::timestamptz` reads a zone-less value as Madrid wall time … and reads the bound the same way. Rows
+and bounds stay consistent with each other, so nothing looks broken; what shifts is the whole
+window. On production `@2026-10-27` covered 23:00 on the 26th to 23:00 on the 27th, and a row stored
+as `2026-10-26T23:30:00Z` — an instant, not a wall clock — fell inside a day it is not in. SQLite
+reads both sides as UTC, so the two engines disagreed.
+
+Fixed by making the shape decide the reading, on both sides of every comparison:
+
+```sql
+-- the column
+CASE WHEN col ~ '(Z|[+-][0-9]{2}:[0-9]{2})$' THEN (col)::timestamptz
+     ELSE ((col)::timestamp AT TIME ZONE 'UTC') END
+-- the bound (always formatted naive-UTC by Bounds::from_sql)
+((?::timestamp) AT TIME ZONE 'UTC')
+```
+
+Both are now independent of the session timezone, so the engines agree by construction.
+
+### 2. Deploy was not blocked by a lineage after all
+
+`~/code/rust/darkhold` is a **symlink to the thinkcentre tree over the mount**
+(`/home/alvaro/mnt/thinkcentre/personal/documents/code/rust/darkhold`). 46 of its 51 "uncommitted"
+files were byte-identical to this line's HEAD: the deploy tree had simply never committed the
+catalogue work. Preserved on branch `wip/deploy-checkout-2026-11-01`, then reset to this line — one
+history again. `docs/plans/deploy-lineage-decision.md` is resolved by that, and the deploy ran from
+the shared tree.
+
+## Verification
+
+| claim | command | output |
+|---|---|---|
+| grammar | `cargo test -p darkhold-domain --lib window` | 25 passed |
+| predicates, both engines | `cargo test -p darkhold-db --test catalogue_window` | 4 passed (SQLite) / 4 passed (PG, session set to `Europe/Madrid`) |
+| wiring | `cargo test -p darkhold-app --test catalogue_window_route` | 2 passed |
+| lib gates | `cargo test -p darkhold-domain -p darkhold-db -p darkhold-app --lib` | 236 / 157 / 784 passed |
+| live build | `curl /api/v1/meta` | `Darkhold 0.1.0 0.1.0+b5f5b9cf` |
+| live filter | `curl '…/catalogue?updated=7d&limit=2'` | `200`, 2 items |
+| live validation | `curl '…/catalogue?updated=nonsense'` | `422 VALIDATION_FAILED "updated: window needs a whole number before its unit"` |
+| fix compiled in | `strings <binary> \| grep -c "AT TIME ZONE 'UTC'"` | 7 |
+
+Mutations, all reverted green afterwards:
+
+| mutation | test that failed |
+|---|---|
+| upper bound `<` → `<=` | `a_window_partitions_the_catalogue_exactly` |
+| drop `datetime()` on SQLite | `mixed_timestamp_shapes_compare_as_instants` |
+| route accepts `updated` and drops it | both route tests |
+| PostgreSQL column read as session-local | `a_zone_less_bound_does_not_move_the_window`, `mixed_timestamp_shapes_compare_as_instants` |
+| PostgreSQL bound read as session-local | `a_zone_less_bound_does_not_move_the_window` |
+
+## The limitation this does not fix
+
+No live row currently stores a timestamp inside the one-hour band the session timezone was shifting,
+so the endpoint returns the same rows before and after: 10 for `@2026-10-27`, and the UTC-anchored
+SQL reference also says 10. The behaviour is fixed and the fixture proves it; the live data cannot
+demonstrate it, and saying otherwise would be a claim about rows that do not exist.
+
+Still open, unchanged: the predicate is a function call on the column, so it does not use an index.
+M63-31 (normalise at the writer, backfill) is what removes both the function and the deferral.

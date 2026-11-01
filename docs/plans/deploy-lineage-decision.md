@@ -1,6 +1,7 @@
-# Decision needed: deploying this lineage
+# Deploy lineage: resolved 2026-11-01
 
-**Status: waiting on the operator. No deploy was performed for M63-02 because of this.**
+**Status: closed. The operator said "sync code-local/ and code/ darkhold repo", and the sync turned
+out to be trivial — see "What the sync found" below. M63-02 is deployed on top of it.**
 
 ## What was found
 
@@ -72,3 +73,33 @@ no-ops against the live 0131 database (they should be — 0131 is already applie
 ## What is needed to proceed
 
 A yes on the option, and a moment when no other session is building on `thinkcentre`.
+
+## What the sync found (2026-11-01, after the options below were written)
+
+`~/code/rust/darkhold` is not a second checkout: it is a **symlink to the thinkcentre tree over the
+mount** (`/home/alvaro/mnt/thinkcentre/personal/documents/code/rust/darkhold`). Its 51 uncommitted
+files were compared against this line's HEAD by content hash — **46 were byte-identical**, and the
+rest were this line's newer commits plus patched TLS dependencies. The "two lineages" were one
+lineage whose deployment side had never committed its work.
+
+What was done, and it is reversible:
+
+```bash
+cd ~/code/rust/darkhold
+git branch -f wip/deploy-checkout-2026-11-01 HEAD      # preserve, do not lose their state
+git add -A && git commit -m "wip: the deploy checkout's uncommitted catalogue work, preserved"
+git remote add local ~/code-local/rust/darkhold
+git fetch local master && git reset --hard local/master # -> 9b1bb539, then b5f5b9cf
+```
+
+Then the normal deploy: `cargo build --release -p darkhold-app --bin darkhold` (10m), the binary
+replaced (kept at `~/backups/darkhold-replaced-*-m63-02tz.bin`), `migrate --status` → 128 applied,
+0 pending, `systemctl --user restart darkhold`, and `/api/v1/meta` reports `0.1.0+b5f5b9cf`.
+
+**Trap found while doing it:** `darkhold migrate` run from `$HOME` printed
+`schema already up to date: … on this sqlite database` and `config_file=None` — it had created a
+local SQLite dev database and migrated nothing. The command discovers `darkhold.toml` **from the
+current directory**, so it must run as `cd <tree> && darkhold migrate`. `migrate --status` from the
+tree is the check that tells the two apart.
+
+Options A/B/C below are kept as the record of what was considered before that was known.
