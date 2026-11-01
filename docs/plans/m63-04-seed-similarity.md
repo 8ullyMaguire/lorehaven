@@ -150,6 +150,27 @@ Seven unit tests in `crates/domain/src/similar.rs`, six store tests in
 | `rp.account_id = ?` → `rp.account_id = rp.account_id` | `an_accounts_reading_is_excluded_and_nobody_elses_is` |
 | route: `if false && exclude_read` | `excluding_read_without_a_session_is_refused_by_name` |
 
+### Live proof changed the resolver, and the change is `0b1d37d9`
+
+The first deploy (`05981e80`) answered correct JSON for a UUID seed and wrong rows
+for a name. Measured against the running instance:
+
+| spec | first version | after `0b1d37d9` |
+|---|---|---|
+| `Ghost in the City` | `422`, "2 rows match" and both were titled `Ghost in the City` — two `archive` rows by the same author with **0 likes** | resolves to the `sb` row with **602,176** likes, `Ghost in the City. Cyberpunk Gamer SI` |
+| `With This Ring` | resolved to an `archive` stub (0 likes); neighbours shared only the token `ring` | resolves to the `qq` thread with **483,770** likes |
+| `Worm` | resolved to a `pawchive` row with 0 likes | resolves to the row carrying **431,719** likes |
+| `Twin Story` (a fixture tie) | — | `422` naming both rows with archive, likes and id |
+
+The lesson generalises: **on this catalogue the exact title is usually the dead
+copy**, because the estates import carries the canonical title with no endorsement
+and the boards carry the readership under a longer one. A resolver that ranks by
+title affinity and refuses on ties sends every reader to a stub. The rule that
+replaced it — same story across archives, or a leader with >0 likes and 10× the
+runner-up — is documented on `resolve_seed` and has its own test
+(`a_short_name_resolves_to_the_copy_people_read`), with the 10× margin mutated to
+prove the test notices.
+
 Three things diverged from this plan, all recorded here rather than silently:
 
 1. **`--sort` with `--seed` is refused, not a tiebreak.** The plan said the metric

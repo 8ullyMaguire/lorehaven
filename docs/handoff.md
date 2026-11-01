@@ -3057,6 +3057,18 @@ Four things that cost time and will cost it again:
   The predicate is right and tested on both engines, but a reading record can only ever
   hide a row the estate import linked. Do not read a small exclusion count as a bug.
 
+**The live proof rewrote the resolver, and that is the transferable lesson.** The first
+deploy resolved `--seed "Ghost in the City"` to two `archive` rows with 0 likes by the same
+author — the exact title, and a dead copy — while the story a reader means has 602,176 likes
+on `sb` under `Ghost in the City. Cyberpunk Gamer SI`. `With This Ring` resolved to an
+`archive` stub instead of the 483,770-like qq thread, and the neighbours then shared nothing
+but the token `ring`. Commit `0b1d37d9` searches exact-or-substring, ranks by likes, and
+accepts a row when every candidate is the same story (same title+author across archives) or
+the leader has >0 likes and at least ten times the runner-up's; otherwise it refuses with
+title, archive, likes and id per candidate. **On this catalogue the exact title is usually
+the dead copy** — the estates import carries canonical titles with no endorsement, the boards
+carry the readership under longer ones.
+
 Gates on this pass: `cargo test -p darkhold-domain -p darkhold-db --lib` 803 + 159;
 `catalogue_similar` 6 SQLite / 6 PostgreSQL; `m63_04_seed` 6; `catalogue_fandom` 5;
 `quality_metrics` 5; `catalogue_window` 4. Five mutations (title weight, author bonus,
