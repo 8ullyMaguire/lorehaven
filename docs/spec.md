@@ -10999,6 +10999,12 @@ came from:
 The script prints what it read, how many rows came from each source, and which built surfaces it
 left off, so a run is auditable without opening the generated file.
 
+Four sources are read as *idea lists* and the rest are not: a session note's headings are its
+narration ("State at handoff", "Three decisions I made"), a requirements row keeps its own id
+(`M63-12`, not a slug of its sentence), and a heading needs two word-ish tokens to count — the
+audit's table has one-word cells that are attributes of a row, not items. Each of those rules was
+paid for by reading a deployed payload that was 18 rows longer than it should have been.
+
 ### 59.11 The instance layer can re-enable an opt-in surface
 
 `[modules] enabled = ["quiz", "arena"]` turns an opt-in-by-default surface back on for one instance,

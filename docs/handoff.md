@@ -3176,3 +3176,29 @@ surface does not use.
 Not built, and registered as such: per-user overrides (M65-04: `module_user_state`, `PATCH`,
 per-request narrowing only when someone holds an override), the roadmap-generated planned
 catalogue (M65-05), and the frontend reading `/api/v1/modules` for its nav (M65-06).
+
+## M65-05 — the idea catalogue is generated, and defaults follow relevance
+
+`scripts/ideas_catalogue.py` reads the places ideas actually live and writes
+`crates/domain/src/modules/ideas.rs` (173 rows, all `planned`, all off, none enablable) plus
+`docs/ideas-catalogue.json`; `the_idea_catalogue_matches_its_json` fails when the two drift.
+`/api/v1/modules` now carries `ideas` and `counts` beside `modules`, and `dh module ideas --min N
+--committed` reads it.
+
+Relevance (§59.10) orders the queue and decides built surfaces' defaults: six are opt-in by design
+(`arena`, `quiz`, `tasting`, `concierge`, `narration`, `vanguard`) and default off, so a fresh
+instance is 68 on / 29 off. This host keeps them with `[modules] enabled = [...]` — declared in
+`darkhold.toml`, not implied by a default that quietly changed under it.
+
+Four rules were paid for by reading the deployed payload rather than counting it: an amendment is
+one idea (its title, not its headings), a session note is not an idea list, a requirements row keeps
+its own id (`M45-26`) instead of a slug of its sentence, and a heading needs two words to count.
+
+Open: M65-07 (the generator reads a named list, so `docs/known-gaps.md` and
+`docs/ROADMAP-guest-trust-governance.md` are idea documents it ignores, and a new brainstorm is
+found only because the directory is globbed) and M65-08 (an idea and the module that realises it are
+not linked, so building one leaves the planned row behind).
+
+Live: deployed from `1f0975c2`, 130 migrations, `/api/v1/modules` = `{modules: 97, enabled: 74,
+ideas: 173}`; `arena`/`quiz` 401; `dh module show idea.ultimate-fanfiction-site` prints "planned —
+idea, relevance 5 (from docs/spec-amendments/ultimate-fanfiction-site.md)".

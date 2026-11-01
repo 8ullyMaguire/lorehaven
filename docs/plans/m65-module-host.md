@@ -224,7 +224,7 @@ rendered from the same payload. Not this milestone.
 ## What Phase 3 landed, and the two rules it cost
 
 `scripts/ideas_catalogue.py` reads eight sources and writes `crates/domain/src/modules/ideas.rs`
-(191 rows) plus `docs/ideas-catalogue.json`; `the_idea_catalogue_matches_its_json` is the drift
+(173 rows) plus `docs/ideas-catalogue.json`; `the_idea_catalogue_matches_its_json` is the drift
 gate. Relevance (§59.10) orders the queue and, for built surfaces, decides the default: six are
 opt-in by design and off (`arena`, `quiz`, `tasting`, `concierge`, `narration`, `vanguard`), so a
 fresh instance is 68 on / 29 off, and `[modules] enabled` turns one back on — the m65 test drives
@@ -237,6 +237,12 @@ of thing that only shows up when you look at the output instead of the count:
 
 - **A spec amendment or a design is one idea** — its title. Its headings are its sections.
 - **A brainstorm is a list**, so its `###` headings are the ideas and its `##` tiers are not.
+
+Three of the defects were only visible in the deployed JSON: two of the four named vault sources were
+session notes whose `###` headings are narration ("State at handoff", "Three decisions I made"), a
+requirements row re-slugged to `idea.dh-watch-saved-query-exec-cmd-notify-ntfy-de` hid that it is
+M63-12, and one-word audit cells ("cover", "pace") were counted as ideas. 191 rows became 173, and
+the committed queue now sits at the top where the score intended it.
 
 Concord's darkhold entry was checked: it is a forge seed (`slug`, `repo_url`) and contributes no
 ideas. Saying so is the honest result; inventing a feature from it would have added a row to a
