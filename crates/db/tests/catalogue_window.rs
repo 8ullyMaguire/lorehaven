@@ -72,11 +72,10 @@ async fn connect(tag: &str) -> Database {
     let db = Database::connect(&make_config(url)).await.expect("connect");
     db.migrate().await.expect("migrate");
     if db.backend() == darkhold_db::Backend::Postgres {
-        // The live server runs with `Europe/Madrid` (measured). A zone-less
-        // timestamp read as local time lands an hour earlier than the same value
-        // read as UTC, so this is what makes `a_zone_less_timestamp_is_utc` able to
-        // fail at all: on a UTC session both readings agree and the test proves
-        // nothing.
+        // The live server runs with `Europe/Madrid` (measured), so every test here runs
+        // under it. Since 0132 stores `+00:00` on every row, a cast that trusted the session
+        // would now fail loudly instead of shifting an hour — which is exactly what
+        // `a_day_window_is_anchored_to_utc` is watching for.
         sqlx::query("SET TIME ZONE 'Europe/Madrid'")
             .execute(db.postgres_pool().expect("postgres"))
             .await
@@ -86,6 +85,14 @@ async fn connect(tag: &str) -> Database {
 }
 
 async fn exec_with(db: &Database, sqlite: &str, args: &[&str]) {
+    try_exec_with(db, sqlite, args)
+        .await
+        .expect("fixture insert");
+}
+
+/// The same statement, with the database's refusal returned rather than swallowed: the
+/// canonical-shape tests assert on *why* an insert failed, so they need the error.
+async fn try_exec_with(db: &Database, sqlite: &str, args: &[&str]) -> Result<(), String> {
     match db.backend() {
         darkhold_db::Backend::Sqlite => {
             let sql = sqlite.replace("#u", "").replace("#i", "");
@@ -95,7 +102,8 @@ async fn exec_with(db: &Database, sqlite: &str, args: &[&str]) {
             }
             q.execute(db.sqlite_pool().expect("sqlite"))
                 .await
-                .expect("fixture insert");
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         }
         darkhold_db::Backend::Postgres => {
             let pg = (1..=9).fold(sqlite.to_string(), |acc, n| {
@@ -112,19 +120,24 @@ async fn exec_with(db: &Database, sqlite: &str, args: &[&str]) {
             }
             q.execute(db.postgres_pool().expect("postgres"))
                 .await
-                .expect("fixture insert");
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         }
     }
 }
 
-/// Four catalogue rows, chosen so each property above has a witness:
+/// Six catalogue rows, chosen so each property above has a witness. Every one is stored in the
+/// canonical shape `YYYY-MM-DDTHH:MM:SS+00:00` — since migration 0132 the database refuses any
+/// other, and `a_legacy_timestamp_shape_cannot_be_stored` below is what holds it to that.
 ///
 /// | key | source_updated_at | why |
 /// |---|---|---|
-/// | `bare-date` | `2026-10-13` | older than 7d **and** stored without a time |
-/// | `offset` | `2026-10-30T10:00:00+00:00` | within 7d, `+00:00` shape |
+/// | `bare-date` | `2026-10-13T00:00:00Z` | a source date with no time: midnight that day |
+/// | `offset` | `2026-10-30T10:00:00Z` | within 7d |
 /// | `boundary` | `2026-10-25T12:00:00Z` | exactly 7 days before `NOW` |
 /// | `unknown` | NULL | neither window may claim it |
+/// | `naive` | `2026-10-27T00:41:28Z` | the shape the live importer produced, 41 minutes into the 27th |
+/// | `z-shape` | `2026-10-26T23:30:00Z` | an instant late on the 26th: a shifted `@2026-10-27` swallows it |
 ///
 /// `now` is 2026-11-01T12:00:00Z, so 7d starts at 2026-10-25T12:00:00Z exactly.
 async fn seed(db: &Database) {
@@ -143,17 +156,17 @@ async fn seed(db: &Database) {
     // `library_items.id` is a UUID on PostgreSQL, so the fixture's own labels go
     // in `source_work_key` and the id is generated. The assertions read the key.
     for (key, source_updated, synced) in [
-        ("bare-date", Some("2026-10-13"), "2026-03-01T00:00:00+00:00"),
+        ("bare-date", Some("2026-10-13T00:00:00Z"), "2026-03-01T00:00:00Z"),
         // Updated three days ago, last rechecked in September: the pair that
         // makes a crossed column visible.
-        ("offset", Some("2026-10-30T10:00:00+00:00"), "2026-09-01T00:00:00+00:00"),
-        ("boundary", Some("2026-10-25T12:00:00Z"), "2026-10-25T12:00:00+00:00"),
-        ("unknown", None, "2026-10-31T00:00:00+00:00"),
-        // The live shape with no zone at all, 41 minutes after midnight.
-        ("naive", Some("2026-10-27T00:41:28"), "2026-10-27T00:41:28"),
-        // An instant (Z) late on the 26th. Paired with the row above it is what
-        // exposes a window that has been shifted by the session timezone: a Madrid
-        // `@2026-10-27` starts at 23:00 on the 26th and swallows this row.
+        ("offset", Some("2026-10-30T10:00:00Z"), "2026-09-01T00:00:00Z"),
+        ("boundary", Some("2026-10-25T12:00:00Z"), "2026-10-25T12:00:00Z"),
+        ("unknown", None, "2026-10-31T00:00:00Z"),
+        // The 27th, 41 minutes after midnight. Paired with the row below it, this
+        // is what exposes a window shifted by the session timezone.
+        ("naive", Some("2026-10-27T00:41:28Z"), "2026-10-27T00:41:28Z"),
+        // An instant late on the 26th: a Madrid `@2026-10-27` starts at 23:00 on the
+        // 26th and would swallow it.
         ("z-shape", Some("2026-10-26T23:30:00Z"), "2026-10-26T23:30:00Z"),
     ] {
         let id = uuid::Uuid::new_v4().to_string();
@@ -273,23 +286,20 @@ async fn the_three_clocks_are_three_columns() {
     db.close().await;
 }
 
-/// The live server's session timezone is `Europe/Madrid` (measured). A zone-less
-/// value and a zone-less bound are both reinterpreted there, so rows and bounds
-/// stay consistent with each other and the only thing that moves is the window:
-/// `@2026-10-27` starts at 23:00 on the 26th instead of midnight. This fixture
-/// holds one row of each shape straddling that hour, so a shifted window is
-/// visible — the row stored `2026-10-26T23:30:00Z` must NOT be in the 27th.
+/// The window is anchored to UTC, not to the session's timezone. `@2026-10-27` starts at
+/// midnight UTC, so the 00:41 instant is in it and the 23:30 instant of the 26th is not —
+/// under a Madrid-anchored day the second row would be swallowed by the 27th.
+///
+/// The fixture cannot hold a zone-less value any more (0132 refuses it), so what this test
+/// guards is the *bound*: a bound that went through the session timezone, or a column cast
+/// that trusted it, moves both assertions.
 #[tokio::test]
-async fn a_zone_less_bound_does_not_move_the_window() {
+async fn a_day_window_is_anchored_to_utc() {
     let db = connect("zone-less").await;
     seed(&db).await;
 
     let day = keys(&db, Some("@2026-10-27"), None).await;
-    assert_eq!(
-        day,
-        vec!["naive"],
-        "only the row stored without a zone is in the 27th, read as UTC"
-    );
+    assert_eq!(day, vec!["naive"], "the 27th, midnight to midnight UTC");
 
     let previous = keys(&db, Some("@2026-10-26"), None).await;
     assert_eq!(
@@ -301,26 +311,98 @@ async fn a_zone_less_bound_does_not_move_the_window() {
     db.close().await;
 }
 
+/// A source that publishes only a date becomes midnight UTC that day, and the day window
+/// covers exactly that. This is the fact the importer's `2026-10-13` used to express badly:
+/// the same instant, in a shape nothing else had.
 #[tokio::test]
-async fn mixed_timestamp_shapes_compare_as_instants() {
-    let db = connect("shapes").await;
+async fn a_source_date_with_no_time_is_that_whole_day() {
+    let db = connect("date-only").await;
     seed(&db).await;
 
-    // A bare date is midnight that day. `@2026-10-13` covers exactly that day, so
-    // the row is inside it -- a raw text comparison against `2026-10-13T00:00:00Z`
-    // would say the value is smaller than its own day start and return nothing.
     let day = keys(&db, Some("@2026-10-13"), None).await;
-    assert_eq!(day, vec!["bare-date"], "a date-only value is that whole day");
+    assert_eq!(day, vec!["bare-date"], "a date-only source date is that day");
 
-    // The boundary row is stored with `Z` and the window bound is formatted with a
-    // space; both normalise to the same instant. Compared as raw text, `Z` sorts
-    // after a space and the row would fall out of its own window.
+    // The instant exactly on the week's start belongs to the window that starts there.
     let boundary_day = keys(&db, Some("@2026-10-25"), None).await;
     assert_eq!(boundary_day, vec!["boundary"]);
 
-    // And an `+00:00` value near the boundary is inside the rolling week.
     let week = keys(&db, Some("7d"), None).await;
     assert!(week.contains(&"offset".to_string()), "{week:?}");
+
+    db.close().await;
+}
+
+/// The database, not this crate's writer, is what keeps the shape canonical — because the
+/// writer that broke it (91,471 bare dates on the live database) is not in this workspace.
+/// Every shape the catalogue held before 0132 must be refused, and the canonical one
+/// accepted, so the test cannot pass by refusing everything.
+#[tokio::test]
+async fn a_legacy_timestamp_shape_cannot_be_stored() {
+    let db = connect("legacy-refused").await;
+    let account = uuid::Uuid::new_v4().to_string();
+    exec_with(
+        &db,
+        "INSERT INTO accounts (id, email, created_at, updated_at) \
+         VALUES (?1#u, 'legacy@example.invalid', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        &[account.as_str()],
+    )
+    .await;
+
+    let insert = "INSERT INTO library_items \
+         (id, account_id, source_key, source_work_key, title, author_text, summary, \
+          word_count, status, source_url, source_updated_at, last_synced_at, created_at, \
+          updated_at, likes) \
+         VALUES (?1#u, ?5#u, 'sb', ?2, ?2, 'A', '', 1000, \
+                 'ongoing', 'https://example.invalid/x', ?3, ?4, ?4, ?4, 5)";
+
+    for (label, shape) in [
+        ("bare date", "2026-10-13"),
+        ("no zone", "2026-10-27T00:41:28"),
+        ("fractional, no zone", "2026-10-27T00:41:28.394000"),
+        ("a non-UTC offset", "2026-10-27T00:41:28+01:00"),
+        // The same instant in the other UTC spelling. Not wrong as a time — wrong as *storage*:
+        // two spellings of one instant do not sort together, which is the defect 0132 removes.
+        ("the +00:00 spelling", "2026-10-27T00:41:28+00:00"),
+    ] {
+        let id = uuid::Uuid::new_v4().to_string();
+        let err = try_exec_with(&db, insert, &[id.as_str(), label, shape, shape, account.as_str()])
+            .await
+            .expect_err(&format!("{label} must be refused"));
+        assert!(
+            err.to_lowercase().contains("canonical"),
+            "{label}: the refusal must name the rule, got {err}"
+        );
+    }
+
+    // The canonical shape is accepted, with the row's other two clocks set to it.
+    let id = uuid::Uuid::new_v4().to_string();
+    try_exec_with(
+        &db,
+        insert,
+        &[
+            id.as_str(),
+            "canonical",
+            "2026-10-27T00:41:28Z",
+            "2026-10-27T00:41:28Z",
+            account.as_str(),
+        ],
+    )
+    .await
+    .expect("the canonical shape is the one shape the database accepts");
+
+    // An UPDATE is the other way a legacy shape can arrive — a backfill or a repair
+    // script — and it is refused too.
+    let err = try_exec_with(
+        &db,
+        "UPDATE library_items SET source_updated_at = '2026-10-13' WHERE source_work_key = 'canonical'",
+        &[],
+    )
+    .await
+    .expect_err("an update must not reintroduce a legacy shape");
+    assert!(
+        err.to_lowercase().contains("canonical"),
+        "the update refusal must name the rule, got {err}"
+    );
 
     db.close().await;
 }

@@ -21,7 +21,7 @@ use serde_json::Value;
 use test_support::{id, scratch_dir, TestClient, TestDb};
 
 /// Fixed timestamps, so two rows written in one test compare equal.
-const NOW: &str = "2026-01-01 00:00:00";
+const NOW: &str = "2026-01-01T00:00:00Z";
 
 fn config_for(dir: &std::path::Path) -> Config {
     let mut config = Config::development_defaults();

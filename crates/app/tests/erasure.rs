@@ -24,7 +24,7 @@ use darkhold_db::{sql_owned, Backend, Database};
 use test_support::{scratch_dir, TestDb};
 
 /// Every fixture row shares one timestamp, so a NOT NULL surprise names one place to fix.
-const TS: &str = "2026-01-01 00:00:00";
+const TS: &str = "2026-01-01T00:00:00Z";
 
 /// `export_jobs` and `jobs` are `timestamptz` on PostgreSQL while the reading tables are
 /// `TEXT`, so their fixtures need an RFC3339 literal. SQLite stores both forms verbatim.

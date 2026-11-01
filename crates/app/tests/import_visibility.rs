@@ -217,7 +217,7 @@ impl Harness {
         let account = account_of(&self.db, handle).await;
         let pseud = pseud_of(&self.db, &account).await;
         let work = uuid::Uuid::new_v4().to_string();
-        let now = "2026-01-01 00:00:00";
+        let now = "2026-01-01T00:00:00Z";
         seed(
             &self.db,
             "INSERT INTO works (id, owner_pseud_id, title, lifecycle, visibility, created_at, \

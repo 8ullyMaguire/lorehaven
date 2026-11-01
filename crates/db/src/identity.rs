@@ -52,6 +52,13 @@ pub fn in_seconds(seconds: i64) -> String {
 /// second formatter would be a second thing that can disagree about the offset.
 #[must_use]
 pub fn format_rfc3339(at: OffsetDateTime) -> String {
+    // Second precision, deliberately. `OffsetDateTime::now_utc()` carries nanoseconds, so
+    // formatting it directly produced `2026-11-01T15:48:17.643518374Z` — a shape that (a) the
+    // catalogue's canonical form does not accept, and (b) does not sort correctly as text, since
+    // a fractional value with a different number of digits compares digit-by-digit
+    // (`.5` < `.12`). Every stored timestamp in this schema is second precision, so truncating
+    // here is what makes the value match the column it lands in.
+    let at = at.replace_nanosecond(0).unwrap_or(at);
     at.format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
 }

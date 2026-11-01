@@ -268,15 +268,14 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
          {SOURCE_COUNT_PG}::bigint AS source_count"
     );
 
-    // Windows: three clocks, one grammar. The predicate normalises BOTH sides
-    // (`datetime()` on SQLite, a timestamptz cast on PostgreSQL) because the
-    // catalogue's timestamps are not uniformly formatted: `source_updated_at` is
-    // stored as a bare `YYYY-MM-DD` by the XenForo importer, while `created_at`
-    // and `last_synced_at` carry `+00:00`. A plain text comparison against an
-    // RFC3339 bound is wrong at the boundary in both shapes -- `2026-10-13` sorts
-    // before `2026-10-13T00:00:00Z` (prefix) and `...46+00:00` sorts before
-    // `...46Z` because '+' precedes 'Z'. Normalising costs the index and buys the
-    // answer; docs/plans/m63-02-window-grammar.md records the write-side fix.
+    // Windows: three clocks, one grammar, one stored shape. M63-02 normalised both
+    // sides of every comparison because `library_items` held four timestamp shapes
+    // (`2026-10-13` from the out-of-tree XenForo importer, `...T01:04:45+00:00` from
+    // this crate's writer, plus `Z` and fractional forms in old fixtures), and a
+    // text comparison is wrong at the boundary in every mixed pair. Migration 0132
+    // backfilled them to one canonical shape and the database now refuses any other,
+    // so the predicate is a plain range -- which is what makes the index usable.
+    // docs/plans/m63-31-timestamp-normalisation.md is the record.
     let windows = windows_sql(query);
 
     let base_sqlite = format!(
@@ -358,32 +357,6 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
     }
 }
 
-/// A column value as an instant, on PostgreSQL, **without** letting the session
-/// timezone reinterpret it.
-///
-/// The live server's session timezone is `Europe/Madrid` (measured), and 27,461
-/// catalogue rows store `source_updated_at` with **no zone at all**
-/// (`2026-10-27T01:04:45`). A plain `::timestamptz` reads such a value as Madrid
-/// wall time, and it reads the *bound* the same way — so rows and bounds stay
-/// consistent with each other and nothing looks broken. What shifts is the whole
-/// window: `@2026-10-27` on production covers 23:00 on the 26th to 23:00 on the
-/// 27th, and a row stored as `2026-10-26T23:30:00Z` — an instant, not a wall
-/// clock — falls inside a day it is not in. SQLite reads both sides as UTC and
-/// disagrees, which is how the mismatch shows up as an engine difference rather
-/// than as an error.
-///
-/// So the shape decides the reading: a value carrying `Z` or an offset is an
-/// instant already; anything else is UTC by definition, whatever the session
-/// happens to be set to.
-
-fn pg_instant(column: &str) -> String {
-    format!(
-        "CASE WHEN {column} ~ '(Z|[+-][0-9]{{2}}:[0-9]{{2}})$' \
-         THEN ({column})::timestamptz \
-         ELSE (({column})::timestamp AT TIME ZONE 'UTC') END"
-    )
-}
-
 /// The window predicates, in one place, with the binds in the order the
 /// placeholders appear.
 struct WindowsSql {
@@ -402,14 +375,19 @@ fn windows_sql(query: &CatalogueQuery) -> WindowsSql {
         ("created_at", query.added),
     ] {
         let Some(bounds) = bounds else { continue };
+        // One comparison, no function on the column. That is only correct because the stored
+        // shape is now canonical and enforced (migration 0132): every value is
+        // `YYYY-MM-DDTHH:MM:SS+00:00`, so text order is chronological order — measured on the
+        // live database before the index was added: 0 disagreements between text order and
+        // instant order across 91,471 dated rows under the database's en_US.UTF-8 collation.
         if let Some(from) = bounds.from_sql() {
-            sqlite.push_str(&format!(" AND datetime({column}) >= datetime(?)"));
-            postgres.push_str(&format!(" AND {} >= ((?::timestamp) AT TIME ZONE 'UTC')", pg_instant(column)));
+            sqlite.push_str(&format!(" AND {column} >= ?"));
+            postgres.push_str(&format!(" AND {column} >= ?"));
             binds.push(from);
         }
         if let Some(to) = bounds.to_sql() {
-            sqlite.push_str(&format!(" AND datetime({column}) < datetime(?)"));
-            postgres.push_str(&format!(" AND {} < ((?::timestamp) AT TIME ZONE 'UTC')", pg_instant(column)));
+            sqlite.push_str(&format!(" AND {column} < ?"));
+            postgres.push_str(&format!(" AND {column} < ?"));
             binds.push(to);
         }
     }

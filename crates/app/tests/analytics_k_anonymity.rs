@@ -26,8 +26,8 @@ async fn seed_pseud(db: &Database, tag: &str) -> String {
             )
             .bind(&account)
             .bind(format!("{tag}@test.dev"))
-            .bind("2026-01-01 00:00:00")
-            .bind("2026-01-01 00:00:00")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
             .execute(db.sqlite_pool().expect("sqlite"))
             .await
             .unwrap();
@@ -39,8 +39,8 @@ async fn seed_pseud(db: &Database, tag: &str) -> String {
             .bind(&account)
             .bind(tag)
             .bind(tag)
-            .bind("2026-01-01 00:00:00")
-            .bind("2026-01-01 00:00:00")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
             .execute(db.sqlite_pool().expect("sqlite"))
             .await
             .unwrap();
@@ -83,8 +83,8 @@ async fn seed_work(db: &Database, tag: &str, owner_pseud: &str) -> String {
             .bind(&work)
             .bind(owner_pseud)
             .bind("A Work")
-            .bind("2026-01-01 00:00:00")
-            .bind("2026-01-01 00:00:00")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
             .execute(db.sqlite_pool().expect("sqlite"))
             .await
             .unwrap();
@@ -296,8 +296,8 @@ async fn seed_alt_pseud(db: &Database, account: &str, tag: &str) -> String {
             .bind(account)
             .bind(tag)
             .bind(tag)
-            .bind("2026-01-01 00:00:00")
-            .bind("2026-01-01 00:00:00")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
             .execute(db.sqlite_pool().expect("sqlite"))
             .await
             .unwrap();
@@ -343,8 +343,8 @@ async fn two_pseudonyms_on_one_account_count_as_two_readers() {
             )
             .bind(&cos_account)
             .bind("anon5-cos@test.dev")
-            .bind("2026-01-01 00:00:00")
-            .bind("2026-01-01 00:00:00")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
             .execute(tdb.db().sqlite_pool().expect("sqlite"))
             .await
             .unwrap();

@@ -99,7 +99,12 @@ async fn seed(tdb: &test_support::TestDb) {
         &[&account],
     )
     .await;
-    for (key, source_updated) in [("old-story", "2020-06-01"), ("new-story", "2026-10-30")] {
+    // Canonical shape, because migration 0132 makes the database refuse any other: the
+    // fixtures used to carry a bare date here, which is exactly what 0132 backfilled away.
+    for (key, source_updated) in [
+        ("old-story", "2020-06-01T00:00:00Z"),
+        ("new-story", "2026-10-30T00:00:00Z"),
+    ] {
         exec_with(
             tdb,
             "INSERT INTO library_items \
@@ -107,8 +112,8 @@ async fn seed(tdb: &test_support::TestDb) {
               word_count, status, source_url, source_updated_at, last_synced_at, created_at, \
               updated_at, likes) \
              VALUES (?1#u, ?2#u, 'sb', ?3, ?3, 'A', '', 1000, 'ongoing', \
-                     'https://example.invalid/x', ?4, '2026-10-30T00:00:00+00:00', \
-                     '2026-10-30T00:00:00+00:00', '2026-10-30T00:00:00+00:00', 5)",
+                     'https://example.invalid/x', ?4, '2026-10-30T00:00:00Z', \
+                     '2026-10-30T00:00:00Z', '2026-10-30T00:00:00Z', 5)",
             &[&uuid::Uuid::new_v4().to_string(), &account, key, source_updated],
         )
         .await;
@@ -145,8 +150,8 @@ async fn the_window_parameter_actually_filters() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(keys(&old).await, vec!["old-story"], "{old}");
 
-    // A single day selects the 2026 row alone, even though its timestamp carries
-    // a bare date and the bound is a date: the normalisation happens in SQL.
+    // A single day selects the 2026 row alone: a bound is a day window, and the stored
+    // instant at its midnight is inside it (half-open, so the next day's midnight is not).
     let (status, new) = h.get("/api/v1/catalogue?updated=@2026-10-30").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(keys(&new).await, vec!["new-story"], "{new}");

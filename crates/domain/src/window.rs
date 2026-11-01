@@ -78,24 +78,35 @@ impl Bounds {
         self.from.is_none_or(|from| at >= from) && self.to.is_none_or(|to| at < to)
     }
 
-    /// Lower bound as `YYYY-MM-DD HH:MM:SS` (UTC), the shape SQLite's `datetime()`
-    /// returns and accepts.
+    /// Lower bound in the canonical stored shape, `YYYY-MM-DDTHH:MM:SSZ`.
     #[must_use]
     pub fn from_sql(&self) -> Option<String> {
         self.from.as_ref().map(sql_shape)
     }
 
-    /// Upper bound as `YYYY-MM-DD HH:MM:SS` (UTC).
+    /// Upper bound as the canonical stored shape, `YYYY-MM-DDTHH:MM:SSZ`.
     #[must_use]
     pub fn to_sql(&self) -> Option<String> {
         self.to.as_ref().map(sql_shape)
     }
 }
 
+/// A bound in the shape the catalogue *stores*, so a window is a plain range comparison
+/// against the column and can use an index (migration 0132 made that shape the only one the
+/// database accepts).
+///
+/// `Z`, not `+00:00`: that is what `time`'s Rfc3339 formatter emits for UTC, so it is what
+/// every in-tree writer already produces — measured, not assumed (`OffsetDateTime` formatted
+/// with `Rfc3339` gives `2026-11-01T12:00:00Z`). Choosing `+00:00` here would have made the
+/// database refuse its own writer's output.
+///
+/// This used to be `YYYY-MM-DD HH:MM:SS` — a shape no row ever had. It was correct only
+/// because every comparison wrapped both sides in a normalising function (`datetime()` on
+/// SQLite, `AT TIME ZONE 'UTC'` on PostgreSQL), and that function is what cost the index.
 fn sql_shape(at: &OffsetDateTime) -> String {
     let utc = at.to_offset(UtcOffset::UTC);
     format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         utc.year(),
         utc.month() as u8,
         utc.day(),
@@ -444,12 +455,18 @@ mod tests {
     }
 
     #[test]
-    fn sql_shape_matches_what_sqlite_returns() {
+    fn sql_shape_is_the_shape_the_column_stores() {
+        // The bound has to be byte-comparable with a stored value, because the window is now a
+        // plain range on the column: one shape, explicit +00:00, second precision (0132).
         let w = parse("7d", NOW()).expect("7d");
-        assert_eq!(w.from_sql().as_deref(), Some("2026-10-25 12:00:00"));
+        assert_eq!(w.from_sql().as_deref(), Some("2026-10-25T12:00:00Z"));
         assert_eq!(w.to_sql(), None);
         // An instant with a non-UTC offset converts rather than truncates.
         let w = parse("@2026-10-31", at("2026-11-01T13:00:00+01:00")).expect("day");
-        assert_eq!(w.from_sql().as_deref(), Some("2026-10-31 00:00:00"));
+        assert_eq!(w.from_sql().as_deref(), Some("2026-10-31T00:00:00Z"));
+        // And it sorts like an instant against every other bound, which is the whole point:
+        // '2026-10-31T00:00:00Z' < '2026-10-31T05:00:00Z' as text and as time.
+        let bound = w.from_sql().expect("bound");
+        assert!(bound.as_str() < "2026-10-31T05:00:00Z");
     }
 }

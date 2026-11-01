@@ -50,7 +50,7 @@ async fn seeded_db(ratings: usize) -> (Database, std::path::PathBuf) {
     .unwrap();
     db.migrate().await.unwrap();
 
-    let now = "2026-01-01 00:00:00";
+    let now = "2026-01-01T00:00:00Z";
     let account = "11111111-1111-1111-1111-111111111111";
     let sqlx_pool = db.sqlite_pool().unwrap();
 
