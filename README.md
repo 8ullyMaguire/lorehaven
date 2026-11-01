@@ -175,6 +175,26 @@ with the test above it — so it could never pass, and the failure read as a
 product bug. Assert the specific thing you changed, using a stable per-row
 handle, and count rows before and after.
 
+## Where this lives
+
+| | |
+|---|---|
+| live | <https://darkhold.polarisocial.xyz> |
+| forge (self-hosted) | <https://git.polarisocial.xyz/hirrolot19/darkhold> |
+| mirror (GitHub) | <https://github.com/8ullyMaguire/darkhold> |
+
+Both forges carry `master` and every tag. They are mirrors of one history, not two lines: push to
+both, and check them against each other rather than trusting one.
+
+```
+git push origin master && git push github master && git push origin --tags && git push github --tags
+```
+
+The repository was called `lorehaven` until November 2026; both forges were renamed to `darkhold`,
+and the old deployed line is kept on each forge as the branch `archive/lorehaven-deployed`. Its
+topic lists differ by number — GitHub caps a repository at 20 topics and Forgejo at 25 — so the
+self-hosted repo carries five the GitHub mirror cannot. That is a platform limit, not drift.
+
 ## Licence
 
 AGPL-3.0-or-later.
