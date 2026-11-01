@@ -62,6 +62,19 @@ Traps that cost a day each, in this repo:
    deploy script's frontend step if the served bundle must match; check `assets/index-<hash>`.
 8. **The SPA answers 200 for every unknown path.** `/api/v1/…` is the contract; a 200 with HTML is
    the shell, not the route.
+9. **Percentiles are the only ranking that survives archive size, and they are zero-inflated here.**
+   1,247 of 141,317 rows carry an endorsement count and `views` is null on all of them, so "no
+   likes" means unmeasured: rank *among engaged rows* and print `ranked N of M`, never rank over
+   the whole catalogue (a 1-like fic scores p97+ and the metric stops discriminating).
+10. **A shrink toward the median cannot move a percentile.** It is a monotone transform: every row
+    moves by the same rule, so the order — and the percentile — is unchanged. What a small source
+    lacks is confidence, not count: shrink the *percentile* toward 0.5 by `n/(n+10)`. Measured
+    2026-11-01, this was the first version's bug, and only a test comparing a 4-row source against
+    a 400-row one caught it.
+11. **A statement built without `sql_owned` keeps `?` on PostgreSQL.** `sqlx` does not rewrite
+    MySQL-style placeholders for Postgres here; the server answers a syntax error that surfaces as
+    a 500 with a request id and no SQL. Every assembled statement goes through `sql_owned`, and an
+    `id` compared as text needs `id::text` on Postgres and bare `id` on SQLite.
 
 Take the work order's order. Do not re-rank by effort or by what is easiest to demo. If evidence
 contradicts the order, say which evidence and what it changes, then proceed.
