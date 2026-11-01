@@ -97,6 +97,8 @@ pub mod spoilers;
 pub mod standing;
 pub mod storage;
 pub mod story_identity;
+// M45-25 (§58): keystone authors, droughts, and the routing record.
+pub mod supply;
 pub mod subscriptions;
 pub mod tag_confirmation;
 pub mod taste_health;

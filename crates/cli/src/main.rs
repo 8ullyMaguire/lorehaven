@@ -13,6 +13,7 @@
 //! a client-side alias table is a second definition waiting to disagree.
 
 mod rec;
+mod supply;
 
 use clap::{Parser, Subcommand};
 
@@ -65,7 +66,16 @@ pub enum Command {
     ///   @2026-10-27               that whole day, UTC
     ///   2026-01-01..2026-10-15    between two days
     /// ```
-    Rec(rec::RecArgs),
+    Rec(Box<rec::RecArgs>),
+    /// §58 supply: keystone authors, droughts, and the routing you opt into.
+    ///
+    /// The operator doors (`keystones`, `droughts`, `recompute`) read a role the
+    /// server holds; the reader doors (`route`, `routing`, `complete`) are keyed
+    /// by your account. Every one of them needs a session.
+    Supply {
+        #[command(subcommand)]
+        action: Box<supply::SupplyArgs>,
+    },
 }
 
 #[tokio::main]
@@ -73,6 +83,13 @@ async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     match &cli.command {
         Command::Rec(args) => match rec::run(&cli, args).await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::ExitCode::from(error.code)
+            }
+        },
+        Command::Supply { action } => match supply::run(&cli, action).await {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");

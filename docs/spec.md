@@ -10729,6 +10729,97 @@ recommending it.
 57.6. **The only new state this section introduces is DNF**, which is a per-reader
 status in the same shape as the rating it sits beside.
 
+## 58 Supply: keystone authors, droughts, and the routing record
+
+M45-25. The platform's supply problem is not "too few works" — the catalogue holds 141,317
+rows — but "too little conversation around the works a few people already love". This
+section specifies the three pieces that make that visible and addressable: which authors
+carry the catalogue, which of their works have readership and no feedback, and how a reader
+who wants to give feedback is routed to one of them.
+
+**Supply never touches ranking.** Nothing here feeds `TagWeights`, a sort order, a percentile
+or a recommendation slot's score. It reports and it routes; §12's positivity rules govern
+what any of it may say in public, and §16.16's gravity is a different mechanism with a
+different dial.
+
+### 58.1 A keystone author is computed, never chosen
+
+An author is a **keystone** when both hold:
+
+- they have at least `min_works` engaged works (default 2), where "engaged" means the
+  catalogue row carries an endorsement count above zero; and
+- the mean **within-source percentile** of those works is at least `min_pct` (default 0.75).
+
+The percentile is §16's catalogue rule, not a new one: rank among the engaged rows *of the
+work's own source*, `pct_raw = (rank - 0.5) / n`, then shrink toward 0.5 by `n / (n + 10)`.
+A mean of these is comparable across sources; a mean of raw endorsement counts is not, and
+would make every keystone author a SpaceBattles author.
+
+An operator may **raise** a keystone and never lower one: the `admin_taste_profile` weights
+whose `dimension_key` is `author:<key>` are summed, clamped to at most 0.25, and added to the
+mean percentile. The floor is enforced twice, and deliberately: the table's own
+`CHECK (weight >= 0.0)` is what stops a stored weight from lowering a keystone, and the
+arithmetic floors at zero as well, so the invariant survives a schema change that relaxes
+the check. When that table is empty the term is `0.0` and is *reported* as
+`0.0` — an absent preference is not a silent default, because a reader of the output cannot
+tell the two apart otherwise.
+
+### 58.2 A drought is conversation debt, and an empty corpus refuses
+
+A work is **in drought** when it carries endorsement and no conversation. Conversation is a
+`comments` row on the work plus a `work_ratings` row for it.
+
+**When the corpus holds no conversation at all, the report is `measured: false`, carries the
+reason, and lists no authors.** It does not list every engaged work as "in drought": that is
+arithmetically true and operationally meaningless, and it is the same refusal shape
+`?sort=velocity` uses when a second snapshot does not exist yet. The first comment on a live
+instance is what turns this report on.
+
+There is no public per-work drought count and no author-facing verdict. §57.4's rule for DNF
+counts applies unchanged: a public drought number is a quality judgement on the author
+published by readers.
+
+### 58.3 Routing is opt-in, and the record is the row
+
+A reader asks for one work to read and comment on. The instance chooses: the keystone author
+with the highest score that still has a work this reader has not been routed before, then the
+least-routed of that author's works, then the most endorsed. Ties resolve by work id so two
+calls in a row agree.
+
+- **A routing is idempotent per (account, work).** The same reader is never routed the same
+  work twice, and a repeated request moves to the next work rather than duplicating.
+- **The row is never deleted.** Completion sets `completed_at`; an abandoned routing stays as
+  evidence that the reader was asked.
+- **Opt-in is per request, not per account.** Nothing is routed by the instance acting alone:
+  a reader who never asks is never on a list.
+
+### 58.4 Patronage pays through the existing ledger
+
+Completion grants `PATRONAGE_BP` (500 basis points, i.e. 5.00 credits) to the reader, through
+`economy::post_transaction` with type `Grant` and the idempotency key `supply-route:<id>`.
+
+- **No second ledger.** A supply-specific balance would be a second definition of what a
+  credit is, and §53 is the one place that is defined.
+- **Completing twice pays once**, and the second call reports the first transaction rather
+  than an error.
+- Patronage is a reward for giving feedback, **not** a purchase and not a bid: it buys no
+  placement, no priority and no visibility, and §12.6's separation of payment from reach
+  applies.
+
+### 58.5 Acceptance
+
+- A keystone list computed on a fixture with a 4-row source and a 400-row source ranks by the
+  shrunk within-source percentile, and the test asserts the small source cannot win on the
+  same raw percentile.
+- `min_works = 2` excludes the author with one work, and the test names the author it excluded.
+- An operator weight of `-0.4` on a keystone changes no score, and the test reads the bonus
+  field to prove it was clamped rather than dropped.
+- A corpus with zero comments and zero ratings reports `measured: false` with a reason and
+  no authors.
+- A reader asking twice receives two different works, and the second routing row names the
+  first as the reason it moved on.
+- Completing a routing twice leaves one `credit_entries` row for it.
+
 ## Guest access, trust levels and self-governance (adopted 2026-10-16)
 
 The owner's 2026-10-16 request is specified per site in `docs/ROADMAP-guest-trust-governance.md`, against the estate standard

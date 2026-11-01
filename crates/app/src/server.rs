@@ -525,6 +525,14 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Search,
             &state,
         ))
+        // §58's supply surface (M45-25): keystone authors, droughts, and the
+        // routing a reader opts into. Write class — every door needs a session,
+        // and routing creates a row the patronage pays against.
+        .merge(classified(
+            routes::supply::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The recommendation engines over a filtered catalogue (M63-01). The
         // search class rather than the default one: it ranks a pool of up to 500
         // rows with every enabled strategy, which is the heaviest read in the

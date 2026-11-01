@@ -767,6 +767,11 @@
       "why": "A precise browser/OS fingerprint is directly identifying and has no research value here.",
       "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
     },
+    "supply_routing.account_id": {
+      "treatment": "drop_table",
+      "why": "\u00a758.3's routing record: which reader was offered which work to comment on, and whether they did. drop_table, not drop_column, because the account column is the only identifying column and the rest is meaningless without it -- the row exists to hold one reader's behaviour. No research value: the interesting fact (a keystone author's works are under-discussed) is derivable from `supply_keystones` plus `comments` without publishing anybody's opt-in. Kept in the database for the patronage audit and the erasure cascade (M45-51), which are operator-side and never published.",
+      "reviewed_by": "agent, 2026-11-01, against spec 11.16 and \u00a758.3; awaiting the operator's review of the \u00a758 columns"
+    },
     "shelves.account_id": {
       "treatment": "rekey_account",
       "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",

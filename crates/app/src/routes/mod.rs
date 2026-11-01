@@ -74,6 +74,8 @@ pub mod settings;
 pub mod source_adapters;
 pub mod spoilers;
 pub mod subscriptions;
+// M45-25 (§58): keystone authors, droughts, and the routing record.
+pub mod supply;
 pub mod tasting;
 pub mod taxonomy;
 pub mod taxonomy_export;

@@ -121,7 +121,7 @@ fn validate_sort(raw: &str) -> Result<(), Failure> {
     }
 }
 
-fn environment(message: impl Into<String>) -> Failure {
+pub(crate) fn environment(message: impl Into<String>) -> Failure {
     Failure {
         message: message.into(),
         code: 1,
@@ -625,8 +625,10 @@ mod tests {
 
     fn args(argv: &[&str]) -> (Cli, RecArgs) {
         let cli = Cli::try_parse_from(argv).expect("parses");
-        let crate::Command::Rec(rec) = cli.command.clone();
-        (cli, rec)
+        let crate::Command::Rec(rec) = cli.command.clone() else {
+            panic!("'rec' is the subcommand this test builds")
+        };
+        (cli, *rec)
     }
 
     #[test]
