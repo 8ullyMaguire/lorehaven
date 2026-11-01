@@ -72,6 +72,37 @@ pub enum Toggle {
     PerUser,
 }
 
+impl Module {
+    /// Whether a reader may hold an override for this row, and why not if they cannot.
+    ///
+    /// The rule is stated once, here, because three callers need it — the route, the
+    /// store's test, and the gate — and a rule copied three times is a rule that
+    /// drifts. A `planned` row fails first: it has no routes, so a preference about
+    /// it would be an opinion about nothing.
+    pub fn may_user_toggle(&self) -> Result<(), crate::AppError> {
+        if self.is_planned() {
+            return Err(crate::AppError::Validation {
+                message: format!(
+                    "`{}` is planned ({}) and has no routes: there is nothing to switch off",
+                    self.id, self.milestone
+                ),
+                field_errors: std::collections::BTreeMap::new(),
+            });
+        }
+        match self.toggle {
+            Toggle::PerUser => Ok(()),
+            Toggle::Operator => Err(crate::AppError::ModuleNotUserToggleable {
+                module: self.id,
+                toggle: "operator",
+            }),
+            Toggle::Fixed => Err(crate::AppError::ModuleNotUserToggleable {
+                module: self.id,
+                toggle: "instance",
+            }),
+        }
+    }
+}
+
 impl Toggle {
     /// Whether a reader may hold an override for this row.
     #[must_use]
@@ -523,6 +554,35 @@ mod tests {
         let err = v(&[], &[idea.id]).expect_err("an idea cannot be enabled");
         assert!(err.contains(idea.id), "{err}");
         assert!(err.contains("planned"), "{err}");
+    }
+
+    /// §59.3: the reader's switch exists on `per_user` rows and nowhere else.
+    #[test]
+    fn only_a_per_user_row_is_the_readers_to_change() {
+        let quiz = find("quiz").expect("quiz is registered");
+        assert!(quiz.toggle.is_per_user());
+        assert!(quiz.may_user_toggle().is_ok());
+
+        // An operator surface: allowed for the instance, not for a reader.
+        let catalogue = find("catalogue").expect("catalogue is registered");
+        let error = catalogue.may_user_toggle().expect_err("not a reader's switch");
+        assert_eq!(error.status_code(), 403, "a refusal, not a 404: {error}");
+        assert!(error.to_string().contains("operator"), "{error}");
+
+        // A safety surface: not anybody's switch (§59.4).
+        let erasure = find("erasure").expect("erasure is registered");
+        let error = erasure.may_user_toggle().expect_err("fixed");
+        assert!(error.to_string().contains("instance"), "{error}");
+    }
+
+    /// A planned row has no routes, so a preference about it is an opinion about
+    /// nothing — refused as `422` (the request) rather than `403` (the permission).
+    #[test]
+    fn a_planned_row_cannot_be_toggled_by_anyone() {
+        let idea = ideas().first().expect("the catalogue is not empty");
+        let error = idea.may_user_toggle().expect_err("planned");
+        assert_eq!(error.status_code(), 422);
+        assert!(error.to_string().contains(idea.milestone), "{error}");
     }
 
     #[test]

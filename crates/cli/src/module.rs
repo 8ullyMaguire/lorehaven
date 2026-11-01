@@ -49,6 +49,20 @@ pub enum ModuleAction {
         #[arg(long)]
         committed: bool,
     },
+    /// Switch a `per_user` surface off for your own account (§59.6).
+    ///
+    /// The instance's decision is unchanged; only your row is written, and only
+    /// you stop seeing it. Needs a session: set DARKHOLD_TOKEN.
+    Off {
+        /// The module id, as `dh module list` prints it.
+        id: String,
+    },
+    /// Switch it back on for your own account: your row is deleted and the
+    /// instance's decision applies again.
+    On {
+        /// The module id.
+        id: String,
+    },
     /// Validate a configuration file's `[modules]` table without starting a server.
     ///
     /// This is the check `darkhold serve` runs at startup: an unknown id, a
@@ -79,6 +93,8 @@ pub async fn run(cli: &Cli, args: ModuleArgs) -> Result<(), Failure> {
         } => list(cli, enabled, disabled, planned).await,
         ModuleAction::Show { id } => show(cli, &id).await,
         ModuleAction::Ideas { min, committed } => ideas(cli, min, committed).await,
+        ModuleAction::Off { id } => override_one(cli, &id, false).await,
+        ModuleAction::On { id } => override_one(cli, &id, true).await,
         ModuleAction::Check { config } => check(&config),
     }
 }
@@ -378,6 +394,71 @@ async fn ideas(cli: &Cli, min: u8, committed: bool) -> Result<(), Failure> {
             idea.name
         );
     }
+    Ok(())
+}
+
+/// `dh module off|on <id>` — the reader's own row.
+///
+/// Sent as a `PATCH` to the same door a browser uses, with the session as a bearer
+/// token: there is no second write path, so a bug in the CLI cannot produce a state
+/// the web cannot.
+async fn override_one(cli: &Cli, id: &str, enabled: bool) -> Result<(), Failure> {
+    let token = cli
+        .token
+        .as_deref()
+        .ok_or_else(|| bad_request("changing a surface is per-account: set DARKHOLD_TOKEN"))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| environment(format!("http client: {error}")))?;
+    let url = format!("{}/api/v1/modules/{id}", cli.base_url);
+    let response = client
+        .patch(&url)
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "enabled": enabled }))
+        .send()
+        .await
+        .map_err(|error| match error.is_connect() {
+            true => environment(format!(
+                "nothing listening at {} — is the server running? (--base-url)",
+                cli.base_url
+            )),
+            false => environment(format!("request failed: {error}")),
+        })?;
+    let status = response.status().as_u16();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| environment(format!("reading the response: {error}")))?;
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    if !(200..300).contains(&status) {
+        // The server's refusal is the useful text: it names the toggle that decides,
+        // or the milestone that owns the row. Quoting a status instead would hide it.
+        let message = body["error"]["message"]
+            .as_str()
+            .map_or_else(|| format!("HTTP {status}"), |text| text.to_owned());
+        return Err(bad_request(message));
+    }
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string())
+        );
+        return Ok(());
+    }
+    let caller = body["enabled_for_caller"].as_bool().unwrap_or(false);
+    let instance = body["instance_enabled"].as_bool().unwrap_or(false);
+    println!(
+        "{id}: {} for you{}",
+        if caller { "on" } else { "off" },
+        if !instance {
+            " — the instance has it off, so nobody reaches it"
+        } else if caller {
+            ""
+        } else {
+            " — your row is written; the instance is unchanged"
+        }
+    );
     Ok(())
 }
 

@@ -1089,12 +1089,12 @@
     },
     "tasting_responses.session_id": {
       "treatment": "keep_gated",
-      "why": "Not a foreign key and not an identity: an opaque per-calibration-session label this instance minted, so it identifies nobody outside the snapshot and no row can be joined to an account through it. §49.5 bounds a session's sample count, which is the only thing it is used for, and dropping it would make the per-session bound unverifiable from a snapshot. keep_gated rather than keep: a session id is low-risk on its own but is a join key, so it is exported only with the de-identified dataset and not with the smaller ones.",
+      "why": "Not a foreign key and not an identity: an opaque per-calibration-session label this instance minted, so it identifies nobody outside the snapshot and no row can be joined to an account through it. \u00a749.5 bounds a session's sample count, which is the only thing it is used for, and dropping it would make the per-session bound unverifiable from a snapshot. keep_gated rather than keep: a session id is low-risk on its own but is a join key, so it is exported only with the de-identified dataset and not with the smaller ones.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "work_tags.confirmation": {
       "treatment": "keep",
-      "why": "An enum the author or a reader applied to a tag, with no identity in it: 'unconfirmed', 'reader', 'wrangler' or 'inaccurate'. It records WHO confirmed in the coarse sense of which class of actor, and never WHICH one -- flagged_by holds the identity, and that is the column that needs re-keying, not this. Keeping it is what makes §49.2 auditable in a snapshot: without it, a de-identified dataset cannot distinguish a counted tag from an uncounted one and the gravity contribution cannot be reproduced.",
+      "why": "An enum the author or a reader applied to a tag, with no identity in it: 'unconfirmed', 'reader', 'wrangler' or 'inaccurate'. It records WHO confirmed in the coarse sense of which class of actor, and never WHICH one -- flagged_by holds the identity, and that is the column that needs re-keying, not this. Keeping it is what makes \u00a749.2 auditable in a snapshot: without it, a de-identified dataset cannot distinguish a counted tag from an uncounted one and the gravity contribution cannot be reproduced.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.2)"
     },
     "work_tags.flagged_by": {
@@ -1104,32 +1104,32 @@
     },
     "work_tags.flagged_at": {
       "treatment": "offset_timestamps",
-      "why": "When a tag was flagged. Timestamps are offset on the instance-wide shift so relative order survives and the absolute instant does not, matching every other created_at/updated_at in the policy. §49.2's value is in the ordering -- an inaccurate flag's effect has to be visible as preceding later re-confirmations -- which an offset preserves.",
+      "why": "When a tag was flagged. Timestamps are offset on the instance-wide shift so relative order survives and the absolute instant does not, matching every other created_at/updated_at in the policy. \u00a749.2's value is in the ordering -- an inaccurate flag's effect has to be visible as preceding later re-confirmations -- which an offset preserves.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.2)"
     },
     "tasting_samples.sample_offset": {
       "treatment": "keep",
-      "why": "A character offset into the work's text, so the 300-word window §49.5 shows can be reproduced. It is a position in a public document, not a fact about a person, and the offset is what stops the sample from being unreproducible. Dropping it would make every sampling decision in the published dataset unverifiable.",
+      "why": "A character offset into the work's text, so the 300-word window \u00a749.5 shows can be reproduced. It is a position in a public document, not a fact about a person, and the offset is what stops the sample from being unreproducible. Dropping it would make every sampling decision in the published dataset unverifiable.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.uncertainty_at_draw": {
       "treatment": "keep",
-      "why": "The confidence the active-learning selector had in its own pick, recorded at draw time so §49.5's 'picked by uncertainty' is a checkable claim rather than an assertion. No identity in it, and it is exactly the number an offline evaluation of the selector needs.",
+      "why": "The confidence the active-learning selector had in its own pick, recorded at draw time so \u00a749.5's 'picked by uncertainty' is a checkable claim rather than an assertion. No identity in it, and it is exactly the number an offline evaluation of the selector needs.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.verdict": {
       "treatment": "keep",
-      "why": "'like' or 'dislike'. The signal itself; §49.5 requires it non-null.",
+      "why": "'like' or 'dislike'. The signal itself; \u00a749.5 requires it non-null.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.reason": {
       "treatment": "keep",
-      "why": "The required reason tag. §49.5 makes the reason the labelled signal, so a snapshot without it cannot train or audit anything.",
+      "why": "The required reason tag. \u00a749.5 makes the reason the labelled signal, so a snapshot without it cannot train or audit anything.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.free_text": {
       "treatment": "drop_column",
-      "why": "The reader's own free-text 'not for me: ___'. Free text is the one column in this migration where a person may have written anything at all, including their own name or someone else's, and it is the only one no reviewer can screen in advance. §49.5 keeps the reason TAGS as the signal precisely because free text is not reviewable, so dropping this loses nothing the mechanism relies on. The enumerated reason survives; the sentence a reader typed does not.",
+      "why": "The reader's own free-text 'not for me: ___'. Free text is the one column in this migration where a person may have written anything at all, including their own name or someone else's, and it is the only one no reviewer can screen in advance. \u00a749.5 keeps the reason TAGS as the signal precisely because free text is not reviewable, so dropping this loses nothing the mechanism relies on. The enumerated reason survives; the sentence a reader typed does not.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_samples.id": {
@@ -1179,7 +1179,7 @@
     },
     "works.generated_content_posture": {
       "treatment": "keep",
-      "why": "Three-valued instance policy, no personal data. 'forbid' | 'disclose' | 'allow' describes how the INSTANCE handles generated content, and the value is a property of the work's publication, not of anybody who wrote it -- which is why it can be kept even though works.title beside it is gated. Keeping it is also what makes a snapshot auditable: a reviewer reading a dataset has to be able to see which works were disclosed, because that changes how a downstream use of the text should be interpreted. Replacing or dropping it would leave a disclosed work indistinguishable from an allowed one, which is the specific thing §51.1's 'allow accepts and does not label' creates.",
+      "why": "Three-valued instance policy, no personal data. 'forbid' | 'disclose' | 'allow' describes how the INSTANCE handles generated content, and the value is a property of the work's publication, not of anybody who wrote it -- which is why it can be kept even though works.title beside it is gated. Keeping it is also what makes a snapshot auditable: a reviewer reading a dataset has to be able to see which works were disclosed, because that changes how a downstream use of the text should be interpreted. Replacing or dropping it would leave a disclosed work indistinguishable from an allowed one, which is the specific thing \u00a751.1's 'allow accepts and does not label' creates.",
       "reviewed_by": "alvaro, 2026-10-02, against spec 11.16 and 51.1"
     },
     "works.generated_declared_at": {
@@ -1199,12 +1199,12 @@
     },
     "concierge_sessions.mood": {
       "treatment": "keep",
-      "why": "A §15.8 mood key the reader typed. It is an expression of preference, which is behavioural data about a person -- so this is kept deliberately and is exactly why account_id must be re-keyed rather than dropped: a free-text preference with no owner is harmless, and one attached to a stable id is not. Not replaced: a constant would make every row's mood identical and destroy the column's only value.",
+      "why": "A \u00a715.8 mood key the reader typed. It is an expression of preference, which is behavioural data about a person -- so this is kept deliberately and is exactly why account_id must be re-keyed rather than dropped: a free-text preference with no owner is harmless, and one attached to a stable id is not. Not replaced: a constant would make every row's mood identical and destroy the column's only value.",
       "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
     },
     "concierge_sessions.budget_minutes": {
       "treatment": "keep",
-      "why": "Minutes the reader stated they had. Operational metadata, no identity. It is a small integer and so quasi-identifying on its own (a budget of 5 minutes is rare), which is an argument for keeping the ACCOUNT re-keyed rather than for changing this column -- the re-key already removes the join to a person, and perturbing the value would destroy the budget/cut relationship §54.4 exists to expose.",
+      "why": "Minutes the reader stated they had. Operational metadata, no identity. It is a small integer and so quasi-identifying on its own (a budget of 5 minutes is rare), which is an argument for keeping the ACCOUNT re-keyed rather than for changing this column -- the re-key already removes the join to a person, and perturbing the value would destroy the budget/cut relationship \u00a754.4 exists to expose.",
       "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
     },
     "concierge_sessions.work_ids": {
@@ -1219,7 +1219,7 @@
     },
     "concierge_sessions.truncated_at": {
       "treatment": "keep",
-      "why": "An integer index or NULL. No identity. Kept because NULL-vs-0 is a distinction the schema exists to hold ('nothing was cut' is not 'cut at index 0'), and collapsing either to a default would make the table assert something false about §54.4's behaviour.",
+      "why": "An integer index or NULL. No identity. Kept because NULL-vs-0 is a distinction the schema exists to hold ('nothing was cut' is not 'cut at index 0'), and collapsing either to a default would make the table assert something false about \u00a754.4's behaviour.",
       "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
     },
     "concierge_sessions.rate_source": {
@@ -1234,7 +1234,7 @@
     },
     "wip_watches.id": {
       "treatment": "keep",
-      "why": "The watch's own surrogate key. Names no person and is referenced by nothing outside this table. `keep` because `mark_watched` addresses a watch by id and a snapshot that dropped it could not answer whether a notification had already been sent -- the one fact §54.5's UNIQUE exists to guarantee.",
+      "why": "The watch's own surrogate key. Names no person and is referenced by nothing outside this table. `keep` because `mark_watched` addresses a watch by id and a snapshot that dropped it could not answer whether a notification had already been sent -- the one fact \u00a754.5's UNIQUE exists to guarantee.",
       "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
     },
     "wip_watches.account_id": {
@@ -1249,7 +1249,7 @@
     },
     "wip_watches.notified_at": {
       "treatment": "offset_timestamps",
-      "why": "The moment the notification was written, or NULL while pending. Shifted per snapshot as an event time. NULL must be preserved rather than defaulted: 'nobody has been told yet' and 'told at some invented time' are different facts about §54.5, and only the first is true of this column.",
+      "why": "The moment the notification was written, or NULL while pending. Shifted per snapshot as an event time. NULL must be preserved rather than defaulted: 'nobody has been told yet' and 'told at some invented time' are different facts about \u00a754.5, and only the first is true of this column.",
       "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
     },
     "wip_watches.created_at": {
@@ -1311,6 +1311,26 @@
       "treatment": "drop_column",
       "why": "The work's DERIVED activity -- how long ago it was published. **Never a penalty** (spec 6.2): it is not a score, not a demotion, and not a reason to show a work less. The snapshot publishes works and their signals; a recency bucket of the publication date is already derivable from `published_at`, and a stored classification of it would be a second copy of a fact the snapshot can compute. Dropped rather than kept: the value is a derived label with no research value beyond the timestamp it is derived from.",
       "reviewed_by": "alvaro, 2026-10-20, against spec 11.16 and the Darkhold content model (M4-01)"
+    },
+    "module_user_state.account_id": {
+      "treatment": "rekey_account",
+      "why": "\u00a759.6/\u00a751: a module preference is not content, so the row survives erasure and its account is rekeyed with the account rather than dropped. Dropping it would silently re-enable a surface the reader had switched off, which is a preference restored against their stated wish.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16.3b and 59.6"
+    },
+    "module_user_state.module_id": {
+      "treatment": "keep",
+      "why": "A module id is a public noun from the registry (\u00a759.7); it names no person.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "module_user_state.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: an event time, so a per-snapshot offset preserves every interval while denying cross-snapshot row alignment.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16.5"
+    },
+    "module_user_state.enabled": {
+      "treatment": "keep",
+      "why": "A boolean state, no personal data beyond what the module choice already carries.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
     }
   }
 }

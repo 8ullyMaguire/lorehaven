@@ -62,6 +62,7 @@ pub mod marketplace;
 pub mod media;
 pub mod media_resilience;
 pub mod migrate;
+pub mod module_state;
 pub mod moderation;
 pub mod monetization;
 pub mod narration;

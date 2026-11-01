@@ -82,6 +82,8 @@ pub enum ErrorCode {
     TrustLevelInsufficient,
     /// A module of the instance is not available.
     ModuleUnavailable,
+    /// The surface exists, but its switch is not the reader's to throw (§59.3).
+    ModuleNotUserToggleable,
     /// Our fault. Details are logged, never returned.
     Internal,
     /// The instance lacks the program this operation needs.
@@ -110,6 +112,7 @@ impl ErrorCode {
             Self::ExtensionPermissionDenied => "EXTENSION_PERMISSION_DENIED",
             Self::TrustLevelInsufficient => "TRUST_LEVEL_INSUFFICIENT",
             Self::ModuleUnavailable => "MODULE_UNAVAILABLE",
+            Self::ModuleNotUserToggleable => "MODULE_NOT_USER_TOGGLEABLE",
             Self::ConverterUnavailable => "CONVERTER_UNAVAILABLE",
             Self::Internal => "INTERNAL",
             Self::NotImplemented => "NOT_IMPLEMENTED",
@@ -276,6 +279,20 @@ pub enum AppError {
         module: &'static str,
     },
 
+    /// A reader tried to change a surface whose switch belongs to somebody else.
+    ///
+    /// **403, not 404.** The surface is here and the reader can use it — what they
+    /// cannot do is hold an opinion about it. Answering 404 would say the feature
+    /// does not exist, sending them looking for a settings page that will never
+    /// appear; `toggle` names who does decide, which is the only useful answer.
+    #[error("the switch for `{module}` belongs to the {toggle}, not to a reader")]
+    ModuleNotUserToggleable {
+        /// The module whose switch was refused.
+        module: &'static str,
+        /// Who decides it: "operator" or "instance".
+        toggle: &'static str,
+    },
+
     /// An unexpected fault. The inner error is logged, never returned.
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
@@ -328,6 +345,7 @@ impl AppError {
             Self::AccessDenied | Self::MissingScope { .. } => ErrorCode::AccessDenied,
             Self::NotFound { .. } => ErrorCode::NotFound,
             Self::ModuleUnavailable { .. } => ErrorCode::ModuleUnavailable,
+            Self::ModuleNotUserToggleable { .. } => ErrorCode::ModuleNotUserToggleable,
             Self::Validation { .. } => ErrorCode::ValidationFailed,
             Self::RevisionConflict { .. } => ErrorCode::RevisionConflict,
             Self::RateLimited { .. } => ErrorCode::RateLimited,
@@ -359,6 +377,7 @@ impl AppError {
             | Self::ExtensionPermissionDenied { .. }
             | Self::TrustLevelInsufficient { .. } => 403,
             Self::NotFound { .. } | Self::ModuleUnavailable { .. } => 404,
+            Self::ModuleNotUserToggleable { .. } => 403,
             Self::Validation { .. } | Self::SourceUnsupported { .. } => 422,
             // The request is well formed and the instance cannot serve it: the
             // program that would is absent. 422 rather than 503 — nothing is

@@ -11005,6 +11005,38 @@ narration ("State at handoff", "Three decisions I made"), a requirements row kee
 audit's table has one-word cells that are attributes of a row, not items. Each of those rules was
 paid for by reading a deployed payload that was 18 rows longer than it should have been.
 
+### 59.12 The account layer narrows, and cannot do anything else
+
+`module_user_state (account_id, module_id, enabled, updated_at)`, one row per account per module the
+reader has **actually changed**. No row means inherit. `PATCH /api/v1/modules/{id}` is the only
+write, and it can only narrow:
+
+| request | effect |
+|---|---|
+| `{"enabled": false}` | writes a row; this reader no longer reaches the surface |
+| `{"enabled": true}` | **deletes** the row; the instance's decision applies again — which may still be off |
+
+Four rules the code enforces, each because the obvious alternative is a lie:
+
+1. **Only a `per_user` row is the reader's to change.** An `operator` or `fixed` row answers
+   `403 MODULE_NOT_USER_TOGGLEABLE` naming who decides (`operator`, `instance`). A `404` would say
+   the surface does not exist, which sends the reader hunting for a settings page that will never
+   appear.
+2. **A planned row answers `422`**, because the request is well formed and the row has no routes —
+   the objection is about work that does not exist yet, not about permission.
+3. **The gate decides on the toggle, not on the row.** A row that exists for an `operator` surface —
+   written by a migration, an older build or a mistaken administrator — silences nothing, and the
+   catalogue does not report the surface as gone for that caller. `enabled_for_caller` uses the same
+   test the gate uses, because two copies of one rule is how a page and a route come to disagree.
+4. **A failed read fails open.** If the per-user lookup errors, the request continues and the failure
+   is logged: a transient database error must not turn a surface into a `404` that reads as "this
+   feature was removed".
+
+The cost is one indexed primary-key read per request to a `per_user` surface, and only when the
+request carries a session. The cache that would skip it — an instance-wide "does anyone hold an
+override" flag — is deliberately not built (M65-09): it saves a row read and adds an invalidation
+problem at startup, on write, and across processes.
+
 ### 59.11 The instance layer can re-enable an opt-in surface
 
 `[modules] enabled = ["quiz", "arena"]` turns an opt-in-by-default surface back on for one instance,

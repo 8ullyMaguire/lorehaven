@@ -665,17 +665,51 @@ fn module_mount<S>(state: &AppState, id: &'static str, router: Router<S>, class:
 where
     S: Clone + Send + Sync + 'static,
 {
-    // Snapshot the decision at mount: one process serves one instance, and a
-    // config change is a restart. A per-request lookup would be the same answer
-    // with an atomic load in front of it.
+    // Snapshot the *instance* decision at mount: one process serves one instance, and
+    // a config change is a restart.
     let on = state.modules().enabled(id);
+    // The account layer is the one thing that cannot be snapshotted — a reader
+    // switches a surface off while the process runs (M65-04). Only a `per_user` row
+    // is theirs to change, and only with a session, so every other mount answers
+    // without touching the database.
+    let per_user = darkhold_domain::modules::find(id)
+        .is_some_and(|row| row.toggle.is_per_user() && !row.is_planned());
+    let gate_state = state.clone();
     let gated = router.layer(middleware::from_fn(
-        move |request: Request, next: Next| async move {
-            if on {
+        move |request: Request, next: Next| {
+            let state = gate_state.clone();
+            async move {
+                if !on {
+                    return crate::http::ApiError(darkhold_domain::AppError::ModuleUnavailable {
+                        module: id,
+                    })
+                    .into_response();
+                }
+                if per_user {
+                    if let Some(user) = request.extensions().get::<auth::SessionUser>() {
+                        let account = user.account_id.to_string();
+                        match darkhold_db::module_state::is_off(state.db(), &account, id).await {
+                            Ok(true) => {
+                                return crate::http::ApiError(
+                                    darkhold_domain::AppError::ModuleUnavailable { module: id },
+                                )
+                                .into_response();
+                            }
+                            // A failed read fails OPEN. The surface is on and one
+                            // preference could not be read; turning a transient
+                            // database error into a 404 on a whole surface reads to
+                            // the reader as "the feature was removed".
+                            Ok(false) => {}
+                            Err(error) => {
+                                tracing::warn!(
+                                    module = id,
+                                    "could not read the per-user module state: {error}"
+                                );
+                            }
+                        }
+                    }
+                }
                 next.run(request).await
-            } else {
-                crate::http::ApiError(darkhold_domain::AppError::ModuleUnavailable { module: id })
-                    .into_response()
             }
         },
     ));
