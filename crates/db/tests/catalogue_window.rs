@@ -32,7 +32,9 @@ use time::OffsetDateTime;
 fn make_config(url: String) -> darkhold_db::DatabaseConfig {
     darkhold_db::DatabaseConfig {
         url,
-        max_connections: 5,
+        // One connection: the PostgreSQL arm sets the session timezone below, and a
+        // `SET` only affects the connection it ran on.
+        max_connections: 1,
         acquire_timeout: Duration::from_secs(5),
         slow_query_warn: Duration::ZERO,
     }
@@ -69,6 +71,17 @@ async fn connect(tag: &str) -> Database {
     };
     let db = Database::connect(&make_config(url)).await.expect("connect");
     db.migrate().await.expect("migrate");
+    if db.backend() == darkhold_db::Backend::Postgres {
+        // The live server runs with `Europe/Madrid` (measured). A zone-less
+        // timestamp read as local time lands an hour earlier than the same value
+        // read as UTC, so this is what makes `a_zone_less_timestamp_is_utc` able to
+        // fail at all: on a UTC session both readings agree and the test proves
+        // nothing.
+        sqlx::query("SET TIME ZONE 'Europe/Madrid'")
+            .execute(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("set session timezone");
+    }
     db
 }
 
@@ -136,6 +149,12 @@ async fn seed(db: &Database) {
         ("offset", Some("2026-10-30T10:00:00+00:00"), "2026-09-01T00:00:00+00:00"),
         ("boundary", Some("2026-10-25T12:00:00Z"), "2026-10-25T12:00:00+00:00"),
         ("unknown", None, "2026-10-31T00:00:00+00:00"),
+        // The live shape with no zone at all, 41 minutes after midnight.
+        ("naive", Some("2026-10-27T00:41:28"), "2026-10-27T00:41:28"),
+        // An instant (Z) late on the 26th. Paired with the row above it is what
+        // exposes a window that has been shifted by the session timezone: a Madrid
+        // `@2026-10-27` starts at 23:00 on the 26th and swallows this row.
+        ("z-shape", Some("2026-10-26T23:30:00Z"), "2026-10-26T23:30:00Z"),
     ] {
         let id = uuid::Uuid::new_v4().to_string();
         match source_updated {
@@ -203,7 +222,11 @@ async fn a_window_partitions_the_catalogue_exactly() {
     let within = keys(&db, Some("7d"), None).await;
     let older = keys(&db, Some(">7d"), None).await;
 
-    assert_eq!(within, vec!["boundary", "offset"], "7d includes its boundary");
+    assert_eq!(
+        within,
+        vec!["boundary", "naive", "offset", "z-shape"],
+        "7d includes its boundary"
+    );
     assert_eq!(older, vec!["bare-date"], ">7d excludes it");
     assert!(
         within.iter().all(|k| !older.contains(k)),
@@ -213,7 +236,7 @@ async fn a_window_partitions_the_catalogue_exactly() {
     // "we do not know when the author touched it" is not "recently".
     let all: Vec<String> = within.iter().chain(older.iter()).cloned().collect();
     assert!(!all.contains(&"unknown".to_string()));
-    assert_eq!(all.len(), 3, "every dated row is in exactly one window");
+    assert_eq!(all.len(), 5, "every dated row is in exactly one window");
 
     db.close().await;
 }
@@ -228,19 +251,51 @@ async fn the_three_clocks_are_three_columns() {
     // the refreshed set and out of the updated one, and nothing else would notice.
     let by_source = keys(&db, Some("7d"), None).await;
     let by_sync = keys(&db, None, Some("7d")).await;
-    assert_eq!(by_source, vec!["boundary", "offset"], "the source clock is October");
+    assert_eq!(
+        by_source,
+        vec!["boundary", "naive", "offset", "z-shape"],
+        "the source clock is October"
+    );
     // `unknown` appears here and in no source-clock window: it has no source
     // clock at all, but we did recheck it yesterday. That asymmetry is the point
     // of having two flags -- "the author touched it" and "we looked" are
     // different facts, and a row can have one without the other.
     assert_eq!(
         by_sync,
-        vec!["boundary", "unknown"],
+        vec!["boundary", "naive", "unknown", "z-shape"],
         "our clock is September for `offset`"
     );
     assert!(
         by_source.contains(&"offset".to_string()) && !by_sync.contains(&"offset".to_string()),
         "the two clocks must be read from different columns"
+    );
+
+    db.close().await;
+}
+
+/// The live server's session timezone is `Europe/Madrid` (measured). A zone-less
+/// value and a zone-less bound are both reinterpreted there, so rows and bounds
+/// stay consistent with each other and the only thing that moves is the window:
+/// `@2026-10-27` starts at 23:00 on the 26th instead of midnight. This fixture
+/// holds one row of each shape straddling that hour, so a shifted window is
+/// visible — the row stored `2026-10-26T23:30:00Z` must NOT be in the 27th.
+#[tokio::test]
+async fn a_zone_less_bound_does_not_move_the_window() {
+    let db = connect("zone-less").await;
+    seed(&db).await;
+
+    let day = keys(&db, Some("@2026-10-27"), None).await;
+    assert_eq!(
+        day,
+        vec!["naive"],
+        "only the row stored without a zone is in the 27th, read as UTC"
+    );
+
+    let previous = keys(&db, Some("@2026-10-26"), None).await;
+    assert_eq!(
+        previous,
+        vec!["z-shape"],
+        "the 23:30Z instant belongs to the 26th; a Madrid-shifted window puts it in the 27th"
     );
 
     db.close().await;

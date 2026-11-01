@@ -358,6 +358,32 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
     }
 }
 
+/// A column value as an instant, on PostgreSQL, **without** letting the session
+/// timezone reinterpret it.
+///
+/// The live server's session timezone is `Europe/Madrid` (measured), and 27,461
+/// catalogue rows store `source_updated_at` with **no zone at all**
+/// (`2026-10-27T01:04:45`). A plain `::timestamptz` reads such a value as Madrid
+/// wall time, and it reads the *bound* the same way — so rows and bounds stay
+/// consistent with each other and nothing looks broken. What shifts is the whole
+/// window: `@2026-10-27` on production covers 23:00 on the 26th to 23:00 on the
+/// 27th, and a row stored as `2026-10-26T23:30:00Z` — an instant, not a wall
+/// clock — falls inside a day it is not in. SQLite reads both sides as UTC and
+/// disagrees, which is how the mismatch shows up as an engine difference rather
+/// than as an error.
+///
+/// So the shape decides the reading: a value carrying `Z` or an offset is an
+/// instant already; anything else is UTC by definition, whatever the session
+/// happens to be set to.
+
+fn pg_instant(column: &str) -> String {
+    format!(
+        "CASE WHEN {column} ~ '(Z|[+-][0-9]{{2}}:[0-9]{{2}})$' \
+         THEN ({column})::timestamptz \
+         ELSE (({column})::timestamp AT TIME ZONE 'UTC') END"
+    )
+}
+
 /// The window predicates, in one place, with the binds in the order the
 /// placeholders appear.
 struct WindowsSql {
@@ -378,14 +404,12 @@ fn windows_sql(query: &CatalogueQuery) -> WindowsSql {
         let Some(bounds) = bounds else { continue };
         if let Some(from) = bounds.from_sql() {
             sqlite.push_str(&format!(" AND datetime({column}) >= datetime(?)"));
-            postgres.push_str(&format!(
-                " AND ({column})::timestamptz >= (?::timestamptz)"
-            ));
+            postgres.push_str(&format!(" AND {} >= ((?::timestamp) AT TIME ZONE 'UTC')", pg_instant(column)));
             binds.push(from);
         }
         if let Some(to) = bounds.to_sql() {
             sqlite.push_str(&format!(" AND datetime({column}) < datetime(?)"));
-            postgres.push_str(&format!(" AND ({column})::timestamptz < (?::timestamptz)"));
+            postgres.push_str(&format!(" AND {} < ((?::timestamp) AT TIME ZONE 'UTC')", pg_instant(column)));
             binds.push(to);
         }
     }
