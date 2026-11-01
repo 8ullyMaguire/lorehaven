@@ -72,6 +72,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/catalogue", get(search))
         .route("/catalogue/sources", get(sources))
+        .route("/catalogue/export", get(export_manifest))
+        .route("/catalogue/export.sqlite", get(export_sqlite))
 }
 
 async fn search(
@@ -111,4 +113,281 @@ async fn search(
 async fn sources(State(state): State<AppState>) -> ApiResult<Json<Vec<SourceCount>>> {
     let rows = catalogue::sources(state.db()).await?;
     Ok(Json(rows))
+}
+
+// ===== the downloadable snapshot =====
+//
+// `GET /catalogue/export.sqlite` and its manifest. The file is built once per
+// catalogue fingerprint and cached on disk, because it is the same bytes for
+// everyone: rebuilding per request would turn a free download into a denial of
+// service on a $5 VPS.
+
+/// Where snapshots live, under the configured storage root.
+const EXPORT_DIR: &str = "catalogue-export";
+
+/// How many fingerprints to keep. Two is enough for a client that started a
+/// download just as the catalogue changed; older files are dead weight.
+const EXPORT_KEEP: usize = 2;
+
+/// Serialises builds inside this process, so ten simultaneous first requests
+/// produce one snapshot rather than ten.
+fn build_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// The manifest: what the file is, how to use it, and what is deliberately not
+/// in it.
+#[derive(Debug, Serialize)]
+pub struct ExportManifest {
+    #[serde(flatten)]
+    summary: darkhold_db::catalogue_export::ExportSummary,
+    /// The route that serves the file itself.
+    url: String,
+    /// The file name a download gets.
+    filename: String,
+    /// Schema, table by table, so a client can write SQL without downloading
+    /// first.
+    tables: Vec<ExportTable>,
+    /// The privacy boundary, in the manifest as well as in the file's `meta`
+    /// table — a download someone forgot they had should still be able to
+    /// explain itself.
+    privacy: String,
+    /// Queries that answer the questions the route cannot: the point of a local
+    /// database is the SQL nobody wrote for you.
+    examples: Vec<ExportExample>,
+}
+
+/// One table in the snapshot.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportTable {
+    name: &'static str,
+    columns: &'static [&'static str],
+    /// One sentence on what a row means.
+    means: &'static str,
+}
+
+/// One example query.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportExample {
+    asks: &'static str,
+    sql: &'static str,
+}
+
+const EXPORT_TABLES: &[ExportTable] = &[
+    ExportTable {
+        name: "works",
+        columns: &[
+            "work_key",
+            "source_key",
+            "source_work_key",
+            "title",
+            "author_text",
+            "summary",
+            "language",
+            "word_count",
+            "status",
+            "source_url",
+            "source_updated_at",
+            "likes",
+            "views",
+            "on_darkhold",
+            "total_likes",
+            "source_count",
+            "catalogue_updated_at",
+        ],
+        means: "One row per story per source. `likes` is the source's own endorsement count \
+                (likes, kudos, followers) normalised by the crawler; `total_likes` sums the same \
+                story across every source it appears on; `on_darkhold` says the catalogue row was \
+                materialised into a work on this instance.",
+    },
+    ExportTable {
+        name: "sources",
+        columns: &["source_key", "works", "likes", "newest_update"],
+        means: "One row per source: how many works it contributes, their likes in total, and the \
+                newest catalogue update for that source.",
+    },
+    ExportTable {
+        name: "meta",
+        columns: &["key", "value"],
+        means: "How the file was built: schema version, row and work counts, the catalogue \
+                fingerprint, the build instant, and the privacy statement.",
+    },
+];
+
+const EXPORT_EXAMPLES: &[ExportExample] = &[
+    ExportExample {
+        asks: "Naruto fics updated in the last week, best first",
+        sql: "SELECT title, author_text, likes, total_likes, catalogue_updated_at \
+              FROM works \
+              WHERE lower(title) LIKE '%naruto%' OR lower(summary) LIKE '%naruto%' \
+              ORDER BY catalogue_updated_at DESC",
+    },
+    ExportExample {
+        asks: "Hidden gems: strong likes on low views, complete works only",
+        sql: "SELECT title, source_key, likes, views, ROUND(1.0 * likes / views, 3) AS likes_per_view \
+              FROM works \
+              WHERE status = 'complete' AND views > 500 \
+              ORDER BY likes_per_view DESC LIMIT 50",
+    },
+    ExportExample {
+        asks: "Which fandoms gained the most catalogue entries (by source)",
+        sql: "SELECT source_key, COUNT(*) AS works, SUM(likes) AS likes, MAX(catalogue_updated_at) \
+              FROM works GROUP BY source_key ORDER BY works DESC",
+    },
+    ExportExample {
+        asks: "Quality per thousand words rather than raw engagement",
+        sql: "SELECT title, word_count, total_likes, \
+                     ROUND(1000.0 * total_likes / NULLIF(word_count, 0), 2) AS likes_per_1k_words \
+              FROM works WHERE word_count > 20000 AND total_likes > 100 \
+              ORDER BY likes_per_1k_words DESC LIMIT 100",
+    },
+];
+
+fn export_privacy() -> String {
+    "Story metadata only. No account, pseudonym, email, import record or reading history is in \
+     this file, and no column identifies a reader of this instance. Counts are exact rather than \
+     suppressed: the k-anonymity floor protects aggregates about people, and there are none here."
+        .to_owned()
+}
+
+fn snapshot_path(state: &AppState, fingerprint: &str) -> std::path::PathBuf {
+    let short = &fingerprint[..16.min(fingerprint.len())];
+    state
+        .config()
+        .storage
+        .root
+        .join(EXPORT_DIR)
+        .join(format!("catalogue-{short}.sqlite"))
+}
+
+fn sidecar_path(snapshot: &std::path::Path) -> std::path::PathBuf {
+    snapshot.with_extension("json")
+}
+
+/// The cached snapshot for the catalogue's current fingerprint, building it if
+/// this fingerprint has never been built.
+async fn snapshot(
+    state: &AppState,
+) -> ApiResult<(std::path::PathBuf, darkhold_db::catalogue_export::ExportSummary)> {
+    let fingerprint = darkhold_db::catalogue_export::fingerprint(state.db()).await?;
+    let path = snapshot_path(state, &fingerprint);
+    if let Some(summary) = read_sidecar(&path).await {
+        return Ok((path, summary));
+    }
+
+    let _guard = build_lock().lock().await;
+    // Re-checked inside the lock: the holder before us may have just built it.
+    if let Some(summary) = read_sidecar(&path).await {
+        return Ok((path, summary));
+    }
+
+    let summary = darkhold_db::catalogue_export::build_sqlite(state.db(), &path).await?;
+    if let Ok(json) = serde_json::to_vec(&summary) {
+        let sidecar = sidecar_path(&path);
+        if let Some(parent) = sidecar.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+        let _ = tokio::fs::write(&sidecar, json).await;
+    }
+    prune_snapshots(&path).await;
+    Ok((path, summary))
+}
+
+async fn read_sidecar(
+    path: &std::path::Path,
+) -> Option<darkhold_db::catalogue_export::ExportSummary> {
+    if tokio::fs::metadata(path).await.is_err() {
+        return None;
+    }
+    let bytes = tokio::fs::read(sidecar_path(path)).await.ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Keep the newest few snapshots, drop the rest.
+async fn prune_snapshots(newest: &std::path::Path) {
+    let Some(dir) = newest.parent() else { return };
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    let mut database = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("sqlite") && path != newest {
+            database.push(path);
+        }
+    }
+    // Oldest first by mtime, so the tail of the list is what survives.
+    let mut stamped = Vec::new();
+    for path in database {
+        let modified = tokio::fs::metadata(&path)
+            .await
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        stamped.push((modified, path));
+    }
+    stamped.sort();
+    let keep = EXPORT_KEEP.saturating_sub(1);
+    for (_, path) in stamped.into_iter().rev().skip(keep) {
+        let sidecar = sidecar_path(&path);
+        let _ = tokio::fs::remove_file(&path).await;
+        let _ = tokio::fs::remove_file(&sidecar).await;
+    }
+}
+
+/// `GET /catalogue/export` — what the file is, before you download tens of MB.
+async fn export_manifest(State(state): State<AppState>) -> ApiResult<Json<ExportManifest>> {
+    let (path, summary) = snapshot(&state).await?;
+    let filename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "catalogue.sqlite".to_owned());
+    Ok(Json(ExportManifest {
+        summary,
+        url: "/api/v1/catalogue/export.sqlite".to_owned(),
+        filename,
+        tables: EXPORT_TABLES.to_vec(),
+        privacy: export_privacy(),
+        examples: EXPORT_EXAMPLES.to_vec(),
+    }))
+}
+
+/// `GET /catalogue/export.sqlite` — the snapshot itself.
+///
+/// Served by `ServeFile`, not read into memory: the file is tens of megabytes on
+/// a real catalogue, and a couple of simultaneous downloads should not be able to
+/// take the instance down. `ServeFile` also gives conditional requests and Range
+/// for free, which is what a resumable download needs.
+async fn export_sqlite(State(state): State<AppState>) -> ApiResult<axum::response::Response> {
+    let (path, summary) = snapshot(&state).await?;
+    let request = axum::http::Request::builder()
+        .uri("/catalogue/export.sqlite")
+        .body(axum::body::Body::empty())
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("export request: {e}")))?;
+    let served = tower::ServiceExt::oneshot(tower_http::services::ServeFile::new(&path), request)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("serve export: {e}")))?;
+    let mut response = served.map(axum::body::Body::new);
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/vnd.sqlite3"),
+    );
+    headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        axum::http::HeaderValue::from_str(&format!(
+            "attachment; filename=\"{}\"",
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "catalogue.sqlite".to_owned())
+        ))
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("content-disposition: {e}")))?,
+    );
+    if let Ok(value) = axum::http::HeaderValue::from_str(&summary.fingerprint) {
+        headers.insert(axum::http::header::ETAG, value);
+    }
+    if let Ok(value) = axum::http::HeaderValue::from_str(&summary.rows.to_string()) {
+        headers.insert("x-catalogue-rows", value);
+    }
+    Ok(response)
 }

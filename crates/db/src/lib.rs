@@ -21,6 +21,7 @@ pub mod bounties;
 pub mod browse;
 pub mod canon_agnostic;
 pub mod catalogue;
+pub mod catalogue_export;
 pub mod category_governance;
 pub mod collaboration;
 pub mod community;

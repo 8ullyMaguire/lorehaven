@@ -89,6 +89,10 @@ tower-http = { version = "0.6", features = [
     "set-header",
     "timeout",
     "cors",
+    # `fs` is here for one route: the catalogue snapshot download. A SQLite
+    # export is tens of megabytes, so it is served by `ServeFile` (streamed, with
+    # Range support and a real Last-Modified) rather than read into memory.
+    "fs",
 ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
