@@ -38,18 +38,29 @@ Traps that cost a day each, in this repo:
 2. **`library_items` is per-account.** A read that appears to be "the catalogue" is really the
    library rows of any account that imported it. `account_id` and `provenance_json` are the private
    side; anything exported or newly exposed must name its columns.
-3. **The timestamps are one format, and the database enforces it.** Since M63-31 (migration 0132)
+3. **`library_items` is the catalogue and `works`+`work_tags`+`canonical_entities` are its
+   metadata, and the metadata is thin.** 7,626 of 141,317 rows carry a fandom tag, and **all of them
+   are `pawchive` rows with no like count** — so `--fandom` pages order ties. Say so when you report
+   it; M63-32 is the backfill. A fandom name resolves case-insensitively against
+   `canonical_entities.norm` (`kind='fandom'`), never against a title.
+4. **The live database is not the schema this tree's migrations describe.** 11 tables the migrations
+   create are absent (`chapters`, `bodies`, `chapter_revisions`, `import_chapters`,
+   `ship_participants`, five pre-rename `taxonomy_*`) and 12 legacy-named tables are present
+   (`units` with 127,474 rows among them). The instance was migrated by the other lineage, whose
+   numbering collides with this tree's. Check `information_schema` before trusting a table; M63-33 is
+   the reconciliation.
+5. **The timestamps are one format, and the database enforces it.** Since M63-31 (migration 0132)
    `library_items` stores `YYYY-MM-DDTHH:MM:SSZ` only: PostgreSQL has a `CHECK`, SQLite has
    triggers, and a write in any other shape fails with "must be canonical". This is what makes the
    window a plain index-able range — do not reintroduce a normalising function in a predicate. The
    writer that produced the old bare dates is the external XenForo importer, which is not in this
    repo, so a fixture that writes `2026-10-13` or `2026-01-01 00:00:00` is a bug in the fixture.
-4. **A clippy warning is a build error** (`build.warnings` denies). Three pre-existing warnings in
+6. **A clippy warning is a build error** (`build.warnings` denies). Three pre-existing warnings in
    `crates/db/src/work_ratings.rs` already fail `--all-targets`; your files must add none, and do
    not "fix" theirs inside an unrelated item.
-5. **The frontend `dist` is embedded at compile time.** A backend-only change still needs the
+7. **The frontend `dist` is embedded at compile time.** A backend-only change still needs the
    deploy script's frontend step if the served bundle must match; check `assets/index-<hash>`.
-6. **The SPA answers 200 for every unknown path.** `/api/v1/…` is the contract; a 200 with HTML is
+8. **The SPA answers 200 for every unknown path.** `/api/v1/…` is the contract; a 200 with HTML is
    the shell, not the route.
 
 Take the work order's order. Do not re-rank by effort or by what is easiest to demo. If evidence
