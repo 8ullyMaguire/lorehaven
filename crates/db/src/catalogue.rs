@@ -339,22 +339,22 @@ pub async fn fandom_coverage(db: &Database) -> Result<FandomCoverage> {
 /// Correlated rather than joined because it has to be evaluated once per
 /// returned row, not once per candidate row: a search returns twenty rows and
 /// this must cost twenty index lookups, not twenty over the whole catalogue.
-const TOTAL_LIKES_SQLITE: &str = "COALESCE((SELECT SUM(l2.likes) \
+pub(crate) const TOTAL_LIKES_SQLITE: &str = "COALESCE((SELECT SUM(l2.likes) \
      FROM library_items l2 \
     WHERE lower(trim(l2.title)) = lower(trim(library_items.title)) \
       AND lower(trim(l2.author_text)) = lower(trim(library_items.author_text))), 0)";
 
-const TOTAL_LIKES_PG: &str = "COALESCE((SELECT SUM(l2.likes) \
+pub(crate) const TOTAL_LIKES_PG: &str = "COALESCE((SELECT SUM(l2.likes) \
      FROM library_items l2 \
     WHERE lower(btrim(l2.title)) = lower(btrim(library_items.title)) \
       AND lower(btrim(l2.author_text)) = lower(btrim(library_items.author_text))), 0)";
 
-const SOURCE_COUNT_SQLITE: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
+pub(crate) const SOURCE_COUNT_SQLITE: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
      FROM library_items l3 \
     WHERE lower(trim(l3.title)) = lower(trim(library_items.title)) \
       AND lower(trim(l3.author_text)) = lower(trim(library_items.author_text)))";
 
-const SOURCE_COUNT_PG: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
+pub(crate) const SOURCE_COUNT_PG: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
      FROM library_items l3 \
     WHERE lower(btrim(l3.title)) = lower(btrim(library_items.title)) \
       AND lower(btrim(l3.author_text)) = lower(btrim(library_items.author_text)))";
@@ -364,11 +364,11 @@ const SOURCE_COUNT_PG: &str = "(SELECT COUNT(DISTINCT l3.source_key) \
 /// `COALESCE` wraps the whole subquery, not its inner column: a row with no
 /// `work_id`, or a work with no aggregate, returns *no rows* — and an aggregate
 /// over no rows is `NULL`, which the decoder refuses for an `i64`.
-const DARKHOLD_KUDOS_SQLITE: &str = "COALESCE((SELECT wma.kudos \
+pub(crate) const DARKHOLD_KUDOS_SQLITE: &str = "COALESCE((SELECT wma.kudos \
      FROM work_metric_aggregates wma \
     WHERE wma.work_id = library_items.work_id), 0)";
 
-const DARKHOLD_KUDOS_PG: &str = "COALESCE((SELECT wma.kudos \
+pub(crate) const DARKHOLD_KUDOS_PG: &str = "COALESCE((SELECT wma.kudos \
      FROM work_metric_aggregates wma \
     WHERE wma.work_id = library_items.work_id), 0)";
 
@@ -511,13 +511,13 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
 
 /// The filter predicates, in one place, with the binds in the order the
 /// placeholders appear.
-struct FilterSql {
-    sqlite: String,
-    postgres: String,
-    binds: Vec<String>,
+pub(crate) struct FilterSql {
+    pub(crate) sqlite: String,
+    pub(crate) postgres: String,
+    pub(crate) binds: Vec<String>,
 }
 
-fn filters_sql(query: &CatalogueQuery) -> FilterSql {
+pub(crate) fn filters_sql(query: &CatalogueQuery) -> FilterSql {
     let mut sqlite = String::new();
     let mut postgres = String::new();
     let mut binds = Vec::new();

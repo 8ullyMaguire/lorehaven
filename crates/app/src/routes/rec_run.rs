@@ -129,6 +129,16 @@ pub struct RecRunPage {
     /// The pool the engine ranked — `min(candidates, 500)`.
     ranked_pool: usize,
     items: Vec<ScoredRow>,
+    /// The quality metric this page was ranked by, when `sort=` named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metric: Option<String>,
+    /// Engaged rows the metric could score, and how many rows the filters
+    /// matched. The pair is the gate: `ranked N of M` — with a plain column sort
+    /// there is nothing to gate, so both are absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ranked: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total: Option<i64>,
     /// Present only with `explain=1`, and always empty for `engine=catalogue`,
     /// which runs no strategies — an empty array there would read as "every
     /// strategy produced nothing".
@@ -141,11 +151,36 @@ async fn run(
     RequireSession(user): RequireSession,
     Query(params): Query<RecRunParams>,
 ) -> ApiResult<Json<RecRunPage>> {
-    let sort = match params.sort.as_deref() {
-        None => CatalogueSort::Likes,
-        Some(raw) => {
+    // `sort=` is now two vocabularies in one parameter: a stored column
+    // (`likes`, `views`, …) or a quality metric (`source_pct`, `quality`, …).
+    // The metric wins where it applies, because a metric cannot be expressed as
+    // an `ORDER BY` — it is a percentile over the filtered population (M63-03).
+    let sort_word = params
+        .sort
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let requested_metric = sort_word.and_then(darkhold_domain::quality::Metric::parse);
+    if let Some(metric) = requested_metric {
+        if let darkhold_domain::quality::Support::Blocked(reason) = metric.support() {
+            return Err(invalid(format!(
+                "sort: \"{}\" is not available yet — {reason}",
+                metric.as_str()
+            )));
+        }
+    }
+    let metric = requested_metric.filter(|metric| {
+        matches!(
+            metric.support(),
+            darkhold_domain::quality::Support::Ranked | darkhold_domain::quality::Support::Triage
+        )
+    });
+    let sort = match (metric, sort_word) {
+        (Some(_), _) => CatalogueSort::Likes,
+        (None, Some(raw)) => {
             CatalogueSort::parse(raw).ok_or_else(|| invalid(format!("unknown sort: {raw}")))?
         }
+        (None, None) => CatalogueSort::Likes,
     };
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
@@ -198,7 +233,31 @@ async fn run(
         added: window(&params.added, "added")?,
         fandom: fandom.clone(),
     };
-    let candidates = catalogue::search(state.db(), &query).await?;
+    // A metric sort ranks the whole filtered population, so the candidate pool is
+    // the metric's own order; the pool is then cut to `MAX_CANDIDATES` for the
+    // engines, which need a bounded set to blend.
+    let (candidates, metric_scores, gate) = match metric {
+        Some(metric) => {
+            let page = darkhold_db::metrics::ranked(
+                state.db(),
+                &query,
+                metric,
+                darkhold_db::metrics::CANDIDATE_CAP as usize,
+                0,
+            )
+            .await?;
+            let mut scores: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            let mut rows = Vec::new();
+            for item in page.items {
+                scores.insert(item.row.id.clone(), item.score);
+                rows.push(item.row);
+            }
+            rows.truncate(MAX_CANDIDATES as usize);
+            (rows, Some(scores), Some((page.ranked, page.total)))
+        }
+        None => (catalogue::search(state.db(), &query).await?, None, None),
+    };
     let candidate_ids: std::collections::HashSet<String> =
         candidates.iter().map(|row| row.id.clone()).collect();
 
@@ -215,7 +274,20 @@ async fn run(
 
     // The engine's ranking, as `(work_id, score)` in its own order.
     let (engine, ranking, strategies) = match requested.as_str() {
-        "catalogue" => ("catalogue".to_owned(), Vec::new(), None),
+        "catalogue" => {
+            // A metric sort *is* a ranking, so its scores travel as `rec_score`
+            // rather than being thrown away and re-derived from the position. A
+            // plain column sort ranks nothing — the page is in the catalogue's
+            // order — and reporting `rec_rank` for it would claim otherwise.
+            let ranking: Vec<(String, f64)> = match metric_scores.as_ref() {
+                Some(scores) => candidates
+                    .iter()
+                    .map(|row| (row.id.clone(), scores.get(&row.id).copied().unwrap_or(0.0)))
+                    .collect(),
+                None => Vec::new(),
+            };
+            ("catalogue".to_owned(), ranking, None)
+        }
         "legacy" => {
             // The discovery feed's blend, restricted to the candidate set. It is
             // the same computation the feed serves, so a reader comparing
@@ -354,7 +426,10 @@ async fn run(
 
     Ok(Json(RecRunPage {
         engine,
-        sort: sort.as_str().to_owned(),
+        sort: metric.map_or_else(|| sort.as_str().to_owned(), |m| m.as_str().to_owned()),
+        metric: metric.map(|m| m.as_str().to_owned()),
+        ranked: gate.map(|(ranked, _)| ranked),
+        total: gate.map(|(_, total)| total),
         candidates: candidates.len(),
         ranked_pool: ranking.len(),
         items,

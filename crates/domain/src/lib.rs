@@ -58,6 +58,7 @@ pub mod policy;
 pub mod positivity;
 pub mod preread;
 pub mod preservation;
+pub mod quality;
 pub mod query;
 pub mod query_sql;
 pub mod query_sql_forum;

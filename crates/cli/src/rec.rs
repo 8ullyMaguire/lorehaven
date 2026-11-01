@@ -50,10 +50,14 @@ pub struct RecArgs {
     #[arg(long, value_name = "TEXT")]
     pub q: Option<String>,
 
-    /// The metric that orders the page: likes (alias quality), aggregate,
-    /// views, words, updated.
+    /// The metric that orders the page. `--list-metrics` prints every name with
+    /// whether it can be computed today.
     #[arg(long, value_name = "METRIC")]
     pub sort: Option<String>,
+
+    /// Print the metric vocabulary and exit. No server is contacted.
+    #[arg(long)]
+    pub list_metrics: bool,
 
     /// Order the candidates with an engine: `catalogue`, `legacy`, `rrf`, or a
     /// registered strategy name. Needs `--token`.
@@ -92,6 +96,16 @@ fn bad_request(message: impl Into<String>) -> Failure {
     Failure {
         message: message.into(),
         code: 2,
+    }
+}
+
+/// Refuse a `--sort` word that is not in the vocabulary, before any request.
+fn validate_sort(raw: &str) -> Result<(), Failure> {
+    match darkhold_domain::quality::Metric::parse(raw) {
+        Some(_) => Ok(()),
+        None => Err(bad_request(format!(
+            "--sort {raw}: unknown metric. `dh rec --list-metrics` prints the vocabulary"
+        ))),
     }
 }
 
@@ -192,6 +206,10 @@ pub struct Row {
     pub words: Option<i64>,
     pub status: String,
     pub updated: String,
+    /// A quality metric's score, when the page carries one.
+    pub score: Option<f64>,
+    /// False when the metric could not measure the row (`measured: false`).
+    pub measured: bool,
 }
 
 fn text(value: &Value, key: &str) -> String {
@@ -227,11 +245,21 @@ pub fn rows(page: &Value) -> Vec<Row> {
                     status: text(item, "status"),
                     updated: {
                         // The stored shape is `YYYY-MM-DDTHH:MM:SSZ`; the date is
-                        // the part a reader scans. A row with no source date
-                        // prints as empty rather than as "1970".
-                        let raw = text(item, "source_updated_at");
+                        // the part a reader scans. A metric page carries the
+                        // source date as `updated_at`, because the catalogue row
+                        // itself does not hold it. A row with no date prints as
+                        // empty rather than as "1970".
+                        let raw = match text(item, "source_updated_at") {
+                            empty if empty.is_empty() => text(item, "updated_at"),
+                            found => found,
+                        };
                         raw.split('T').next().unwrap_or("").to_owned()
                     },
+                    score: item.get("score").and_then(Value::as_f64),
+                    measured: item
+                        .get("measured")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
                 })
                 .collect()
         })
@@ -259,22 +287,90 @@ fn pad(value: &str, width: usize) -> String {
 }
 
 /// The table.
+///
+/// The score column appears only on a metric-ranked page: a column of `—` would
+/// suggest every row was measured, which is the one thing a metric page must not
+/// imply. Unmeasured rows are marked with `~` for the same reason.
 pub fn table(page: &Value) -> String {
     let rows = rows(page);
+    let scored = rows.iter().any(|row| row.score.is_some());
     let mut out = String::new();
     for (index, row) in rows.iter().enumerate() {
-        out.push_str(&format!(
-            "{:>3}  {:>6} likes  {:>9} words  {} {}  {} by {} [{}]\n",
-            index + 1,
-            compact(row.likes),
-            row.words.map(compact).unwrap_or_else(|| "—".to_owned()),
-            pad(&row.status, 8),
-            row.updated,
-            pad(&row.title, 44),
-            pad(&row.author, 18),
-            row.source,
-        ));
+        let marker = if row.measured { ' ' } else { '~' };
+        if scored {
+            out.push_str(&format!(
+                "{:>3}{} {:>6}  {:>6} likes  {:>9} words  {} {}  {} by {} [{}]\n",
+                index + 1,
+                marker,
+                row.score
+                    .map(|score| format!("{score:.3}"))
+                    .unwrap_or_else(|| "—".to_owned()),
+                compact(row.likes),
+                row.words.map(compact).unwrap_or_else(|| "—".to_owned()),
+                pad(&row.status, 8),
+                row.updated,
+                pad(&row.title, 44),
+                pad(&row.author, 18),
+                row.source,
+            ));
+        } else {
+            out.push_str(&format!(
+                "{:>3}  {:>6} likes  {:>9} words  {} {}  {} by {} [{}]\n",
+                index + 1,
+                compact(row.likes),
+                row.words.map(compact).unwrap_or_else(|| "—".to_owned()),
+                pad(&row.status, 8),
+                row.updated,
+                pad(&row.title, 44),
+                pad(&row.author, 18),
+                row.source,
+            ));
+        }
     }
+    out
+}
+
+/// The gate line for a metric page: how many rows the metric could actually
+/// score, and how many matched.
+///
+/// Without it a percentile page reads as a verdict on the whole catalogue, when
+/// on the live catalogue it is a verdict on 0.9 % of it.
+pub fn gate(page: &Value) -> Option<String> {
+    let ranked = page.get("ranked").and_then(Value::as_i64)?;
+    let total = page.get("total").and_then(Value::as_i64)?;
+    let metric = page.get("metric").and_then(Value::as_str).unwrap_or("metric");
+    let share = match total {
+        0 => 0.0,
+        total => ranked as f64 * 100.0 / total as f64,
+    };
+    let mut line = format!(
+        "{metric}: ranked {ranked} of {total} matching rows ({share:.1}% carry an endorsement count)"
+    );
+    if ranked < total {
+        line.push_str("; the rest are ordered by metadata and marked ~");
+    }
+    Some(line)
+}
+
+/// The metric vocabulary, as the CLI prints it.
+pub fn metrics_list() -> String {
+    use darkhold_domain::quality::{Metric, Support};
+    let mut out = String::from("QUALITY METRICS — dh rec --sort <name>\n\n");
+    for metric in Metric::ALL {
+        let (status, detail) = match metric.support() {
+            Support::Ranked => ("ready", metric.help().to_owned()),
+            Support::Triage => ("triage", metric.help().to_owned()),
+            Support::Raw => ("raw", metric.help().to_owned()),
+            Support::Blocked(reason) => ("blocked", format!("{} — {reason}", metric.help())),
+        };
+        let name = match metric.support() {
+            Support::Blocked(_) => format!("{}*", metric.as_str()),
+            _ => metric.as_str().to_owned(),
+        };
+        out.push_str(&format!("  {} {} {}\n", pad(&name, 20), pad(status, 8), detail));
+    }
+    out.push_str("\nraw = a stored column ordered in SQL. triage = metadata order for rows with no endorsement data.\n");
+    out.push_str("* = refused with the reason and the work item that unblocks it.\n");
     out
 }
 
@@ -366,6 +462,16 @@ pub fn failure_for(status: u16, body: &Value, base_url: &str) -> Failure {
 
 /// Run `dh rec`.
 pub async fn run(cli: &Cli, args: &RecArgs) -> Result<(), Failure> {
+    if args.list_metrics {
+        print!("{}", metrics_list());
+        return Ok(());
+    }
+    // Refuse an unknown metric here, where the message can point at the
+    // vocabulary, rather than letting the server answer `unknown sort` after a
+    // round trip.
+    if let Some(raw) = args.sort.as_deref() {
+        validate_sort(raw)?;
+    }
     if !(1..=100).contains(&args.limit) {
         return Err(bad_request("limit must be between 1 and 100"));
     }
@@ -427,6 +533,9 @@ pub async fn run(cli: &Cli, args: &RecArgs) -> Result<(), Failure> {
         eprintln!("no rows matched");
     } else {
         print!("{printed}");
+    }
+    if let Some(line) = gate(&body) {
+        println!("\n{line}");
     }
     if let Some(line) = coverage(&body) {
         println!("\n{line}");
@@ -589,6 +698,72 @@ mod tests {
         let block = explanation(&with).expect("explanation");
         assert!(block.contains("cooccurrence"), "the silent strategy is the finding");
         assert!(block.contains("0.0164"), "{block}");
+    }
+
+    fn metric_page() -> Value {
+        serde_json::json!({
+            "items": [
+                {"id": "a", "source_key": "sb", "source_work_key": "a", "title": "Measured",
+                 "author_text": "Esama", "summary": "", "word_count": 40000, "status": "ongoing",
+                 "likes": 33107, "views": null, "source_url": "https://x.invalid",
+                 "updated_at": "2026-10-27T00:00:00+00:00", "score": 0.75, "measured": true},
+                {"id": "b", "source_key": "sb", "source_work_key": "b", "title": "Unmeasured",
+                 "author_text": "Nobody", "summary": "", "word_count": 60000, "status": "ongoing",
+                 "likes": 0, "views": null, "source_url": "https://x.invalid",
+                 "score": 0.33, "measured": false}
+            ],
+            "sort": "source_pct", "metric": "source_pct", "ranked": 1247, "total": 141317
+        })
+    }
+
+    #[test]
+    fn a_metric_page_prints_a_score_column_and_an_unmeasured_marker() {
+        let rendered = table(&metric_page());
+        assert!(rendered.contains("0.750"), "{rendered}");
+        assert!(rendered.contains("2026-10-27"), "the source date fills the column: {rendered}");
+        // The unmeasured row is marked, so a script cannot mistake triage for rank.
+        assert!(rendered.contains('~'), "{rendered}");
+    }
+
+    #[test]
+    fn the_gate_says_ranked_of_total_and_the_share() {
+        let line = gate(&metric_page()).expect("gate");
+        assert!(line.contains("1247 of 141317"), "{line}");
+        assert!(line.contains("0.9%"), "{line}");
+        assert!(line.contains("marked ~"), "{line}");
+
+        // A page where everything was measured needs no caveat.
+        let complete = serde_json::json!({
+            "items": [], "metric": "source_pct", "ranked": 10, "total": 10
+        });
+        let line = gate(&complete).expect("gate");
+        assert!(!line.contains("marked ~"), "{line}");
+    }
+
+    #[test]
+    fn the_gate_is_absent_on_a_plain_column_sort() {
+        assert_eq!(gate(&page(vec![item("x", 1)])), None);
+    }
+
+    #[test]
+    fn the_metric_list_names_every_metric_its_status_and_what_unblocks_the_rest() {
+        let text = metrics_list();
+        for name in ["quality", "source_pct", "engagement_density", "consensus", "crosspost",
+                     "words_maturity", "source_coverage", "cohort_pct", "recency", "unmeasured"] {
+            assert!(text.contains(name), "{name} missing from:\n{text}");
+        }
+        assert!(text.contains("velocity*"), "blocked metrics are marked: {text}");
+        assert!(text.contains("M63-32"), "and say what unblocks them: {text}");
+        assert!(text.contains("raw"), "the stored columns are still there: {text}");
+    }
+
+    #[test]
+    fn a_sort_word_outside_the_vocabulary_is_refused_locally() {
+        assert!(validate_sort("source_pct").is_ok());
+        assert!(validate_sort("wilson").is_ok());
+        let failure = validate_sort("wilson2").expect_err("unknown");
+        assert_eq!(failure.code, 2);
+        assert!(failure.message.contains("--list-metrics"));
     }
 
     #[test]

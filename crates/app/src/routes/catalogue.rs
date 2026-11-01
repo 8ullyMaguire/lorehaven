@@ -14,16 +14,28 @@
 //! the catalogue metadata-only is what makes an unauthenticated read safe; if it
 //! ever stopped being metadata-only, this route would have to stop being public.
 //!
-//! # Why `sort=quality` is `likes`
+//! # The metric vocabulary
 //!
-//! Because that is what the operator means by quality: the community's own
-//! endorsement, normalised across sources by the crawler. `sort=aggregate` adds
-//! the same story's likes from every other source plus the kudos it earned on
-//! darkhold, which is what "the ones from everywhere plus the ones from here"
-//! asks for. The response carries all three numbers so the UI never has to
-//! pretend they are the same thing.
+//! `sort=` takes either a stored column (`likes`, `aggregate`, `views`, `words`,
+//! `updated`) or a quality metric (`quality`, `source_pct`, `source_z`,
+//! `engagement_density`, `consensus`, `crosspost`, `words_maturity`,
+//! `source_coverage`, `cohort_pct`, `recency`, `unmeasured`) — see
+//! [`darkhold_domain::quality`] for the maths of each.
+//!
+//! The distinction matters: a stored column is an `ORDER BY`, and ordering by
+//! `likes` rewards whichever archive is largest. A metric is a percentile
+//! computed *within the row's own source* before anything is compared, which is
+//! what makes the ranking independent of archive size. A metric page therefore
+//! answers with `ranked` of `total` — on the live catalogue, `1247 of 141317`,
+//! because only 1,247 rows carry an endorsement count at all — and the rest of
+//! the page is metadata triage, labelled `measured: false`.
+//!
+//! `likes` remains the default so that nothing changes for a caller that did not
+//! ask, and `aggregate` still adds the same story's likes from every other
+//! source plus the kudos it earned on darkhold.
 
 use axum::extract::{Query, State};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -64,6 +76,46 @@ pub struct CatalogueParams {
     added: Option<String>,
     /// Restrict to one fandom, e.g. `naruto`. Case-insensitive; an unknown name
     /// is a `422` that names the field and suggests the nearest known fandom.
+    fandom: Option<String>,
+}
+
+/// One row of a metric-ranked page.
+#[derive(Debug, Serialize)]
+pub struct MetricItem {
+    #[serde(flatten)]
+    row: CatalogueRow,
+    /// 0..=1 for every ranked metric.
+    score: f64,
+    /// False when the metric could not measure the row and metadata triage
+    /// ordered it. The two blocks are never mixed in a way that hides this.
+    measured: bool,
+    /// The components of the score, so a ranking can be argued with.
+    signals: darkhold_domain::quality::Signals,
+    /// 1-based position on this page.
+    rank: usize,
+    /// The source's last-update date, which [`CatalogueRow`] does not carry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<String>,
+}
+
+/// What a metric-ranked page answers: the page, plus the gate.
+///
+/// `ranked` of `total` is the line that keeps a thin ranking from reading as a
+/// verdict: on the live catalogue it is `1247 of 141317`, because only 1,247 rows
+/// carry any endorsement count at all.
+#[derive(Debug, Serialize)]
+pub struct MetricPage {
+    items: Vec<MetricItem>,
+    sort: String,
+    metric: String,
+    /// Engaged rows the metric could score, across the whole filtered set.
+    ranked: i64,
+    /// Rows the filters matched.
+    total: i64,
+    limit: i64,
+    offset: i64,
+    sources: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     fandom: Option<String>,
 }
 
@@ -115,50 +167,85 @@ pub fn router() -> Router<AppState> {
 async fn search(
     State(state): State<AppState>,
     Query(params): Query<CatalogueParams>,
-) -> ApiResult<Json<CataloguePage>> {
+) -> ApiResult<Response> {
+    // A quality metric is not a column, so it cannot be an `ORDER BY`: it is a
+    // percentile computed over the filtered population, and the store ranks it in
+    // memory (M63-03). The vocabulary is tried first so a metric name is never
+    // mistaken for an unknown sort.
+    let sort_word = params.sort.as_deref().map(str::trim).unwrap_or("");
+    if let Some(metric) = darkhold_domain::quality::Metric::parse(sort_word) {
+        use darkhold_domain::quality::Support;
+        match metric.support() {
+            Support::Blocked(reason) => {
+                return Err(invalid(format!(
+                    "sort: \"{}\" is not available yet — {reason}",
+                    metric.as_str()
+                )))
+            }
+            Support::Raw => return Ok(Json(search_raw(state, params).await?).into_response()),
+            Support::Ranked | Support::Triage => {
+                let limit = params.limit.unwrap_or(20);
+                if !(1..=100).contains(&limit) {
+                    return Err(invalid("limit must be between 1 and 100"));
+                }
+                let offset = params.offset.unwrap_or(0).max(0);
+                let query = build_query(&state, &params).await?;
+                let page = darkhold_db::metrics::ranked(
+                    state.db(),
+                    &query,
+                    metric,
+                    limit as usize,
+                    offset as usize,
+                )
+                .await?;
+                let mut sources: Vec<String> =
+                    page.items.iter().map(|i| i.row.source_key.clone()).collect();
+                sources.sort();
+                sources.dedup();
+                return Ok(Json(MetricPage {
+                    items: page
+                        .items
+                        .into_iter()
+                        .map(|item| MetricItem {
+                            row: item.row,
+                            score: item.score,
+                            measured: item.measured,
+                            signals: item.signals,
+                            rank: item.rank,
+                            updated_at: item.updated_at,
+                        })
+                        .collect(),
+                    sort: metric.as_str().to_owned(),
+                    metric: metric.as_str().to_owned(),
+                    ranked: page.ranked,
+                    total: page.total,
+                    limit,
+                    offset,
+                    sources,
+                    fandom: query.fandom.clone(),
+                })
+                .into_response());
+            }
+        }
+    }
+    Ok(Json(search_raw(state, params).await?).into_response())
+}
+
+/// The catalogue as a plain `ORDER BY` page — every sort the store can do in SQL.
+async fn search_raw(
+    state: AppState,
+    params: CatalogueParams,
+) -> ApiResult<CataloguePage> {
     let sort = match params.sort.as_deref() {
         None => CatalogueSort::Likes,
-        Some(raw) => CatalogueSort::parse(raw).ok_or_else(|| invalid(format!("unknown sort: {raw}")))?,
+        Some(raw) => CatalogueSort::parse(raw)
+            .ok_or_else(|| invalid(format!("unknown sort: {raw}")))?,
     };
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(invalid("limit must be between 1 and 100"));
     }
-    // One parser for all three clocks, shared with the CLI (M63-01): a window
-    // typed at the terminal must mean exactly what it means in a URL.
-    let now = time::OffsetDateTime::now_utc();
-    let window = |raw: &Option<String>, field: &str| match raw {
-        None => Ok(None),
-        Some(text) => darkhold_domain::window::parse(text, now)
-            .map(Some)
-            .map_err(|e| invalid(format!("{field}: {e}"))),
-    };
-    // Resolve the fandom before the page query. An unknown name that fell
-    // through to the store would answer 200 with an empty list, which reads as
-    // "this fandom has nothing" rather than "you spelled it differently".
-    let fandom = match params
-        .fandom
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        None => None,
-        Some(raw) => {
-            let known = catalogue::fandoms(state.db(), FANDOM_LIST_LIMIT).await?;
-            match known.iter().find(|f| f.name.eq_ignore_ascii_case(raw)) {
-                Some(found) => Some(found.name.clone()),
-                None => {
-                    let hint = suggest(raw, &known)
-                        .map(|name| format!("; did you mean \"{name}\"?"))
-                        .unwrap_or_else(|| ".".to_owned());
-                    return Err(invalid(format!(
-                        "fandom: no fandom called \"{raw}\"{hint} ({} fandoms known)",
-                        known.len()
-                    )));
-                }
-            }
-        }
-    };
+    let fandom = resolve_fandom(&state, params.fandom.as_deref()).await?;
     let (tagged, rankable, total) = match fandom.is_some() {
         true => {
             let coverage = catalogue::fandom_coverage(state.db()).await?;
@@ -170,23 +257,14 @@ async fn search(
         }
         false => (None, None, None),
     };
-    let query = CatalogueQuery {
-        source: params.source.clone(),
-        min_likes: params.min_likes,
-        q: params.q.clone(),
-        sort: Some(sort),
-        limit: Some(limit),
-        offset: Some(params.offset.unwrap_or(0)),
-        updated: window(&params.updated, "updated")?,
-        refreshed: window(&params.refreshed, "refreshed")?,
-        added: window(&params.added, "added")?,
-        fandom,
-    };
+    let mut query = build_query(&state, &params).await?;
+    query.sort = Some(sort);
+    query.limit = Some(limit);
     let items = catalogue::search(state.db(), &query).await?;
     let mut sources: Vec<String> = items.iter().map(|row| row.source_key.clone()).collect();
     sources.sort();
     sources.dedup();
-    Ok(Json(CataloguePage {
+    Ok(CataloguePage {
         items,
         sort: sort.as_str().to_owned(),
         limit,
@@ -196,7 +274,62 @@ async fn search(
         fandom_tagged_rows: tagged,
         fandom_tagged_with_likes: rankable,
         catalogue_rows: total,
-    }))
+    })
+}
+
+/// Resolve the request into a [`CatalogueQuery`]: the fandom name against the
+/// list the catalogue knows, and the three clocks through the one window parser
+/// the CLI shares.
+async fn build_query(
+    state: &AppState,
+    params: &CatalogueParams,
+) -> ApiResult<CatalogueQuery> {
+    let now = time::OffsetDateTime::now_utc();
+    let window = |raw: &Option<String>, field: &str| match raw {
+        None => Ok(None),
+        Some(text) => darkhold_domain::window::parse(text, now)
+            .map(Some)
+            .map_err(|e| invalid(format!("{field}: {e}"))),
+    };
+    Ok(CatalogueQuery {
+        source: params.source.clone(),
+        min_likes: params.min_likes,
+        q: params.q.clone(),
+        sort: Some(CatalogueSort::Likes),
+        limit: params.limit,
+        offset: Some(params.offset.unwrap_or(0)),
+        updated: window(&params.updated, "updated")?,
+        refreshed: window(&params.refreshed, "refreshed")?,
+        added: window(&params.added, "added")?,
+        fandom: resolve_fandom(state, params.fandom.as_deref()).await?,
+    })
+}
+
+/// The fandom this request names, spelled as the catalogue spells it.
+///
+/// An unknown name is a `422` that suggests the nearest known one: falling
+/// through to the store would answer 200 with an empty list, which reads as
+/// "this fandom has nothing" rather than "you spelled it differently".
+async fn resolve_fandom(
+    state: &AppState,
+    raw: Option<&str>,
+) -> ApiResult<Option<String>> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let known = catalogue::fandoms(state.db(), FANDOM_LIST_LIMIT).await?;
+    match known.iter().find(|f| f.name.eq_ignore_ascii_case(raw)) {
+        Some(found) => Ok(Some(found.name.clone())),
+        None => {
+            let hint = suggest(raw, &known)
+                .map(|name| format!("; did you mean \"{name}\"?"))
+                .unwrap_or_else(|| ".".to_owned());
+            Err(invalid(format!(
+                "fandom: no fandom called \"{raw}\"{hint} ({} fandoms known)",
+                known.len()
+            )))
+        }
+    }
 }
 
 /// How many fandoms the suggestion list is built from.

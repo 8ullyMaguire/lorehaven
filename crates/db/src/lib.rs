@@ -22,6 +22,8 @@ pub mod browse;
 pub mod canon_agnostic;
 pub mod catalogue;
 pub mod catalogue_export;
+// M63-03: source-relative quality metrics.
+pub mod metrics;
 pub mod category_governance;
 pub mod collaboration;
 pub mod community;

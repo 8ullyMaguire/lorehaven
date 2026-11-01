@@ -11,6 +11,8 @@ name = "dh"
 path = "src/main.rs"
 
 [dependencies]
+# M63-03: one definition of the metric vocabulary, shared with the server.
+darkhold-domain = { path = "../domain" }
 anyhow.workspace = true
 clap.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls"] }
