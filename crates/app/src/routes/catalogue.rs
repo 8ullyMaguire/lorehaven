@@ -54,6 +54,12 @@ pub struct CatalogueParams {
     limit: Option<i64>,
     #[serde(default)]
     offset: Option<i64>,
+    /// Window on the source's clock: when the author last touched it.
+    updated: Option<String>,
+    /// Window on our clock: when the crawler last rechecked it.
+    refreshed: Option<String>,
+    /// Window on entry age: when it entered this catalogue.
+    added: Option<String>,
 }
 
 /// What the route answers.
@@ -88,6 +94,15 @@ async fn search(
     if !(1..=100).contains(&limit) {
         return Err(invalid("limit must be between 1 and 100"));
     }
+    // One parser for all three clocks, shared with the CLI (M63-01): a window
+    // typed at the terminal must mean exactly what it means in a URL.
+    let now = time::OffsetDateTime::now_utc();
+    let window = |raw: &Option<String>, field: &str| match raw {
+        None => Ok(None),
+        Some(text) => darkhold_domain::window::parse(text, now)
+            .map(Some)
+            .map_err(|e| invalid(format!("{field}: {e}"))),
+    };
     let query = CatalogueQuery {
         source: params.source.clone(),
         min_likes: params.min_likes,
@@ -95,6 +110,9 @@ async fn search(
         sort: Some(sort),
         limit: Some(limit),
         offset: Some(params.offset.unwrap_or(0)),
+        updated: window(&params.updated, "updated")?,
+        refreshed: window(&params.refreshed, "refreshed")?,
+        added: window(&params.added, "added")?,
     };
     let items = catalogue::search(state.db(), &query).await?;
     let mut sources: Vec<String> = items.iter().map(|row| row.source_key.clone()).collect();

@@ -140,6 +140,12 @@ pub struct CatalogueQuery {
     pub limit: Option<i64>,
     /// Page offset.
     pub offset: Option<i64>,
+    /// Window on `source_updated_at`: when the author last touched it.
+    pub updated: Option<darkhold_domain::window::Bounds>,
+    /// Window on `last_synced_at`: when this crawler last rechecked it.
+    pub refreshed: Option<darkhold_domain::window::Bounds>,
+    /// Window on `created_at`: when it entered this catalogue.
+    pub added: Option<darkhold_domain::window::Bounds>,
 }
 
 /// One source key and how many catalogue rows it contributed.
@@ -262,21 +268,34 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
          {SOURCE_COUNT_PG}::bigint AS source_count"
     );
 
+    // Windows: three clocks, one grammar. The predicate normalises BOTH sides
+    // (`datetime()` on SQLite, a timestamptz cast on PostgreSQL) because the
+    // catalogue's timestamps are not uniformly formatted: `source_updated_at` is
+    // stored as a bare `YYYY-MM-DD` by the XenForo importer, while `created_at`
+    // and `last_synced_at` carry `+00:00`. A plain text comparison against an
+    // RFC3339 bound is wrong at the boundary in both shapes -- `2026-10-13` sorts
+    // before `2026-10-13T00:00:00Z` (prefix) and `...46+00:00` sorts before
+    // `...46Z` because '+' precedes 'Z'. Normalising costs the index and buys the
+    // answer; docs/plans/m63-02-window-grammar.md records the write-side fix.
+    let windows = windows_sql(query);
+
     let base_sqlite = format!(
         "SELECT {columns_sqlite} FROM library_items \
          WHERE (? IS NULL OR source_key = ?) \
            AND likes >= ? \
            AND (? IS NULL OR lower(title) LIKE '%' || ? || '%' \
-                          OR lower(author_text) LIKE '%' || ? || '%') \
-         ORDER BY {order} LIMIT ? OFFSET ?"
+                          OR lower(author_text) LIKE '%' || ? || '%'){windows_sqlite} \
+         ORDER BY {order} LIMIT ? OFFSET ?",
+        windows_sqlite = windows.sqlite
     );
     let base_pg = format!(
         "SELECT {columns_pg} FROM library_items \
          WHERE (?::text IS NULL OR source_key = ?::text) \
            AND likes >= ? \
            AND (?::text IS NULL OR lower(title) LIKE '%' || ?::text || '%' \
-                          OR lower(author_text) LIKE '%' || ?::text || '%') \
-         ORDER BY {order} LIMIT ? OFFSET ?"
+                          OR lower(author_text) LIKE '%' || ?::text || '%'){windows_pg} \
+         ORDER BY {order} LIMIT ? OFFSET ?",
+        windows_pg = windows.postgres
     );
     let sql = sql_owned(db, base_sqlite, base_pg);
 
@@ -295,16 +314,23 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
         )
     };
     let (b1, b2, b3, b4, b5, b6, b7, b8) = bind_all(source, needle.as_deref());
+    // Window placeholders sit in the WHERE clause, so their binds come before
+    // LIMIT/OFFSET in both engines' positional order.
+    let windows_binds = windows.binds.clone();
 
     match db.backend() {
         crate::Backend::Sqlite => {
-            let rows: Vec<CatalogueRow> = sqlx::query_as(&sql)
+            let mut q = sqlx::query_as::<_, CatalogueRow>(&sql)
                 .bind(b1)
                 .bind(b2)
                 .bind(b3)
                 .bind(b4)
                 .bind(b5)
-                .bind(b6)
+                .bind(b6);
+            for value in &windows_binds {
+                q = q.bind(value.clone());
+            }
+            let rows: Vec<CatalogueRow> = q
                 .bind(b7)
                 .bind(b8)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
@@ -312,19 +338,61 @@ pub async fn search(db: &Database, query: &CatalogueQuery) -> Result<Vec<Catalog
             Ok(rows)
         }
         crate::Backend::Postgres => {
-            let rows: Vec<CatalogueRow> = sqlx::query_as(&sql)
+            let mut q = sqlx::query_as::<_, CatalogueRow>(&sql)
                 .bind(b1)
                 .bind(b2)
                 .bind(b3)
                 .bind(b4)
                 .bind(b5)
-                .bind(b6)
+                .bind(b6);
+            for value in &windows_binds {
+                q = q.bind(value.clone());
+            }
+            let rows: Vec<CatalogueRow> = q
                 .bind(b7)
                 .bind(b8)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?;
             Ok(rows)
         }
+    }
+}
+
+/// The window predicates, in one place, with the binds in the order the
+/// placeholders appear.
+struct WindowsSql {
+    sqlite: String,
+    postgres: String,
+    binds: Vec<String>,
+}
+
+fn windows_sql(query: &CatalogueQuery) -> WindowsSql {
+    let mut sqlite = String::new();
+    let mut postgres = String::new();
+    let mut binds = Vec::new();
+    for (column, bounds) in [
+        ("source_updated_at", query.updated),
+        ("last_synced_at", query.refreshed),
+        ("created_at", query.added),
+    ] {
+        let Some(bounds) = bounds else { continue };
+        if let Some(from) = bounds.from_sql() {
+            sqlite.push_str(&format!(" AND datetime({column}) >= datetime(?)"));
+            postgres.push_str(&format!(
+                " AND ({column})::timestamptz >= (?::timestamptz)"
+            ));
+            binds.push(from);
+        }
+        if let Some(to) = bounds.to_sql() {
+            sqlite.push_str(&format!(" AND datetime({column}) < datetime(?)"));
+            postgres.push_str(&format!(" AND ({column})::timestamptz < (?::timestamptz)"));
+            binds.push(to);
+        }
+    }
+    WindowsSql {
+        sqlite,
+        postgres,
+        binds,
     }
 }
 

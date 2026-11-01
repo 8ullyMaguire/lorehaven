@@ -79,6 +79,7 @@ pub mod typed_votes;
 pub mod vote_decay;
 pub mod vote_decay_sql;
 pub mod webhook;
+pub mod window;
 pub mod work_discussion;
 
 pub use error::{AppError, ErrorCode, Result};
