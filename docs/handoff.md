@@ -3069,6 +3069,14 @@ title, archive, likes and id per candidate. **On this catalogue the exact title 
 the dead copy** — the estates import carries canonical titles with no endorsement, the boards
 carry the readership under longer ones.
 
+**A seed page cost 5.4 s, and the database was not the reason.** Measured live: the same
+page ranked by a metric answered in 1.2 s, so four of those seconds were `rank()` — it called
+`Seed::weighted` once per pair and ran a `contains` over a row's title tokens for every
+summary token, 5,000 times per request. `prepare()` (`3c2c623c`) folds a row into
+idf-weighted terms once with a hash set behind it. If a seed page is slow again, time
+`?sort=source_pct` on the same filters first: it isolates the two `LIKE` scans (0.64 s each
+on 141,317 rows) from the ranking.
+
 Gates on this pass: `cargo test -p darkhold-domain -p darkhold-db --lib` 803 + 159;
 `catalogue_similar` 6 SQLite / 6 PostgreSQL; `m63_04_seed` 6; `catalogue_fandom` 5;
 `quality_metrics` 5; `catalogue_window` 4. Five mutations (title weight, author bonus,

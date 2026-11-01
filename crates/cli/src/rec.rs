@@ -529,19 +529,9 @@ pub async fn run(cli: &Cli, args: &RecArgs) -> Result<(), Failure> {
     if !(1..=100).contains(&args.limit) {
         return Err(bad_request("limit must be between 1 and 100"));
     }
-    // An engine request without a token is refused here rather than by the
-    // server, so the message can say what to do instead of quoting a 401.
-    let engine = args.engine.clone();
-    if engine.is_some() && cli.token.is_none() {
-        return Err(bad_request(format!(
-            "--engine {} reads your own reading history, so it needs a session: \
-             set DARKHOLD_TOKEN",
-            engine.unwrap_or_default()
-        )));
-    }
-    // The two things a shell can be told before a round trip, and both are
-    // refusals the server also makes: a message that names the flag is cheaper
-    // than a 422 the user has to read twice.
+    // These come before the engine check on purpose: `--seed X --engine rrf` is a
+    // contradiction whatever the token situation is, and answering it with
+    // "set DARKHOLD_TOKEN" sends the user to fix the wrong thing.
     if args.seed.is_some() && args.sort.is_some() {
         return Err(bad_request(
             "--seed already decides the order; --sort would be silently ignored",
@@ -551,6 +541,16 @@ pub async fn run(cli: &Cli, args: &RecArgs) -> Result<(), Failure> {
         return Err(bad_request(
             "--seed orders by similarity and --engine orders by your history; pick one",
         ));
+    }
+    // An engine request without a token is refused here rather than by the
+    // server, so the message can say what to do instead of quoting a 401.
+    let engine = args.engine.clone();
+    if engine.is_some() && cli.token.is_none() {
+        return Err(bad_request(format!(
+            "--engine {} reads your own reading history, so it needs a session: \
+             set DARKHOLD_TOKEN",
+            engine.unwrap_or_default()
+        )));
     }
     if args.exclude_read && cli.token.is_none() {
         return Err(bad_request(
