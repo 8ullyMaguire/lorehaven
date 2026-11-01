@@ -38,8 +38,12 @@ Traps that cost a day each, in this repo:
 2. **`library_items` is per-account.** A read that appears to be "the catalogue" is really the
    library rows of any account that imported it. `account_id` and `provenance_json` are the private
    side; anything exported or newly exposed must name its columns.
-3. **The timestamps are three formats** (bare date, `+00:00`, `Z`). Text comparison against one
-   bound is wrong at the boundary; normalise both sides. See M63-31.
+3. **The timestamps are one format, and the database enforces it.** Since M63-31 (migration 0132)
+   `library_items` stores `YYYY-MM-DDTHH:MM:SSZ` only: PostgreSQL has a `CHECK`, SQLite has
+   triggers, and a write in any other shape fails with "must be canonical". This is what makes the
+   window a plain index-able range — do not reintroduce a normalising function in a predicate. The
+   writer that produced the old bare dates is the external XenForo importer, which is not in this
+   repo, so a fixture that writes `2026-10-13` or `2026-01-01 00:00:00` is a bug in the fixture.
 4. **A clippy warning is a build error** (`build.warnings` denies). Three pre-existing warnings in
    `crates/db/src/work_ratings.rs` already fail `--all-targets`; your files must add none, and do
    not "fix" theirs inside an unrelated item.
@@ -68,14 +72,16 @@ For each row, the order of work is fixed:
    - `cargo test -p darkhold-app --test <item>`
    - `cargo clippy -p <touched crates> --all-targets`
    Report the real counts from the output.
-5. Deploy per `darkhold-thinkcentre-deploy` — **currently blocked** by
-   `docs/plans/deploy-lineage-decision.md`; if it is still waiting, say so and leave the item at
-   `implemented-locally-tested` rather than claiming a deploy.
+5. Deploy per `darkhold-thinkcentre-deploy`. The lineage question is closed
+   (`docs/plans/deploy-lineage-decision.md`): `~/code/rust/darkhold` is the thinkcentre tree over
+   the mount, and both trees are one history now — fetch `local`, reset, build from the tree on the
+   host. Run `migrate` **from the tree root** or it silently migrates a fresh sqlite dev database.
 6. Docs: the `requirements.csv` row's `status`, `evidence` (paths that exist) and `notes` (what
    landed, what was deferred and why); the plan's own "what landed" section if it diverged; a new
    row for any defect the item uncovered.
-7. Commit; push to `origin` (`git.polarisocial.xyz`) and `github` — **only when the deploy lineage
-   is settled**; until then commit locally and say push is held.
+7. Commit; push to `origin` (`git.polarisocial.xyz`) and `github`. The two remotes are ~1046 commits
+   behind this line and merging them rewrites published history, so a push is an operator decision,
+   not a step: commit locally and say the push is held until they say otherwise.
 8. A session note in `~/secondbrain/10-Projects/`, named for the date and the project.
 
 Evidence rules, because they are the difference between a report and a claim:

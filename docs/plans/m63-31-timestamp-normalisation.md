@@ -164,3 +164,41 @@ M63-02 spent a session finding.
   wire format a client sees is that string. Recorded as a follow-up, not smuggled in here.
 - Rewriting the external XenForo loader. It is not in this workspace; the constraint is what makes
   its next write visible instead of silent.
+
+## What landed (`9254e5e6`), and what the live run measured
+
+Deployed as build `0.1.0+9254e5e6`; migration 0132 applied to the live database in 226 s
+(327,764 rows touched across the three columns, then `VALIDATE`, then the index). 129 migrations
+applied, 0 pending.
+
+| claim | command | output |
+|---|---|---|
+| one shape, no exceptions | `select count(*) … where col !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'` | **0** across all three columns |
+| no instant moved | snapshot table `m6331_before` vs the new values | 3 rows differ, **max drift 0.948 s** — the sub-second truncation, by design |
+| the partition still partitions | `>= '2026-10-25T12:00:00Z'` / `<` | 105 + 91,366 = **91,471**, exactly the number of dated rows before |
+| the same day answers the same | `?updated=@2026-10-27` | **10 items**, unchanged from before the migration |
+| the window uses the index | `EXPLAIN` on the endpoint's predicate | `Bitmap Index Scan on idx_library_items_source_updated_at` (was `Parallel Seq Scan`) |
+| a legacy shape is refused live | `INSERT … '2026-10-13'` in a transaction | `ERROR: violates check constraint "library_items_canonical_timestamps"` |
+| the running server has it | `/api/v1/meta` | `Darkhold 0.1.0 0.1.0+9254e5e6` |
+| nothing else broke | journal since restart | 0 errors, 0 constraint violations; `?source=sb&sort=quality` 200 in 0.23 s |
+
+Latency, same host, same data, `limit=20`:
+
+| query | before | after |
+|---|---|---|
+| `?updated=7d` | 0.34–0.71 s | **0.01 s** |
+| `?updated=2026-01-01..2026-10-15` (44 k rows in range) | 0.29–0.35 s | **0.03 s** |
+
+The wide window is the honest caveat: `EXPLAIN` on a predicate covering 44 k rows chooses a bitmap
+scan and takes 227 ms for the page — the index is not a win there, and the planner is right not to
+use a plain index scan. It is a win for the windows people actually ask for (`7d`, `@date`), which is
+the case that was slow.
+
+## Deferred, with reasons
+
+- `updated_at` has the same mixed history (58,728 `Z` + 66,875 `+00:00` in `created_at`, similar in
+  `last_synced_at`) and is still unconstrained. It is not a window column, so it was out of scope;
+  the next migration that touches this table should include it.
+- The column type stays `TEXT`. `timestamptz` would remove the text-versus-instant question, but the
+  value is bound as `Option<String>` in the API, the exporter and ~40 call sites, and the wire format
+  a client sees is that string. Its own item.
