@@ -6,8 +6,10 @@ this sweep goes deep on one axis only.
 
 The anchor ask, in the operator's words: a CLI for recommendations where the user chooses the
 time frame, the fandom, the recommendation engine and the quality metric — *"naruto fics that
-updated last week, sorted by metric X, run by algorithm Y"*. Everything below is that idea, or
-a power-user surface that makes it more useful.
+updated last week, sorted by metric X, run by algorithm Y"*. The time frame must not be only
+"the last week": *"updated more than a week ago"*, an absolute range, a calendar month and a
+single day all have to work, on the right one of the three clocks. Everything below is that
+idea, or a power-user surface that makes it more useful.
 
 Grounded in what exists: `dh` CLI stub + offline cache card (in progress), `rec.mode` config
 with legacy|rrf and the strategy registry (shipped), `/api/v1/catalogue?source=&sort=quality`,
@@ -19,7 +21,7 @@ Effort tags: **S** ≤2 days, **M** ≤5, **L** >5.
 ## The flagship: `dh rec`
 
 - **[M] `dh rec` with per-call engine selection and `--explain`** — `dh rec --fandom naruto --updated 7d --engine rrf --sort wilson`. Engine is currently instance config (`rec.mode`), so comparing legacy against rrf needs a restart and an operator; a per-call override makes it an experiment a user can run at the terminal, and `--explain` prints each strategy's contribution so the difference is legible.
-- **[S] `--updated 7d|24h|2026-10-01..2026-11-01` as a first-class filter** — mapped to `works.updated_at` with the same window grammar everywhere it appears (rec, q, watch, digest), so "updated last week" is a phrase the whole tool understands once.
+- **[S] One window grammar, on three clocks** — `--updated 7d` is a phrase the whole tool understands once (rec, q, watch, digest, export), and it takes more than "the last week": `>7d` (older than), `-30d..-7d` (between), `2026-10-01..2026-11-01` (absolute), `last-month` (calendar), `@2026-11-01` (a day). It also names **which clock**, because the catalogue has three and "updated last week" hides a real ambiguity — see below.
 - **[S] `--sort` accepts any registered metric by name** — `wilson`, `kudos`, `kudos_per_1k_views`, `kudos_per_hour`, `completion`, `updater_reliability`, `hidden_gem`, `freshness_weighted_quality`. The metric registry that already backs analytics becomes the single place a sort name is defined, so a new metric is not a new route.
 - **[M] `--seed <work>` for similar-to-this-work** — tag plus cooccurrence vectors already power the rec strategies; exposing the seed as a CLI argument turns "more like this one" into a pipeable query instead of a button.
 - **[S] `--author <pseud> --exclude-read`** — backfill an author's catalogue minus what the reader has already finished, using attention records as an implicit negative set rather than a separate flag per surface.
@@ -34,6 +36,67 @@ Effort tags: **S** ≤2 days, **M** ≤5, **L** >5.
 - **[S] `--link md|epub|url`** — emits ready-to-paste markdown or a URL list for a reading queue, because the next step after choosing is always moving the list somewhere.
 - **[S] `--dry-run` prints the resolved SQL, the parameter set and the engine plan** — before any network call, so a surprising result set is diagnosable without reading code.
 - **[S] `--fresh` / `--cache-ttl 60`** — explicit cache control per call. A recommendation you cannot force-recompute is a recommendation you cannot debug.
+
+## The window grammar (the anchor, made flexible)
+
+The anchor ask is *"naruto fics that updated last week"*. Written that way it is three questions
+wearing one sentence, because the catalogue stores **three clocks** on every row and they disagree
+by design:
+
+| Clock | Column | Answers |
+|---|---|---|
+| the source's | `library_items.source_updated_at` | when the author last touched it on the archive |
+| ours | `library_items.last_synced_at` | when the crawler last rechecked it |
+| the entry's | `library_items.created_at` | when it entered this instance's catalogue |
+
+The monthly recheck makes them drift: a fic updated yesterday but rechecked in March has a recent
+source clock and a stale sync clock. `--updated 7d` alone would silently pick one, and a user would
+get wrong answers with no way to tell. So the flags are **one grammar, three names**:
+
+```
+--updated   <window>    the source's clock   (the author touched it)
+--refreshed <window>    our clock            (the crawler rechecked it)
+--added     <window>    entry age            (the catalogue gained it)
+```
+
+And each window is a small language rather than a duration:
+
+| Form | Meaning |
+|---|---|
+| `7d` `36h` `3w` `6m` `2y` | within the last N (rolling) |
+| `>7d` `>3m` | **older than** N — the half nobody writes until they need it |
+| `-30d..-7d` | between 30 and 7 days ago |
+| `2026-10-01..2026-11-01` | absolute range, `[start, end)` |
+| `..-7d` | everything older than a week ago |
+| `@2026-11-01` | that calendar day |
+| `today` `yesterday` `this-week` `last-week` `this-month` `last-month` `this-year` `last-year` | calendar windows in the instance's timezone |
+| `any` | no constraint (the default) |
+
+Combinations AND together, which is where the grammar earns itself:
+
+```sh
+# the author updated it this week and we have not looked since
+dh rec --fandom naruto --updated 7d --refreshed '>30d'
+
+# completed works that stopped updating more than a year ago: read them whole
+dh rec --fandom naruto --completion complete --updated '>1y'
+
+# everything first catalogued last month, whatever the source clock says
+dh q 'tag:naruto' --added last-month --sort wilson
+```
+
+Three implementation constraints, each grounded in something that already exists:
+
+1. **The parser is shared, not per-surface.** It belongs beside the wire types (`crates/metadata`
+   / `crates/domain`), and the route uses it too — `/api/v1/catalogue?updated=%3E7d`. A CLI that
+   parsed windows itself would fork the meaning the first time either side changed.
+2. **`>7d` is the default-buster.** Client-side filtering of a top-20 page cannot answer "older
+   than a year" at all: the page never contains those rows. The predicate has to be in SQL, which
+   is why this is a query the index carries (`idx_library_items_source_likes` plus a range scan),
+   not a flag the client post-filters.
+3. **Half-open ranges everywhere.** `2026-10-01..2026-11-01` excludes 1 November, so two adjacent
+   ranges tile without double-counting a row. `--updated 7d` and `--updated '>7d'` partition the
+   catalogue exactly; a `>=` on both ends would not.
 
 ## Query language for the terminal
 
