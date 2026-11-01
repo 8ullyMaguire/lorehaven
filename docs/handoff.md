@@ -3086,3 +3086,46 @@ test that names it.
 Two pre-existing clippy failures now block `--all-targets` on `darkhold-app` as well as
 `darkhold-db`: `crates/app/src/routes/draw.rs:191` and `:254` report a useless conversion to
 the same type. They are not this item's and were left alone (M63-35 records them).
+
+## M45-25 (§58) — supply: keystone authors, droughts, routing
+
+The row read "keystone author program: drought detection, feedback routing, beta
+matching", and the measurement split it down the middle. **Keystone detection works
+today**: 1,247 engaged rows across 920 authors, 202 with two or more. **Drought
+detection does not**: `comments` and `work_ratings` are both EMPTY on this instance,
+so every engaged work has zero conversation and a drought list would be the whole
+catalogue. The report therefore refuses — `measured: false`, a reason, no authors —
+and the first real comment on the site is what turns it on. Beta matching is
+M45-33's row and the plan says so.
+
+What makes the keystone list trustworthy is the rule M63-03 established: rank a work
+**among the engaged rows of its own source** and shrink by `n/(n+10)`, because a mean of
+raw endorsement counts is a ranking by archive size. The fixture that proves it is built
+so the two orders disagree: `bea` leads on raw per-source percentile (0.80 vs 0.775) and
+loses after shrinkage (0.60 vs 0.72). The shrinkage mutation is caught by that test;
+without the maths, four lucky rows outrank a real backlist.
+
+Lessons worth keeping:
+
+- **`COUNT(DISTINCT li.id)` over a `LEFT JOIN` counts the rows with no comment.** The
+  first version reported "3 works with conversation" where the answer was 1, on a fixture
+  where two of the author's three works had none. `COUNT(DISTINCT CASE WHEN c.id IS NOT
+  NULL THEN li.id END)` is the correct shape, and the failing test was the only notice.
+- **`likes` is `INTEGER` on PostgreSQL and `i64` on SQLite.** `get::<i64>` panics with
+  `ColumnDecode … SQL type INT4` on the PostgreSQL arm only; the SQLite run passed while
+  the real database would have 500'd. `CAST(likes AS BIGINT)` in both arms.
+- **A new migration must declare its snapshot policy before the suite will pass.**
+  `scripts/check-snapshot-pii.py` runs inside `cargo test -p darkhold-app --lib`
+  (`doctor::tests::the_snapshot_gate_check_ran_the_script`), so an undecided identity
+  column fails the unit gate with "the gate check reported Fatal" — which reads like a
+  broken doctor, not like a missing policy entry. `supply_routing.account_id` is
+  `drop_table`.
+- **Two guards on one invariant hide each other.** Completion pays once because of the
+  `completed_at` early return *and* the `supply-route:<id>` idempotency key; removing
+  either leaves the test green. The mutation that fails removes both — say so in the plan
+  rather than claiming a single-guard test.
+
+Gates: domain 803, db lib 159, app lib 236, cli 16; `supply_keystones` 7 SQLite + 7
+PostgreSQL; `m45_25_supply` 6; six mutations caught. Live: 133 migrations applied, 0
+pending, unit active. **The operator and reader doors are credential-gated, so the happy
+paths are proven in tests only** — this session held no session for either.

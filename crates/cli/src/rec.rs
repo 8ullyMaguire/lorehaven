@@ -104,7 +104,7 @@ impl std::fmt::Display for Failure {
     }
 }
 
-fn bad_request(message: impl Into<String>) -> Failure {
+pub(crate) fn bad_request(message: impl Into<String>) -> Failure {
     Failure {
         message: message.into(),
         code: 2,

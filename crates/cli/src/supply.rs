@@ -20,7 +20,7 @@
 use clap::Subcommand;
 use serde_json::Value;
 
-use crate::rec::{environment, failure_for, Failure};
+use crate::rec::{bad_request, environment, failure_for, Failure};
 use crate::Cli;
 
 #[derive(Debug, Clone, Subcommand)]
@@ -67,7 +67,7 @@ pub async fn run(cli: &Cli, args: &SupplyArgs) -> Result<(), Failure> {
     // holds, and the reader doors are keyed by account. Refused here so the
     // message says what to set rather than quoting a 401.
     let token = cli.token.as_deref().ok_or_else(|| {
-        environment("every supply door needs a session: set DARKHOLD_TOKEN")
+        bad_request("every supply door needs a session: set DARKHOLD_TOKEN")
     })?;
 
     let client = reqwest::Client::builder()
@@ -94,12 +94,12 @@ pub async fn run(cli: &Cli, args: &SupplyArgs) -> Result<(), Failure> {
         }
         SupplyArgs::Recompute { min_works, min_pct } => {
             if !(1..=25).contains(min_works) {
-                return Err(environment(
+                return Err(bad_request(
                     "min_works must be between 1 and 25; a keystone is a handful of authors",
                 ));
             }
             if !(0.0..=1.0).contains(min_pct) {
-                return Err(environment(
+                return Err(bad_request(
                     "min_pct is a fraction of a source's engaged rows, so it lies between 0 and 1",
                 ));
             }
@@ -169,7 +169,7 @@ fn check_limit(limit: i64) -> Result<(), Failure> {
     if (1..=100).contains(&limit) {
         Ok(())
     } else {
-        Err(environment("limit must be between 1 and 100"))
+        Err(bad_request("limit must be between 1 and 100"))
     }
 }
 
