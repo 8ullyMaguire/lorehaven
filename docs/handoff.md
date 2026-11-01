@@ -3129,3 +3129,50 @@ Gates: domain 803, db lib 159, app lib 236, cli 16; `supply_keystones` 7 SQLite 
 PostgreSQL; `m45_25_supply` 6; six mutations caught. Live: 133 migrations applied, 0
 pending, unit active. **The operator and reader doors are credential-gated, so the happy
 paths are proven in tests only** — this session held no session for either.
+
+## M65 (§59) — the module host: a small core, every surface a switch
+
+Asked for: "refactor darkhold to be as modular and configurable as possible, a small core and
+everything else as extensions, everything that exists on by default, everything we have thought
+about but not built also an extension and switched off". Shipped as Phase 1 of that, with the
+vocabulary resolved against the tree rather than the request.
+
+**The incumbent was real and would have been a live 500.** `GET /api/v1/extensions` already
+exists: `marketplace.rs` serves a third-party extension catalogue with grants, revokes, webhooks
+and `extension_submissions` (migration 0113). The first draft mounted a second `GET /extensions`
+in a new route module; the assembled router panicked at test time with
+`Overlapping method route. Handler for GET /extensions already exists`. So the compiled-surface
+host is called a **module** everywhere — `[modules]` in config, `/api/v1/modules` on the wire,
+`dh module …` in the CLI — which is also the noun `AppError::ModuleUnavailable` has carried since
+before this milestone. **An extension is a package you install; a module is a surface the build
+compiles.** Do not "unify" the two names later without reading §59.1.
+
+What shipped:
+
+- `crates/domain/src/modules/` — 97 rows (74 surfaces that exist, all `default_on: true`; 23 M64
+  surfaces that do not, `planned`, off, unenablable), `ModuleState::resolve`, and `validate` with
+  six refusals. In `domain` rather than `app` because the registry is static data and `dh` must
+  print the same rows the server enforces without linking the web stack.
+- `crates/app/src/server.rs` — **90 merge sites** rewritten to `module_mount(&state, id, router,
+  class)`, which snapshots the resolution at mount and layers the 404 refusal. Core keeps the
+  plain `classified` helper: `meta`, `health`, `auth`, `settings`, `openapi`, plus the catalogue.
+- `crates/app/src/routes/modules.rs` — `GET /api/v1/modules`, core, lists disabled rows too.
+- `crates/cli/src/module.rs` — `list|show|check`, with the stated fallback to the compiled
+  registry when the instance does not answer (a CLI that silently showed defaults would describe a
+  posture the server is not enforcing).
+- `[modules] disabled/enabled/allow_user_overrides` in `darkhold.toml`, validated at startup.
+
+Gates: domain `modules` 10, app lib 236, `m65_module_host` 8, cli 16. Six mutations, each caught —
+and one of them first came back as a **compile warning, not a red test** (`enabled() always true`
+left `self` unused, and warnings are denied here); the corrected probe
+`is_core(id) || self.enabled.contains(id) || true` failed the right test. A build break is not a
+verdict.
+
+Measured, for the next session: 82 route modules on disk, 79 mounted, 90 merge sites, `config.rs`
+6,160 lines across 49 top-level sections. The registry's `summary` for every pre-M65 row is lifted
+from that module's own `//!` header, so the catalogue cannot describe a surface in words the
+surface does not use.
+
+Not built, and registered as such: per-user overrides (M65-04: `module_user_state`, `PATCH`,
+per-request narrowing only when someone holds an override), the roadmap-generated planned
+catalogue (M65-05), and the frontend reading `/api/v1/modules` for its nav (M65-06).
