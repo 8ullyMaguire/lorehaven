@@ -272,3 +272,43 @@ Mutations, both reverted:
 A first attempt at the second mutation removed the `suggest()` call outright; that fails the build on
 `dead_code` (warnings are denied), which is not a verdict about the test. The mutation has to keep
 the code compiling to say anything.
+
+## The live verification, and what it found
+
+Deployed as `0.1.0+f13597f3`, then re-deployed as `+cb72c098` with the coverage fix.
+
+| claim | command | output |
+|---|---|---|
+| the filter answers | `curl '…/catalogue?fandom=naruto&limit=5'` | `200` in **0.10 s**, 5 rows, `fandom: "Naruto"` |
+| the index carries it | `EXPLAIN ANALYZE` on the same predicate | 1.9 ms: index scan `canonical_entities_norm` → `work_tags_node_work` → `library_items_work` |
+| coverage is reported | same response | `fandom_tagged_rows: 7626`, `catalogue_rows: 141317` |
+| a misspelt name is answered | `curl '…/catalogue?fandom=narut'` | `422` `fandom: no fandom called "narut"; did you mean "Naruto"? (233 fandoms known)` |
+| the list is the list | `curl '…/catalogue/fandoms'` | 233 fandoms, top `Harry Potter` 2,311 |
+| the engines are not public | `curl '…/rec/run?engine=catalogue'` | `401` |
+
+And then the number that changes what the feature is worth:
+
+```
+$ sudo -u postgres psql -tA -F'|' -d darkhold -c "…all tagged rows, by source…"
+pawchive|7626|0
+```
+
+**Every tagged row is `pawchive`, and none of the 7,626 has a like count.** So `--fandom naruto
+--sort likes` returns 265 rows whose likes are all zero — a correct answer, ordered by nothing. The
+page now carries `fandom_tagged_with_likes` beside `fandom_tagged_rows`, and the CLI prints
+
+```
+Naruto: 7626 of 141317 catalogue rows carry a fandom tag (5.4%) — and none of them publishes a like
+count, so this order is ties only
+```
+
+Filed as **M63-32** (backfill tags for the forum/AO3 estate and import pawchive's endorsements). The
+filter was never the problem; the metadata is.
+
+## Not verified live, and why
+
+`/api/v1/rec/run` structurally needs a session, and no operator credential was used to obtain one.
+Its three engines are verified on both engines in `m63_01_rec` (9/9 each) and through
+`engine_legacy`'s "restricted to the filter" assertion; the live check stops at the `401`. Saying
+"engines verified live" on the strength of a green unit suite would be the exact claim this project
+keeps having to retract.
