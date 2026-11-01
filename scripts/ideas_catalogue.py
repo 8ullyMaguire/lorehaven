@@ -128,8 +128,10 @@ def audit_absent() -> list[str]:
         m = re.match(r"^\|\s*(\d+)\s*\|\s*(.+?)\s*\|", line)
         if not m:
             continue
-        title = re.sub(r"[*_`]", "", m.group(2)).strip().strip('"')
-        if 4 <= len(title) <= 70:
+        title = re.sub(r"[*_`]", "", m.group(2)).strip().strip('"').replace('"', "")
+        # One-word cells ("cover", "pace", "seeding") are table column values, not
+        # ideas: the audit's table has cells that are attributes as well as items.
+        if 4 <= len(title) <= 70 and words(title, 2):
             out.append(title)
     return out
 
@@ -170,6 +172,12 @@ def host_rows() -> list[dict]:
             }
         )
     return out
+
+
+def words(text: str, least: int) -> bool:
+    """At least `least` word-ish tokens of 2+ letters: a heading that is one word
+    is usually a label, not a proposal."""
+    return len(re.findall(r"[A-Za-z]{2,}", text)) >= least
 
 
 def shorten(text: str, limit: int = 80) -> str:
@@ -297,11 +305,24 @@ def main() -> int:
     sources: dict[str, set[str]] = {}
     ideas: list[dict] = []
 
-    def add(title: str, source: str, context: str = "", milestone: str = "", built: bool = False):
+    def add(
+        title: str,
+        source: str,
+        context: str = "",
+        milestone: str = "",
+        built: bool = False,
+        row_id: str = "",
+    ):
+        title = title.replace('"', "").strip()
+        if not words(title, 2):
+            return
         key = slug(title)
         if not key:
             return
-        entry = next((e for e in ideas if e["slug"] == key), None)
+        entry = next(
+            (e for e in ideas if e["slug"] == key or (row_id and e.get("row_id") == row_id)),
+            None,
+        )
         if entry is None:
             entry = {
                 "slug": key,
@@ -310,6 +331,7 @@ def main() -> int:
                 "context": context,
                 "milestone": milestone,
                 "built": built,
+                "row_id": row_id,
             }
             ideas.append(entry)
         if source not in entry["sources"]:
@@ -319,9 +341,11 @@ def main() -> int:
         if milestone and not entry["milestone"]:
             entry["milestone"] = milestone
 
-    # 1. requirements.csv — the committed queue.
+    # 1. requirements.csv — the committed queue. Keep the row's id: re-slugging the
+    #    sentence gave `idea.dh-watch-saved-query-exec-cmd-notify-ntfy-de`, which is
+    #    unreadable and hides that this is M63-12 rather than a new idea.
     for rid, requirement, milestone in planned:
-        add(requirement[:70], "docs/requirements.csv", requirement, milestone)
+        add(requirement.split(":")[0], "docs/requirements.csv", requirement, milestone, row_id=rid)
 
     # 2. Brainstorms enumerate their ideas as `### Something` headings.
     for path in sorted((REPO / "docs/ideas").glob("*.md")):
@@ -349,19 +373,20 @@ def main() -> int:
     for title in audit_absent():
         add(title, "docs/audit-100-reader-ideas-2026-10-04.md")
 
-    # 4. the vault's darkhold idea notes. Named files, not a grep: a grep over
-    #    the vault finds every session note that mentions the word.
+    # 4. the vault's *idea* notes. Named files, not a grep, and not the session
+    #    notes: `ranking-substrate-47` and `companion-firefox-extension-48` record
+    #    what happened, so their `###` headings are narration — "State at handoff",
+    #    "Three decisions I made", "Lesson worth keeping" — and reading them put a
+    #    changelog into a backlog. Two of the four named sources were that mistake.
     for name in [
         "2026-09-20T183349+0200-darkhold-growth-ideas.md",
         "2026-09-30-cross-project-feature-suggestions.md",
-        "2026-09-30-darkhold-companion-firefox-extension-48.md",
-        "2026-09-30-darkhold-ranking-substrate-47.md",
     ]:
         path = VAULT / name
         if not path.exists():
             print(f"warning: missing source {path}", file=sys.stderr)
             continue
-        for title in headings(path):
+        for title in headings(path, levels=(3,)):
             add(title, f"vault:{name}")
 
     host = host_rows()
@@ -388,7 +413,10 @@ def main() -> int:
         rows.append(
             {
                 "why_summary": escape(idea["context"])[:180],
-                "id": f"idea.{idea['slug']}" if not built_id else built_id,
+                # A requirement already has an id, and re-slugging its sentence
+                # gave `idea.dh-watch-saved-query-exec-cmd-notify-ntfy-de`:
+                # unreadable, and it hides that this is M63-12.
+                "id": built_id or idea.get("row_id") or f"idea.{idea['slug']}",
                 "title": idea["title"],
                 "sources": idea["sources"],
                 "milestone": idea["milestone"] or "unassigned",

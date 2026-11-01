@@ -1,6 +1,6 @@
 {
  "generated_by": "scripts/ideas_catalogue.py",
- "count": 191,
+ "count": 173,
  "ideas": [
   {
    "why_summary": "",
@@ -16,416 +16,13 @@
    "built": false
   },
   {
-   "why_summary": "a challenger is promoted automatically only on a sequential-test win with every guardrail in bounds, at minimum sample and after seven days, and demoted automatically when a guardr",
-   "id": "idea.a-challenger-is-promoted-automatically-only",
-   "title": "a challenger is promoted automatically only on a sequential-test win w",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "an offline pre-registration harness scores a challenger against recorded history on taste::eval's metrics before it takes live traffic an offline pre-registration harness scores a ",
-   "id": "idea.an-offline-pre-registration-harness-scores-a",
-   "title": "an offline pre-registration harness scores a challenger against record",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Author-note links through snapshot-and-monitor pipeline Author-note links through snapshot-and-monitor pipeline",
-   "id": "idea.author-note-links-through-snapshot-and-monit",
-   "title": "Author-note links through snapshot-and-monitor pipeline",
+   "why_summary": "Feedback-drought intervention: welcome rota guarantees first-work comment in 72h Feedback-drought intervention: welcome rota guarantees first-work comment in 72h",
+   "id": "M45-26",
+   "title": "Feedback-drought intervention",
    "sources": [
     "docs/requirements.csv"
    ],
    "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Beta and specialist matchmaking: betas, Britpickers, sensitivity readers Beta and specialist matchmaking: betas, Britpickers, sensitivity readers",
-   "id": "idea.beta-and-specialist-matchmaking-betas-britpi",
-   "title": "Beta and specialist matchmaking: betas, Britpickers, sensitivity reade",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Built-in compliance tooling: notice forms, SOR templates, DSAR export Built-in compliance tooling: notice forms, SOR templates, DSAR export",
-   "id": "idea.built-in-compliance-tooling-notice-forms-sor",
-   "title": "Built-in compliance tooling: notice forms, SOR templates, DSAR export",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "catalogue q= searches the summary as well as title and author, and can search title+summary in one query from the CLI catalogue q= searches the summary as well as title and author,",
-   "id": "idea.catalogue-q-searches-the-summary-as-well-as",
-   "title": "catalogue q= searches the summary as well as title and author, and can",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Claim your works: invite authors whose works exist as metadata Claim your works: invite authors whose works exist as metadata",
-   "id": "idea.claim-your-works-invite-authors-whose-works",
-   "title": "Claim your works: invite authors whose works exist as metadata",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "co_shelving: reading lists are first-class (create, curate, publish, follow) and list co-occurrence feeds story.similar and library.because_you_shelved co_shelving: reading lists a",
-   "id": "idea.co-shelving-reading-lists-are-first-class-cr",
-   "title": "co_shelving: reading lists are first-class (create, curate, publish, f",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Config profiles (--profile, DARKHOLD_PROFILE) with per-profile instance URL and token; dh config get/set with dotted keys Config profiles (--profile, DARKHOLD_PROFILE) with per-pro",
-   "id": "idea.config-profiles-profile-darkhold-profile-wit",
-   "title": "Config profiles (--profile, DARKHOLD_PROFILE) with per-profile instanc",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "crates/cli: the `dh` binary, a thin client of /api/v1 that may not depend on crates/app or crates/db crates/cli: the `dh` binary, a thin client of /api/v1 that may not depend on cr",
-   "id": "idea.crates-cli-the-dh-binary-a-thin-client-of-ap",
-   "title": "crates/cli: the `dh` binary, a thin client of /api/v1 that may not dep",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Cross-language supply: taste-score foreign works, fund translation bounties Cross-language supply: taste-score foreign works, fund translation bounties",
-   "id": "idea.cross-language-supply-taste-score-foreign-wo",
-   "title": "Cross-language supply: taste-score foreign works, fund translation bou",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "crosspost_union: one story's engagement is summed across every archive it appears on, reusing M63-04's resolution rule for which copy a name means crosspost_union: one story's enga",
-   "id": "idea.crosspost-union-one-story-s-engagement-is-su",
-   "title": "crosspost_union: one story's engagement is summed across every archive",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Curator lenses: invited rec-bloggers publish opt-in taste-profile views Curator lenses: invited rec-bloggers publish opt-in taste-profile views",
-   "id": "idea.curator-lenses-invited-rec-bloggers-publish",
-   "title": "Curator lenses: invited rec-bloggers publish opt-in taste-profile view",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh admin backup --to - streams a consistent dump to stdout; dh admin health emits machine-readable checks with per-check exit codes dh admin backup --to - streams a consistent dump",
-   "id": "idea.dh-admin-backup-to-streams-a-consistent-dump",
-   "title": "dh admin backup --to - streams a consistent dump to stdout; dh admin h",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh audit --since 7d: the account owner sees every write their tokens made dh audit --since 7d: the account owner sees every write their tokens made",
-   "id": "idea.dh-audit-since-7d-the-account-owner-sees-eve",
-   "title": "dh audit --since 7d: the account owner sees every write their tokens m",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh bench: times the 20 canonical queries against a local or remote instance and prints a table dh bench: times the 20 canonical queries against a local or remote instance and print",
-   "id": "idea.dh-bench-times-the-20-canonical-queries-agai",
-   "title": "dh bench: times the 20 canonical queries against a local or remote ins",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh cron install --every 6h --jitter 10m: writes a systemd user timer for a saved query or recheck job dh cron install --every 6h --jitter 10m: writes a systemd user timer for a sav",
-   "id": "idea.dh-cron-install-every-6h-jitter-10m-writes-a",
-   "title": "dh cron install --every 6h --jitter 10m: writes a systemd user timer f",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version drift, one suggested fix per problem dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version d",
-   "id": "idea.dh-doctor-diagnoses-token-scope-clock-skew-t",
-   "title": "dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh lib sync --since: incremental local sqlite mirror of the library and catalogue dh lib sync --since: incremental local sqlite mirror of the library and catalogue",
-   "id": "idea.dh-lib-sync-since-incremental-local-sqlite-m",
-   "title": "dh lib sync --since: incremental local sqlite mirror of the library an",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh lib tag --from-csv with a per-row error report and a rollback file; dh lib diff and push --dry-run before any bulk write dh lib tag --from-csv with a per-row error report and a ",
-   "id": "idea.dh-lib-tag-from-csv-with-a-per-row-error-rep",
-   "title": "dh lib tag --from-csv with a per-row error report and a rollback file;",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh q --explain prints the query plan and index used; parse errors point at the token and exit 2 dh q --explain prints the query plan and index used; parse errors point at the token",
-   "id": "idea.dh-q-explain-prints-the-query-plan-and-index",
-   "title": "dh q --explain prints the query plan and index used; parse errors poin",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=, updated>=-7d, words>, completion:), shared with web search dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=,",
-   "id": "idea.dh-q-expr-with-a-real-grammar-tag-and-or-not",
-   "title": "dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=, updated>=",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh q --from-file with .darkhold/queries/*.q: the user's query library is a versioned file, not browser history dh q --from-file with .darkhold/queries/*.q: the user's query library",
-   "id": "idea.dh-q-from-file-with-darkhold-queries-q-the-u",
-   "title": "dh q --from-file with .darkhold/queries/*.q: the user's query library ",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: output shape is a contract dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: output shape is a",
-   "id": "idea.dh-rec-jsonl-fields-table-wide-cols-link-md",
-   "title": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: ou",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh rec --sort accepts any registered metric name (wilson, kudos, kudos_per_1k_views, kudos_per_hour, completion, updater_reliability, hidden_gem, freshness_weighted_quality) dh rec",
-   "id": "idea.dh-rec-sort-accepts-any-registered-metric-na",
-   "title": "dh rec --sort accepts any registered metric name (wilson, kudos, kudos",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh stats --by week --year: streaks and a shareable wrapped-style personal report for the engineering-minded reader dh stats --by week --year: streaks and a shareable wrapped-style ",
-   "id": "idea.dh-stats-by-week-year-streaks-and-a-shareabl",
-   "title": "dh stats --by week --year: streaks and a shareable wrapped-style perso",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh tui: a full-screen mode of the same binary behind a feature flag, not a separate project dh tui: a full-screen mode of the same binary behind a feature flag, not a separate proj",
-   "id": "idea.dh-tui-a-full-screen-mode-of-the-same-binary",
-   "title": "dh tui: a full-screen mode of the same binary behind a feature flag, n",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Dry-run is the default for every bulk verb; --yes applies; dh redact strips pseudonyms and emails from JSON output Dry-run is the default for every bulk verb; --yes applies; dh red",
-   "id": "idea.dry-run-is-the-default-for-every-bulk-verb-y",
-   "title": "Dry-run is the default for every bulk verb; --yes applies; dh redact s",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "DSA notice-and-action flow and statements of reasons DSA notice-and-action flow and statements of reasons",
-   "id": "idea.dsa-notice-and-action-flow-and-statements-of",
-   "title": "DSA notice-and-action flow and statements of reasons",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "engagement_overlap at reader-cluster level with k-anonymity (a minimum number of readers per cluster) and aggregation thresholds, exposing no per-reader signal engagement_overlap a",
-   "id": "idea.engagement-overlap-at-reader-cluster-level-w",
-   "title": "engagement_overlap at reader-cluster level with k-anonymity (a minimum",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "erasure reaches the supply routing record: \u00a758.3 keeps a routing row forever, and GDPR erasure must still remove the account from it erasure reaches the supply routing record: \u00a758.",
-   "id": "idea.erasure-reaches-the-supply-routing-record-58",
-   "title": "erasure reaches the supply routing record: \u00a758.3 keeps a routing row f",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "every recommendation surface has a canonical id and a field of two to four named algorithms chosen by config, and an algorithm whose data is empty refuses by name instead of servin",
-   "id": "idea.every-recommendation-surface-has-a-canonical",
-   "title": "every recommendation surface has a canonical id and a field of two to ",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
@@ -433,7 +30,7 @@
   },
   {
    "why_summary": "Exchanges, prompt memes, big bangs with matching engine Exchanges, prompt memes, big bangs with matching engine",
-   "id": "idea.exchanges-prompt-memes-big-bangs-with-matchi",
+   "id": "M45-27",
    "title": "Exchanges, prompt memes, big bangs with matching engine",
    "sources": [
     "docs/requirements.csv"
@@ -445,61 +42,9 @@
    "built": false
   },
   {
-   "why_summary": "Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 auth, 5 rate-limited) Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 ",
-   "id": "idea.exit-codes-as-a-documented-tested-api-0-ok-1",
-   "title": "Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not ",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "fandom_graph: an operator-managed adjacency map with edge weights (Worm<->Ward, Naruto<->Boruto, MCU<->616, SB<->SV culture) used by tag.cross_fandom and author.similar fandom_grap",
-   "id": "idea.fandom-graph-an-operator-managed-adjacency-m",
-   "title": "fandom_graph: an operator-managed adjacency map with edge weights (Wor",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "fandom tags cover the whole catalogue and can be ranked: backfill tags for the sb/sv/qq/ao3/ffnet estate and import the endorsement counts the tagged rows lack fandom tags cover th",
-   "id": "idea.fandom-tags-cover-the-whole-catalogue-and-ca",
-   "title": "fandom tags cover the whole catalogue and can be ranked: backfill tags",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Feedback-drought intervention: welcome rota guarantees first-work comment in 72h Feedback-drought intervention: welcome rota guarantees first-work comment in 72h",
-   "id": "idea.feedback-drought-intervention-welcome-rota-g",
-   "title": "Feedback-drought intervention: welcome rota guarantees first-work comm",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Fic Finder bounties: pay for identifying half-remembered works Fic Finder bounties: pay for identifying half-remembered works",
-   "id": "idea.fic-finder-bounties-pay-for-identifying-half",
-   "title": "Fic Finder bounties: pay for identifying half-remembered works",
+   "why_summary": "WIP adoption and closure notes with lineage WIP adoption and closure notes with lineage",
+   "id": "M45-28",
+   "title": "WIP adoption and closure notes with lineage",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -511,8 +56,8 @@
   },
   {
    "why_summary": "Finisher signals: update cadence and completion history, positive framing only Finisher signals: update cadence and completion history, positive framing only",
-   "id": "idea.finisher-signals-update-cadence-and-completi",
-   "title": "Finisher signals: update cadence and completion history, positive fram",
+   "id": "M45-29",
+   "title": "Finisher signals",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -523,9 +68,9 @@
    "built": false
   },
   {
-   "why_summary": "Hardware-aware presets with graceful degradation tiers Hardware-aware presets with graceful degradation tiers",
-   "id": "idea.hardware-aware-presets-with-graceful-degrada",
-   "title": "Hardware-aware presets with graceful degradation tiers",
+   "why_summary": "Cross-language supply: taste-score foreign works, fund translation bounties Cross-language supply: taste-score foreign works, fund translation bounties",
+   "id": "M45-30",
+   "title": "Cross-language supply",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -536,22 +81,9 @@
    "built": false
   },
   {
-   "why_summary": "impressions and the events that follow them are logged append-only per (surface, algorithm, position, item), with a sticky bucket assignment per pseud or session impressions and th",
-   "id": "idea.impressions-and-the-events-that-follow-them",
-   "title": "impressions and the events that follow them are logged append-only per",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Instance-death protection: mutual backup, dead-man's-switch export, redirect registry Instance-death protection: mutual backup, dead-man's-switch export, redirect registry",
-   "id": "idea.instance-death-protection-mutual-backup-dead",
-   "title": "Instance-death protection: mutual backup, dead-man's-switch export, re",
+   "why_summary": "Trend radar: emerging-fandom detection for event and bounty timing Trend radar: emerging-fandom detection for event and bounty timing",
+   "id": "M45-32",
+   "title": "Trend radar",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -562,13 +94,26 @@
    "built": false
   },
   {
-   "why_summary": "length, status, rating and cadence are first-class facets on every browse and search surface, and a facet whose column is null on the filtered rows says so instead of returning an ",
-   "id": "idea.length-status-rating-and-cadence-are-first-c",
-   "title": "length, status, rating and cadence are first-class facets on every bro",
+   "why_summary": "Beta and specialist matchmaking: betas, Britpickers, sensitivity readers Beta and specialist matchmaking: betas, Britpickers, sensitivity readers",
+   "id": "M45-33",
+   "title": "Beta and specialist matchmaking",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M64",
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Fic Finder bounties: pay for identifying half-remembered works Fic Finder bounties: pay for identifying half-remembered works",
+   "id": "M45-34",
+   "title": "Fic Finder bounties",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
@@ -576,220 +121,12 @@
   },
   {
    "why_summary": "MediaReference descriptions as link-rot last fallback, curator-bountied MediaReference descriptions as link-rot last fallback, curator-bountied",
-   "id": "idea.mediareference-descriptions-as-link-rot-last",
-   "title": "MediaReference descriptions as link-rot last fallback, curator-bountie",
+   "id": "M45-36",
+   "title": "MediaReference descriptions as link-rot last fallback, curator-bountied",
    "sources": [
     "docs/requirements.csv"
    ],
    "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "per-arm metrics and guardrails are computed as daily snapshots, so a promotion reads a snapshot and never the raw log at decision time per-arm metrics and guardrails are computed a",
-   "id": "idea.per-arm-metrics-and-guardrails-are-computed",
-   "title": "per-arm metrics and guardrails are computed as daily snapshots, so a p",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match",
-   "id": "idea.per-saved-query-rss-atom-and-json-feed-endpo",
-   "title": "Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Mat",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "per-source engagement is stored as the source reports it (likes, hits, replies, bookmarks) instead of one normalised `likes`, so a rate metric can be computed per archive per-sourc",
-   "id": "idea.per-source-engagement-is-stored-as-the-sourc",
-   "title": "per-source engagement is stored as the source reports it (likes, hits,",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "per-user module overrides: module_user_state table, PATCH /api/v1/modules/{id}, and the per-request narrowing in the gate per-user module overrides: module_user_state table, PATCH ",
-   "id": "idea.per-user-module-overrides-module-user-state",
-   "title": "per-user module overrides: module_user_state table, PATCH /api/v1/modu",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M65",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Preview before apply: view-as persona preview of discover/search under proposed config Preview before apply: view-as persona preview of discover/search under proposed config",
-   "id": "idea.preview-before-apply-view-as-persona-preview",
-   "title": "Preview before apply: view-as persona preview of discover/search under",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Rate-limit awareness: back off with jitter on 429, print the retry window, never die silently mid-batch Rate-limit awareness: back off with jitter on 429, print the retry window, n",
-   "id": "idea.rate-limit-awareness-back-off-with-jitter-on",
-   "title": "Rate-limit awareness: back off with jitter on 429, print the retry win",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Rec-post attribution: share links carry sharer code, both sides earn credits Rec-post attribution: share links carry sharer code, both sides earn credits",
-   "id": "idea.rec-post-attribution-share-links-carry-share",
-   "title": "Rec-post attribution: share links carry sharer code, both sides earn c",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "reconcile the live database with the workspace migrations: 11 tables the migrations create are absent, 12 legacy-named tables are present reconcile the live database with the works",
-   "id": "idea.reconcile-the-live-database-with-the-workspa",
-   "title": "reconcile the live database with the workspace migrations: 11 tables t",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "RPF instance policy knob; Spain honor/image rights awareness RPF instance policy knob; Spain honor/image rights awareness",
-   "id": "idea.rpf-instance-policy-knob-spain-honor-image-r",
-   "title": "RPF instance policy knob; Spain honor/image rights awareness",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Saved queries: dh rec --save <name>, shareable URL, schedulable, with --digest-diff printing only rows new since that query last ran Saved queries: dh rec --save <name>, shareable ",
-   "id": "idea.saved-queries-dh-rec-save-name-shareable-url",
-   "title": "Saved queries: dh rec --save <name>, shareable URL, schedulable, with ",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Scale-aware activation: mechanisms declare minimum activity, dormant below it Scale-aware activation: mechanisms declare minimum activity, dormant below it",
-   "id": "idea.scale-aware-activation-mechanisms-declare-mi",
-   "title": "Scale-aware activation: mechanisms declare minimum activity, dormant b",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Scheduled gravity: time-boxed theme configs for events and seasons Scheduled gravity: time-boxed theme configs for events and seasons",
-   "id": "idea.scheduled-gravity-time-boxed-theme-configs-f",
-   "title": "Scheduled gravity: time-boxed theme configs for events and seasons",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Scoped tokens per command family, with the missing scope named on refusal Scoped tokens per command family, with the missing scope named on refusal",
-   "id": "idea.scoped-tokens-per-command-family-with-the-mi",
-   "title": "Scoped tokens per command family, with the missing scope named on refu",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Shell completions and man pages generated from the clap definition (bash/zsh/fish) Shell completions and man pages generated from the clap definition (bash/zsh/fish)",
-   "id": "idea.shell-completions-and-man-pages-generated-fr",
-   "title": "Shell completions and man pages generated from the clap definition (ba",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Sister instances: subscribe to public picks over ActivityPub Sister instances: subscribe to public picks over ActivityPub",
-   "id": "idea.sister-instances-subscribe-to-public-picks-o",
-   "title": "Sister instances: subscribe to public picks over ActivityPub",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "six milestone ids are duplicated in this file (M63-03/04/05 appear twice, once per area), so a row can be closed twice for two different pieces of work six milestone ids are duplic",
-   "id": "idea.six-milestone-ids-are-duplicated-in-this-fil",
-   "title": "six milestone ids are duplicated in this file (M63-03/04/05 appear twi",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
@@ -797,8 +134,8 @@
   },
   {
    "why_summary": "Stable identifiers for media: MusicBrainz/ISRC, tracklists, Wikidata, ISBN/TMDB Stable identifiers for media: MusicBrainz/ISRC, tracklists, Wikidata, ISBN/TMDB",
-   "id": "idea.stable-identifiers-for-media-musicbrainz-isr",
-   "title": "Stable identifiers for media: MusicBrainz/ISRC, tracklists, Wikidata, ",
+   "id": "M45-37",
+   "title": "Stable identifiers for media",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -809,26 +146,78 @@
    "built": false
   },
   {
-   "why_summary": "story.more_by_author and author.works are served from the author's own rows, ordered by that surface's field story.more_by_author and author.works are served from the author's own ",
-   "id": "idea.story-more-by-author-and-author-works-are-se",
-   "title": "story.more_by_author and author.works are served from the author's own",
+   "why_summary": "Author-note links through snapshot-and-monitor pipeline Author-note links through snapshot-and-monitor pipeline",
+   "id": "M45-38",
+   "title": "Author-note links through snapshot-and-monitor pipeline",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M64",
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "tag_jaccard and tag_cooccurrence over the normalised tag taxonomy with synonym mapping, refused by name while no engaged row carries a tag tag_jaccard and tag_cooccurrence over the",
-   "id": "idea.tag-jaccard-and-tag-cooccurrence-over-the-no",
-   "title": "tag_jaccard and tag_cooccurrence over the normalised tag taxonomy with",
+   "why_summary": "Instance-death protection: mutual backup, dead-man's-switch export, redirect registry Instance-death protection: mutual backup, dead-man's-switch export, redirect registry",
+   "id": "M45-39",
+   "title": "Instance-death protection",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M64",
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Curator lenses: invited rec-bloggers publish opt-in taste-profile views Curator lenses: invited rec-bloggers publish opt-in taste-profile views",
+   "id": "M45-40",
+   "title": "Curator lenses",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Rec-post attribution: share links carry sharer code, both sides earn credits Rec-post attribution: share links carry sharer code, both sides earn credits",
+   "id": "M45-41",
+   "title": "Rec-post attribution",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Claim your works: invite authors whose works exist as metadata Claim your works: invite authors whose works exist as metadata",
+   "id": "M45-42",
+   "title": "Claim your works",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Sister instances: subscribe to public picks over ActivityPub Sister instances: subscribe to public picks over ActivityPub",
+   "id": "M45-44",
+   "title": "Sister instances",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
@@ -836,7 +225,7 @@
   },
   {
    "why_summary": "Taste as versioned blendable object with governance mode Taste as versioned blendable object with governance mode",
-   "id": "idea.taste-as-versioned-blendable-object-with-gov",
+   "id": "M45-45",
    "title": "Taste as versioned blendable object with governance mode",
    "sources": [
     "docs/requirements.csv"
@@ -848,61 +237,113 @@
    "built": false
   },
   {
-   "why_summary": "taste gravity applies at every recommendation surface as a bounded influence layer after the blend, with a per-surface strength, reordering and never filtering taste gravity applie",
-   "id": "idea.taste-gravity-applies-at-every-recommendatio",
-   "title": "taste gravity applies at every recommendation surface as a bounded inf",
+   "why_summary": "Preview before apply: view-as persona preview of discover/search under proposed config Preview before apply: view-as persona preview of discover/search under proposed config",
+   "id": "M45-46",
+   "title": "Preview before apply",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M64",
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "the frontend hides its links from /api/v1/modules instead of assuming every surface exists the frontend hides its links from /api/v1/modules instead of assuming every surface exist",
-   "id": "idea.the-frontend-hides-its-links-from-api-v1-mod",
-   "title": "the frontend hides its links from /api/v1/modules instead of assuming ",
+   "why_summary": "Scale-aware activation: mechanisms declare minimum activity, dormant below it Scale-aware activation: mechanisms declare minimum activity, dormant below it",
+   "id": "M45-47",
+   "title": "Scale-aware activation",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M65",
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "the operator console lists every live experiment per surface with its numbers, allows hold, promote and preview-as-persona, and shows why each promotion happened the operator conso",
-   "id": "idea.the-operator-console-lists-every-live-experi",
-   "title": "the operator console lists every live experiment per surface with its ",
+   "why_summary": "Hardware-aware presets with graceful degradation tiers Hardware-aware presets with graceful degradation tiers",
+   "id": "M45-48",
+   "title": "Hardware-aware presets with graceful degradation tiers",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M64",
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "the planned catalogue is generated from the roadmap rather than hand-listed the planned catalogue is generated from the roadmap rather than hand-listed",
-   "id": "idea.the-planned-catalogue-is-generated-from-the",
-   "title": "the planned catalogue is generated from the roadmap rather than hand-l",
+   "why_summary": "Scheduled gravity: time-boxed theme configs for events and seasons Scheduled gravity: time-boxed theme configs for events and seasons",
+   "id": "M45-50",
+   "title": "Scheduled gravity",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M65",
+   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "the quality weights are per-operator and per-surface rather than compiled in the quality weights are per-operator and per-surface rather than compiled in",
-   "id": "idea.the-quality-weights-are-per-operator-and-per",
-   "title": "the quality weights are per-operator and per-surface rather than compi",
+   "why_summary": "DSA notice-and-action flow and statements of reasons DSA notice-and-action flow and statements of reasons",
+   "id": "M45-52",
+   "title": "DSA notice-and-action flow and statements of reasons",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "RPF instance policy knob; Spain honor/image rights awareness RPF instance policy knob; Spain honor/image rights awareness",
+   "id": "M45-54",
+   "title": "RPF instance policy knob; Spain honor/image rights awareness",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Built-in compliance tooling: notice forms, SOR templates, DSAR export Built-in compliance tooling: notice forms, SOR templates, DSAR export",
+   "id": "M45-55",
+   "title": "Built-in compliance tooling",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "erasure reaches the supply routing record: \u00a758.3 keeps a routing row forever, and GDPR erasure must still remove the account from it erasure reaches the supply routing record: \u00a758.",
+   "id": "M45-58",
+   "title": "erasure reaches the supply routing record",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh rec --sort accepts any registered metric name (wilson, kudos, kudos_per_1k_views, kudos_per_hour, completion, updater_reliability, hidden_gem, freshness_weighted_quality) dh rec",
+   "id": "M63-03",
+   "title": "dh rec --sort accepts any registered metric name (wilson, kudos, kudos_per_1k_views, kudos_per_hour, completion, updater_reliability, hidden_gem, freshness_weighted_quality)",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -913,41 +354,613 @@
    "built": false
   },
   {
-   "why_summary": "",
-   "id": "idea.theme",
-   "title": "Theme",
-   "sources": [
-    "docs/design/THEME.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 4,
-   "because": "in a design (+2); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Trend radar: emerging-fandom detection for event and bounty timing Trend radar: emerging-fandom detection for event and bounty timing",
-   "id": "idea.trend-radar-emerging-fandom-detection-for-ev",
-   "title": "Trend radar: emerging-fandom detection for event and bounty timing",
+   "why_summary": "per-source engagement is stored as the source reports it (likes, hits, replies, bookmarks) instead of one normalised `likes`, so a rate metric can be computed per archive per-sourc",
+   "id": "M63-04",
+   "title": "per-source engagement is stored as the source reports it (likes, hits, replies, bookmarks) instead of one normalised `likes`, so a rate metric can be computed per archive",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M45",
+   "milestone": "M63",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "WIP adoption and closure notes with lineage WIP adoption and closure notes with lineage",
-   "id": "idea.wip-adoption-and-closure-notes-with-lineage",
-   "title": "WIP adoption and closure notes with lineage",
+   "why_summary": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: output shape is a contract dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: output shape is a",
+   "id": "M63-05",
+   "title": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M45",
+   "milestone": "M63",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Saved queries: dh rec --save <name>, shareable URL, schedulable, with --digest-diff printing only rows new since that query last ran Saved queries: dh rec --save <name>, shareable ",
+   "id": "M63-06",
+   "title": "Saved queries",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=, updated>=-7d, words>, completion:), shared with web search dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=,",
+   "id": "M63-07",
+   "title": "dh q '<expr>' with a real grammar (tag",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh q --explain prints the query plan and index used; parse errors point at the token and exit 2 dh q --explain prints the query plan and index used; parse errors point at the token",
+   "id": "M63-08",
+   "title": "dh q --explain prints the query plan and index used; parse errors point at the token and exit 2",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh q --from-file with .darkhold/queries/*.q: the user's query library is a versioned file, not browser history dh q --from-file with .darkhold/queries/*.q: the user's query library",
+   "id": "M63-09",
+   "title": "dh q --from-file with .darkhold/queries/*.q",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh lib sync --since: incremental local sqlite mirror of the library and catalogue dh lib sync --since: incremental local sqlite mirror of the library and catalogue",
+   "id": "M63-10",
+   "title": "dh lib sync --since",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh lib tag --from-csv with a per-row error report and a rollback file; dh lib diff and push --dry-run before any bulk write dh lib tag --from-csv with a per-row error report and a ",
+   "id": "M63-11",
+   "title": "dh lib tag --from-csv with a per-row error report and a rollback file; dh lib diff and push --dry-run before any bulk write",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh cron install --every 6h --jitter 10m: writes a systemd user timer for a saved query or recheck job dh cron install --every 6h --jitter 10m: writes a systemd user timer for a sav",
+   "id": "M63-13",
+   "title": "dh cron install --every 6h --jitter 10m",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match",
+   "id": "M63-14",
+   "title": "Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version drift, one suggested fix per problem dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version d",
+   "id": "M63-15",
+   "title": "dh doctor",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 auth, 5 rate-limited) Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 ",
+   "id": "M63-16",
+   "title": "Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 auth, 5 rate-limited)",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Shell completions and man pages generated from the clap definition (bash/zsh/fish) Shell completions and man pages generated from the clap definition (bash/zsh/fish)",
+   "id": "M63-17",
+   "title": "Shell completions and man pages generated from the clap definition (bash/zsh/fish)",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Config profiles (--profile, DARKHOLD_PROFILE) with per-profile instance URL and token; dh config get/set with dotted keys Config profiles (--profile, DARKHOLD_PROFILE) with per-pro",
+   "id": "M63-18",
+   "title": "Config profiles (--profile, DARKHOLD_PROFILE) with per-profile instance URL and token; dh config get/set with dotted keys",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Scoped tokens per command family, with the missing scope named on refusal Scoped tokens per command family, with the missing scope named on refusal",
+   "id": "M63-19",
+   "title": "Scoped tokens per command family, with the missing scope named on refusal",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Rate-limit awareness: back off with jitter on 429, print the retry window, never die silently mid-batch Rate-limit awareness: back off with jitter on 429, print the retry window, n",
+   "id": "M63-20",
+   "title": "Rate-limit awareness",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "Dry-run is the default for every bulk verb; --yes applies; dh redact strips pseudonyms and emails from JSON output Dry-run is the default for every bulk verb; --yes applies; dh red",
+   "id": "M63-21",
+   "title": "Dry-run is the default for every bulk verb; --yes applies; dh redact strips pseudonyms and emails from JSON output",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh admin backup --to - streams a consistent dump to stdout; dh admin health emits machine-readable checks with per-check exit codes dh admin backup --to - streams a consistent dump",
+   "id": "M63-23",
+   "title": "dh admin backup --to - streams a consistent dump to stdout; dh admin health emits machine-readable checks with per-check exit codes",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh bench: times the 20 canonical queries against a local or remote instance and prints a table dh bench: times the 20 canonical queries against a local or remote instance and print",
+   "id": "M63-24",
+   "title": "dh bench",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh audit --since 7d: the account owner sees every write their tokens made dh audit --since 7d: the account owner sees every write their tokens made",
+   "id": "M63-25",
+   "title": "dh audit --since 7d",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh stats --by week --year: streaks and a shareable wrapped-style personal report for the engineering-minded reader dh stats --by week --year: streaks and a shareable wrapped-style ",
+   "id": "M63-26",
+   "title": "dh stats --by week --year",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "crates/cli: the `dh` binary, a thin client of /api/v1 that may not depend on crates/app or crates/db crates/cli: the `dh` binary, a thin client of /api/v1 that may not depend on cr",
+   "id": "M63-28",
+   "title": "crates/cli",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh tui: a full-screen mode of the same binary behind a feature flag, not a separate project dh tui: a full-screen mode of the same binary behind a feature flag, not a separate proj",
+   "id": "M63-29",
+   "title": "dh tui",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "fandom tags cover the whole catalogue and can be ranked: backfill tags for the sb/sv/qq/ao3/ffnet estate and import the endorsement counts the tagged rows lack fandom tags cover th",
+   "id": "M63-32",
+   "title": "fandom tags cover the whole catalogue and can be ranked",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "reconcile the live database with the workspace migrations: 11 tables the migrations create are absent, 12 legacy-named tables are present reconcile the live database with the works",
+   "id": "M63-33",
+   "title": "reconcile the live database with the workspace migrations",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "catalogue q= searches the summary as well as title and author, and can search title+summary in one query from the CLI catalogue q= searches the summary as well as title and author,",
+   "id": "M63-34",
+   "title": "catalogue q= searches the summary as well as title and author, and can search title+summary in one query from the CLI",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "six milestone ids are duplicated in this file (M63-03/04/05 appear twice, once per area), so a row can be closed twice for two different pieces of work six milestone ids are duplic",
+   "id": "M63-35",
+   "title": "six milestone ids are duplicated in this file (M63-03/04/05 appear twice, once per area), so a row can be closed twice for two different pieces of work",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "every recommendation surface has a canonical id and a field of two to four named algorithms chosen by config, and an algorithm whose data is empty refuses by name instead of servin",
+   "id": "M64-01",
+   "title": "every recommendation surface has a canonical id and a field of two to four named algorithms chosen by config, and an algorithm whose data is empty refuses by name instead of serving a page",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "impressions and the events that follow them are logged append-only per (surface, algorithm, position, item), with a sticky bucket assignment per pseud or session impressions and th",
+   "id": "M64-02",
+   "title": "impressions and the events that follow them are logged append-only per (surface, algorithm, position, item), with a sticky bucket assignment per pseud or session",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "per-arm metrics and guardrails are computed as daily snapshots, so a promotion reads a snapshot and never the raw log at decision time per-arm metrics and guardrails are computed a",
+   "id": "M64-03",
+   "title": "per-arm metrics and guardrails are computed as daily snapshots, so a promotion reads a snapshot and never the raw log at decision time",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "a challenger is promoted automatically only on a sequential-test win with every guardrail in bounds, at minimum sample and after seven days, and demoted automatically when a guardr",
+   "id": "M64-04",
+   "title": "a challenger is promoted automatically only on a sequential-test win with every guardrail in bounds, at minimum sample and after seven days, and demoted automatically when a guardrail breaches on two consecutive snapshots",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "story.more_by_author and author.works are served from the author's own rows, ordered by that surface's field story.more_by_author and author.works are served from the author's own ",
+   "id": "M64-05",
+   "title": "story.more_by_author and author.works are served from the author's own rows, ordered by that surface's field",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "tag_jaccard and tag_cooccurrence over the normalised tag taxonomy with synonym mapping, refused by name while no engaged row carries a tag tag_jaccard and tag_cooccurrence over the",
+   "id": "M64-06",
+   "title": "tag_jaccard and tag_cooccurrence over the normalised tag taxonomy with synonym mapping, refused by name while no engaged row carries a tag",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "crosspost_union: one story's engagement is summed across every archive it appears on, reusing M63-04's resolution rule for which copy a name means crosspost_union: one story's enga",
+   "id": "M64-07",
+   "title": "crosspost_union",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "fandom_graph: an operator-managed adjacency map with edge weights (Worm<->Ward, Naruto<->Boruto, MCU<->616, SB<->SV culture) used by tag.cross_fandom and author.similar fandom_grap",
+   "id": "M64-08",
+   "title": "fandom_graph",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "taste gravity applies at every recommendation surface as a bounded influence layer after the blend, with a per-surface strength, reordering and never filtering taste gravity applie",
+   "id": "M64-09",
+   "title": "taste gravity applies at every recommendation surface as a bounded influence layer after the blend, with a per-surface strength, reordering and never filtering",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "length, status, rating and cadence are first-class facets on every browse and search surface, and a facet whose column is null on the filtered rows says so instead of returning an ",
+   "id": "M64-10",
+   "title": "length, status, rating and cadence are first-class facets on every browse and search surface, and a facet whose column is null on the filtered rows says so instead of returning an empty page",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "co_shelving: reading lists are first-class (create, curate, publish, follow) and list co-occurrence feeds story.similar and library.because_you_shelved co_shelving: reading lists a",
+   "id": "M64-11",
+   "title": "co_shelving",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "engagement_overlap at reader-cluster level with k-anonymity (a minimum number of readers per cluster) and aggregation thresholds, exposing no per-reader signal engagement_overlap a",
+   "id": "M64-13",
+   "title": "engagement_overlap at reader-cluster level with k-anonymity (a minimum number of readers per cluster) and aggregation thresholds, exposing no per-reader signal",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "the operator console lists every live experiment per surface with its numbers, allows hold, promote and preview-as-persona, and shows why each promotion happened the operator conso",
+   "id": "M64-15",
+   "title": "the operator console lists every live experiment per surface with its numbers, allows hold, promote and preview-as-persona, and shows why each promotion happened",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "an offline pre-registration harness scores a challenger against recorded history on taste::eval's metrics before it takes live traffic an offline pre-registration harness scores a ",
+   "id": "M64-16",
+   "title": "an offline pre-registration harness scores a challenger against recorded history on taste",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "per-user module overrides: module_user_state table, PATCH /api/v1/modules/{id}, and the per-request narrowing in the gate per-user module overrides: module_user_state table, PATCH ",
+   "id": "M65-04",
+   "title": "per-user module overrides",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M65",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "the frontend hides its links from /api/v1/modules instead of assuming every surface exists the frontend hides its links from /api/v1/modules instead of assuming every surface exist",
+   "id": "M65-06",
+   "title": "the frontend hides its links from /api/v1/modules instead of assuming every surface exists",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M65",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "the idea catalogue reads every brainstorm, including the ones written after it the idea catalogue reads every brainstorm, including the ones written after it",
+   "id": "M65-07",
+   "title": "the idea catalogue reads every brainstorm, including the ones written after it",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M65",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "an idea row becomes a module when it is built, without a second backlog an idea row becomes a module when it is built, without a second backlog",
+   "id": "M65-08",
+   "title": "an idea row becomes a module when it is built, without a second backlog",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M65",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "dh admin explain-rec <work>: full feature vector and every strategy's score for one work dh admin explain-rec <work>: full feature vector and every strategy's score for one work",
+   "id": "M63-22",
+   "title": "dh admin explain-rec <work>",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 3,
+   "because": "a requirements row exists (+4); needs a model or heavy compute (-1)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "embedding similarity for summaries first and full text last, feature-gated on a configured AI provider and degrading to disabled rather than erroring embedding similarity for summa",
+   "id": "M64-14",
+   "title": "embedding similarity for summaries first and full text last, feature-gated on a configured AI provider and degrading to disabled rather than erroring",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 3,
+   "because": "a requirements row exists (+4); needs a model or heavy compute (-1)",
    "default_on": false,
    "built": false
   },
@@ -1005,19 +1018,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.collection",
-   "title": "collection",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in the reader audit (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.community-gift-exchanges",
    "title": "Community Gift Exchanges",
    "sources": [
@@ -1031,19 +1031,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.comparison",
-   "title": "comparison",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in the reader audit (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.composer-positivity-indicator",
    "title": "Composer Positivity Indicator",
    "sources": [
@@ -1052,19 +1039,6 @@
    "milestone": "unassigned",
    "relevance": 3,
    "because": "specified by an amendment (+3)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.cover",
-   "title": "cover",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in the reader audit (+1); named in the spec (+2)",
    "default_on": false,
    "built": false
   },
@@ -1095,19 +1069,6 @@
    "built": false
   },
   {
-   "why_summary": "dh admin explain-rec <work>: full feature vector and every strategy's score for one work dh admin explain-rec <work>: full feature vector and every strategy's score for one work",
-   "id": "idea.dh-admin-explain-rec-work-full-feature-vecto",
-   "title": "dh admin explain-rec <work>: full feature vector and every strategy's ",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 3,
-   "because": "a requirements row exists (+4); needs a model or heavy compute (-1)",
-   "default_on": false,
-   "built": false
-  },
-  {
    "why_summary": "",
    "id": "idea.draw-slot",
    "title": "Draw Slot",
@@ -1117,19 +1078,6 @@
    "milestone": "unassigned",
    "relevance": 3,
    "because": "specified by an amendment (+3)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "embedding similarity for summaries first and full text last, feature-gated on a configured AI provider and degrading to disabled rather than erroring embedding similarity for summa",
-   "id": "idea.embedding-similarity-for-summaries-first-and",
-   "title": "embedding similarity for summaries first and full text last, feature-g",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 3,
-   "because": "a requirements row exists (+4); needs a model or heavy compute (-1)",
    "default_on": false,
    "built": false
   },
@@ -1187,19 +1135,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.pace",
-   "title": "pace",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in the reader audit (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.periodic-deidentified-dataset",
    "title": "Periodic Deidentified Dataset",
    "sources": [
@@ -1239,19 +1174,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.related",
-   "title": "Related",
-   "sources": [
-    "vault:2026-09-30-cross-project-feature-suggestions.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in a vault note (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.roadmap-card-bodies",
    "title": "Roadmap Card Bodies",
    "sources": [
@@ -1273,19 +1195,6 @@
    "milestone": "unassigned",
    "relevance": 3,
    "because": "in a vault note (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.seeding",
-   "title": "seeding",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in the reader audit (+1); named in the spec (+2)",
    "default_on": false,
    "built": false
   },
@@ -1343,19 +1252,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.webhooks",
-   "title": "Webhooks",
-   "sources": [
-    "vault:2026-09-20T183349+0200-darkhold-growth-ideas.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in a vault note (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.writing-prompts-engine",
    "title": "Writing Prompts Engine",
    "sources": [
@@ -1368,26 +1264,26 @@
    "built": false
   },
   {
-   "why_summary": "co_read: session transitions feed story.also_enjoyed, with bot and single-click traffic excluded co_read: session transitions feed story.also_enjoyed, with bot and single-click tra",
-   "id": "idea.co-read-session-transitions-feed-story-also",
-   "title": "co_read: session transitions feed story.also_enjoyed, with bot and sin",
+   "why_summary": "",
+   "id": "idea.year-in-review-wrapped",
+   "title": "Year in Review / Wrapped",
    "sources": [
-    "docs/requirements.csv"
+    "vault:2026-09-20T183349+0200-darkhold-growth-ideas.md"
    ],
-   "milestone": "M64",
-   "relevance": 2,
-   "because": "a requirements row exists (+4); needs a third party or an external client (-2)",
+   "milestone": "unassigned",
+   "relevance": 3,
+   "because": "in a vault note (+1); named in the spec (+2)",
    "default_on": false,
    "built": false
   },
   {
-   "why_summary": "dh lib --calibre <path>: read Calibre's metadata.db as a data source to seed a reading history, with no crate or RPC link to lorebook dh lib --calibre <path>: read Calibre's metada",
-   "id": "idea.dh-lib-calibre-path-read-calibre-s-metadata",
-   "title": "dh lib --calibre <path>: read Calibre's metadata.db as a data source t",
+   "why_summary": "Discord bot with rec commands, per-fandom feeds, account linking Discord bot with rec commands, per-fandom feeds, account linking",
+   "id": "M45-43",
+   "title": "Discord bot with rec commands, per-fandom feeds, account linking",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M63",
+   "milestone": "M45",
    "relevance": 2,
    "because": "a requirements row exists (+4); needs a third party or an external client (-2)",
    "default_on": false,
@@ -1395,8 +1291,8 @@
   },
   {
    "why_summary": "dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook: a debounced polling daemon dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook: a debounced pol",
-   "id": "idea.dh-watch-saved-query-exec-cmd-notify-ntfy-de",
-   "title": "dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook: a",
+   "id": "M63-12",
+   "title": "dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -1407,13 +1303,26 @@
    "built": false
   },
   {
-   "why_summary": "Discord bot with rec commands, per-fandom feeds, account linking Discord bot with rec commands, per-fandom feeds, account linking",
-   "id": "idea.discord-bot-with-rec-commands-per-fandom-fee",
-   "title": "Discord bot with rec commands, per-fandom feeds, account linking",
+   "why_summary": "dh lib --calibre <path>: read Calibre's metadata.db as a data source to seed a reading history, with no crate or RPC link to lorebook dh lib --calibre <path>: read Calibre's metada",
+   "id": "M63-30",
+   "title": "dh lib --calibre <path>",
    "sources": [
     "docs/requirements.csv"
    ],
-   "milestone": "M45",
+   "milestone": "M63",
+   "relevance": 2,
+   "because": "a requirements row exists (+4); needs a third party or an external client (-2)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "co_read: session transitions feed story.also_enjoyed, with bot and single-click traffic excluded co_read: session transitions feed story.also_enjoyed, with bot and single-click tra",
+   "id": "M64-12",
+   "title": "co_read",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
    "relevance": 2,
    "because": "a requirements row exists (+4); needs a third party or an external client (-2)",
    "default_on": false,
@@ -1455,19 +1364,6 @@
    "milestone": "unassigned",
    "relevance": 2,
    "because": "in a design (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.a-pre-existing-failure-found-while-running-t",
-   "title": "A pre-existing failure found while running the gate",
-   "sources": [
-    "vault:2026-09-30-darkhold-ranking-substrate-47.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
    "default_on": false,
    "built": false
   },
@@ -1564,19 +1460,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.bonus-unconventional-growth-hacks",
-   "title": "Bonus: Unconventional Growth Hacks",
-   "sources": [
-    "vault:2026-09-20T183349+0200-darkhold-growth-ideas.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.bookmark-collections",
    "title": "bookmark collections",
    "sources": [
@@ -1617,7 +1500,7 @@
   {
    "why_summary": "",
    "id": "idea.complete-works-under-10k-filter",
-   "title": "Complete works under 10k\" filter",
+   "title": "Complete works under 10k filter",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
@@ -1759,32 +1642,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.gate-results-and-two-environmental-failure-m",
-   "title": "Gate results and two environmental failure modes",
-   "sources": [
-    "vault:2026-09-30-darkhold-ranking-substrate-47.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.highest-severity-item-found-stash-box-r074-s",
-   "title": "Highest-severity item found: stash-box R074's real content",
-   "sources": [
-    "vault:2026-09-30-cross-project-feature-suggestions.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.import-progress-bar-import-job-status-is-abs",
    "title": "import progress bar (import job status is absent, not the progress UI)",
    "sources": [
@@ -1845,19 +1702,6 @@
    "milestone": "unassigned",
    "relevance": 1,
    "because": "in the reader audit (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.lesson-worth-keeping",
-   "title": "Lesson worth keeping",
-   "sources": [
-    "vault:2026-09-30-darkhold-companion-firefox-extension-48.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
    "default_on": false,
    "built": false
   },
@@ -1955,39 +1799,13 @@
   {
    "why_summary": "",
    "id": "idea.new-author-debut-badge",
-   "title": "New author\" debut badge",
+   "title": "New author debut badge",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
    "milestone": "unassigned",
    "relevance": 1,
    "because": "in the reader audit (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.non-transfers",
-   "title": "Non-transfers",
-   "sources": [
-    "vault:2026-09-30-cross-project-feature-suggestions.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.not-started-and-why-each-is-separate",
-   "title": "Not started, and why each is separate",
-   "sources": [
-    "vault:2026-09-30-darkhold-ranking-substrate-47.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
    "default_on": false,
    "built": false
   },
@@ -2007,7 +1825,7 @@
   {
    "why_summary": "",
    "id": "idea.on-this-day-feature",
-   "title": "\"On This Day\" Feature",
+   "title": "On This Day Feature",
    "sources": [
     "vault:2026-09-20T183349+0200-darkhold-growth-ideas.md"
    ],
@@ -2046,39 +1864,13 @@
   {
    "why_summary": "",
    "id": "idea.open-to-requests-badge",
-   "title": "open to requests\" badge",
+   "title": "open to requests badge",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
    "milestone": "unassigned",
    "relevance": 1,
    "because": "in the reader audit (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.ownership-caution",
-   "title": "Ownership caution",
-   "sources": [
-    "vault:2026-09-30-cross-project-feature-suggestions.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.patterns-and-why-they-outrank-individual-fea",
-   "title": "Patterns, and why they outrank individual features",
-   "sources": [
-    "vault:2026-09-30-cross-project-feature-suggestions.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
    "default_on": false,
    "built": false
   },
@@ -2150,7 +1942,7 @@
   {
    "why_summary": "",
    "id": "idea.reader-to-reader-also-read",
-   "title": "reader-to-reader \"also read",
+   "title": "reader-to-reader also read",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
@@ -2164,6 +1956,19 @@
    "why_summary": "",
    "id": "idea.reading-goal-progress-ring",
    "title": "reading-goal progress ring",
+   "sources": [
+    "docs/audit-100-reader-ideas-2026-10-04.md"
+   ],
+   "milestone": "unassigned",
+   "relevance": 1,
+   "because": "in the reader audit (+1)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "",
+   "id": "idea.recommended-by-curator-label-curator-rs-exis",
+   "title": "Recommended by [curator] label \u2014 curator.rs exists, the label does not",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
@@ -2228,7 +2033,7 @@
   {
    "why_summary": "",
    "id": "idea.similar-works-section",
-   "title": "Similar works\" section",
+   "title": "Similar works section",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
@@ -2253,19 +2058,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.state-at-handoff",
-   "title": "State at handoff",
-   "sources": [
-    "vault:2026-09-30-darkhold-ranking-substrate-47.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.telegram-bot",
    "title": "Telegram Bot",
    "sources": [
@@ -2274,19 +2066,6 @@
    "milestone": "unassigned",
    "relevance": 1,
    "because": "in a vault note (+1); named in the spec (+2); needs a third party or an external client (-2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.three-decisions-i-made",
-   "title": "Three decisions I made",
-   "sources": [
-    "vault:2026-09-30-darkhold-companion-firefox-extension-48.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
    "default_on": false,
    "built": false
   },
@@ -2345,7 +2124,7 @@
   {
    "why_summary": "",
    "id": "idea.work-of-the-day-spotlight",
-   "title": "Work of the day\" spotlight",
+   "title": "Work of the day spotlight",
    "sources": [
     "docs/audit-100-reader-ideas-2026-10-04.md"
    ],
@@ -2372,19 +2151,6 @@
    "why_summary": "",
    "id": "idea.writing-sprints-and-word-wars",
    "title": "Writing Sprints & Word Wars",
-   "sources": [
-    "vault:2026-09-20T183349+0200-darkhold-growth-ideas.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.year-in-review-wrapped",
-   "title": "\"Year in Review\" / Wrapped",
    "sources": [
     "vault:2026-09-20T183349+0200-darkhold-growth-ideas.md"
    ],
