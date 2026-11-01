@@ -70,6 +70,7 @@ pub mod retention;
 pub mod retention_quorum;
 pub mod settings;
 pub mod similar;
+pub mod modules;
 pub mod spoilers;
 pub mod stats;
 pub mod subscriptions;

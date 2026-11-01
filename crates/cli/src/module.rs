@@ -1,0 +1,350 @@
+//! `dh module` — what this instance runs, and what it could.
+//!
+//! The one design rule of this binary (§ above `main`): **every rule lives on the
+//! server**. So `list` and `show` ask `/api/v1/modules` and print what came back —
+//! the compiled registry in `darkhold-domain` is the *fallback* for an instance
+//! that does not answer, and the output says which of the two you are reading.
+//! Without that distinction the CLI would be a second source of truth about an
+//! instance's posture: an operator running `dh module list` against a host that
+//! had switched a surface off would see the compiled default and believe it.
+//!
+//! `check` is the exception, and deliberately so: it reads a `darkhold.toml` on
+//! this machine and validates it with the same function the server runs at
+//! startup. A configuration that would refuse to boot should not need a running
+//! server to be diagnosed.
+
+use std::path::PathBuf;
+
+use clap::{Args, Subcommand};
+use darkhold_domain::modules::{self, ModuleState};
+use serde::Deserialize;
+
+use crate::rec::{bad_request, environment, failure_for, Failure};
+use crate::Cli;
+
+/// What to do with the module registry.
+#[derive(Debug, Clone, Subcommand)]
+pub enum ModuleAction {
+    /// List every registered surface, its state, and who may change it.
+    List {
+        /// Only the surfaces this instance runs.
+        #[arg(long)]
+        enabled: bool,
+        /// Only the surfaces this instance does not run.
+        #[arg(long)]
+        disabled: bool,
+        /// Only surfaces that are registered and not built.
+        #[arg(long)]
+        planned: bool,
+    },
+    /// One surface in full: its routes, its dependencies, its milestone.
+    Show { id: String },
+    /// Validate a configuration file's `[modules]` table without starting a server.
+    ///
+    /// This is the check `darkhold serve` runs at startup: an unknown id, a
+    /// safety surface, or an id in both lists is a refusal there, and it is the
+    /// same refusal here, before you restart anything.
+    Check {
+        /// The configuration file to check.
+        #[arg(long, default_value = "darkhold.toml", value_name = "PATH")]
+        config: PathBuf,
+    },
+}
+
+/// `dh module …`
+#[derive(Debug, Args)]
+pub struct ModuleArgs {
+    /// What to do.
+    #[command(subcommand)]
+    pub action: ModuleAction,
+}
+
+/// Run a module command.
+pub async fn run(cli: &Cli, args: ModuleArgs) -> Result<(), Failure> {
+    match args.action {
+        ModuleAction::List {
+            enabled,
+            disabled,
+            planned,
+        } => list(cli, enabled, disabled, planned).await,
+        ModuleAction::Show { id } => show(cli, &id).await,
+        ModuleAction::Check { config } => check(&config),
+    }
+}
+
+/// One row as the server sends it (`GET /api/v1/modules`).
+#[derive(Debug, Deserialize)]
+struct ServerRow {
+    id: String,
+    name: String,
+    summary: String,
+    enabled: bool,
+    stability: String,
+    toggle: String,
+    milestone: String,
+    spec: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServerCatalogue {
+    allow_user_overrides: bool,
+    core: Vec<String>,
+    modules: Vec<ServerRow>,
+}
+
+/// Fetch the catalogue, or `None` when the instance does not answer.
+async fn catalogue(cli: &Cli) -> Result<Option<ServerCatalogue>, Failure> {
+    let url = format!("{}/api/v1/modules", cli.base_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = match client.get(&url).send().await {
+        Ok(response) => response,
+        // An unreachable instance is not an error for a read a terminal user can
+        // still be served from the compiled registry.
+        Err(_) => return Ok(None),
+    };
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+        return Err(failure_for(status, &body, &cli.base_url));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|error| environment(format!("reading {url}: {error}")))?;
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|error| environment(format!("{url} did not answer a catalogue: {error}")))
+}
+
+fn print_rows(rows: &[&ServerRow], json: bool) -> Result<(), Failure> {
+    if json {
+        let value: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.id,
+                    "name": row.name,
+                    "summary": row.summary,
+                    "enabled": row.enabled,
+                    "stability": row.stability,
+                    "toggle": row.toggle,
+                    "milestone": row.milestone,
+                    "spec": row.spec,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value)
+                .map_err(|error| environment(format!("rendering json: {error}")))?
+        );
+        return Ok(());
+    }
+    let width = rows.iter().map(|row| row.id.len()).max().unwrap_or(2).max(6);
+    for row in rows {
+        println!(
+            "{:<width$}  {:<4}  {:<12}  {:<9}  {}",
+            row.id,
+            if row.enabled { "on" } else { "off" },
+            row.stability,
+            row.toggle,
+            row.summary,
+            width = width
+        );
+    }
+    Ok(())
+}
+
+async fn list(cli: &Cli, enabled: bool, disabled: bool, planned: bool) -> Result<(), Failure> {
+    if enabled && disabled {
+        return Err(bad_request(
+            "--enabled and --disabled ask opposite questions; pick one",
+        ));
+    }
+    let server = catalogue(cli).await?;
+    let rows: Vec<ServerRow> = match server {
+        Some(catalogue) => {
+            if !cli.json {
+                eprintln!(
+                    "# {} — {} modules, {} core, per-user overrides {}",
+                    cli.base_url,
+                    catalogue.modules.len(),
+                    catalogue.core.len(),
+                    if catalogue.allow_user_overrides {
+                        "allowed"
+                    } else {
+                        "refused by the instance"
+                    }
+                );
+            }
+            catalogue.modules
+        }
+        None => {
+            if !cli.json {
+                eprintln!(
+                    "# {} did not answer; showing this build's compiled registry instead. \
+                     States below are defaults, not the instance's posture.",
+                    cli.base_url
+                );
+            }
+            let defaults = ModuleState::resolve(&[], &[], true);
+            modules::all()
+                .iter()
+                .map(|ext| ServerRow {
+                    id: ext.id.to_owned(),
+                    name: ext.name.to_owned(),
+                    summary: ext.summary.to_owned(),
+                    enabled: defaults.enabled(ext.id),
+                    stability: ext.stability.as_str().to_owned(),
+                    toggle: match ext.toggle {
+                        modules::Toggle::Fixed => "fixed".to_owned(),
+                        modules::Toggle::Operator => "operator".to_owned(),
+                        modules::Toggle::PerUser => "per_user".to_owned(),
+                    },
+                    milestone: ext.milestone.to_owned(),
+                    spec: ext.spec.to_owned(),
+                })
+                .collect()
+        }
+    };
+
+    let selected: Vec<&ServerRow> = rows
+        .iter()
+        .filter(|row| {
+            (!enabled || row.enabled)
+                && (!disabled || !row.enabled)
+                && (!planned || row.stability == "planned")
+        })
+        .collect();
+    print_rows(&selected, cli.json)
+}
+
+async fn show(cli: &Cli, id: &str) -> Result<(), Failure> {
+    let compiled = modules::find(id).ok_or_else(|| {
+        let hint = modules::nearest(id)
+            .map(|near| format!("; the nearest registered id is `{near}`"))
+            .unwrap_or_default();
+        bad_request(format!("no registered module called `{id}`{hint}"))
+    })?;
+
+    let server = catalogue(cli).await?;
+    let state = match &server {
+        Some(catalogue) => catalogue
+            .modules
+            .iter()
+            .find(|row| row.id == id)
+            .map_or("unknown (the instance did not list it)".to_owned(), |row| {
+                (if row.enabled { "on" } else { "off" }).to_owned()
+            }),
+        None => "(instance unreachable; compiled default below)".to_owned(),
+    };
+
+    if cli.json {
+        let value = serde_json::json!({
+            "id": compiled.id,
+            "name": compiled.name,
+            "summary": compiled.summary,
+            "enabled": state,
+            "stability": compiled.stability.as_str(),
+            "toggle": match compiled.toggle {
+                modules::Toggle::Fixed => "fixed",
+                modules::Toggle::Operator => "operator",
+                modules::Toggle::PerUser => "per_user",
+            },
+            "requires": compiled.requires,
+            "milestone": compiled.milestone,
+            "spec": compiled.spec,
+            "nav": compiled.nav.iter().map(|n| serde_json::json!({
+                "label": n.label, "href": n.href, "slot": n.slot
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value)
+                .map_err(|error| environment(format!("rendering json: {error}")))?
+        );
+        return Ok(());
+    }
+
+    println!("{} — {}", compiled.id, compiled.name);
+    println!("  state      {state}");
+    println!(
+        "  stability  {} ({})",
+        compiled.stability.as_str(),
+        compiled.milestone
+    );
+    println!(
+        "  toggle     {}",
+        match compiled.toggle {
+            modules::Toggle::Fixed => "fixed — a safety surface, never switchable (§59.4)",
+            modules::Toggle::Operator => "operator — the instance decides",
+            modules::Toggle::PerUser => "per_user — the instance decides, you may switch it off",
+        }
+    );
+    if !compiled.requires.is_empty() {
+        println!("  requires   {}", compiled.requires.join(", "));
+    }
+    println!("  spec       {}", compiled.spec);
+    println!("  {}", compiled.summary);
+    if !compiled.nav.is_empty() {
+        println!("  nav");
+        for nav in compiled.nav {
+            println!("    [{:<14}] {:<20} {}", nav.slot, nav.label, nav.href);
+        }
+    }
+    Ok(())
+}
+
+/// What a `darkhold.toml` says about modules; every other key is ignored, because
+/// checking the whole file is `darkhold serve`'s job and it already refuses.
+#[derive(Debug, Default, Deserialize)]
+struct ConfigFile {
+    #[serde(default)]
+    modules: ModulesTable,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModulesTable {
+    #[serde(default)]
+    disabled: Vec<String>,
+    #[serde(default)]
+    enabled: Vec<String>,
+    allow_user_overrides: Option<bool>,
+}
+
+fn check(path: &PathBuf) -> Result<(), Failure> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        environment(format!(
+            "reading {}: {error}. `dh module check` reads the file `darkhold serve` reads",
+            path.display()
+        ))
+    })?;
+    // Parsed loosely at the top level: this command is about one table, and a
+    // typo in `[server]` is reported by the server with better context than a
+    // 6,000-line config struct re-derived here would give.
+    let file: ConfigFile = toml::from_str(&text)
+        .map_err(|error| bad_request(format!("{}: {error}", path.display())))?;
+    match modules::validate(&file.modules.disabled, &file.modules.enabled) {
+        Ok(()) => {
+            let state = ModuleState::resolve(
+                &file.modules.disabled,
+                &file.modules.enabled,
+                file.modules.allow_user_overrides.unwrap_or(true),
+            );
+            let on = modules::all()
+                .iter()
+                .filter(|ext| state.enabled(ext.id))
+                .count();
+            println!(
+                "{}: [modules] is valid — {on} of {} registered surfaces run",
+                path.display(),
+                modules::all().len()
+            );
+            Ok(())
+        }
+        // A refusal is a usage error: the operator's file is wrong (§44's exit
+        // vocabulary), not the environment.
+        Err(message) => Err(bad_request(message)),
+    }
+}

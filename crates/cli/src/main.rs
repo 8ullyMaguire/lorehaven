@@ -12,6 +12,7 @@
 //! fails today with the server's own message rather than being mapped to `likes`:
 //! a client-side alias table is a second definition waiting to disagree.
 
+mod module;
 mod rec;
 mod supply;
 
@@ -76,6 +77,12 @@ pub enum Command {
         #[command(subcommand)]
         action: Box<supply::SupplyArgs>,
     },
+    /// §59: what this instance runs, and what it could. `list` and `show` read the
+    /// server; `check` validates a config file without one.
+    Module {
+        #[command(subcommand)]
+        action: module::ModuleAction,
+    },
 }
 
 #[tokio::main]
@@ -83,6 +90,13 @@ async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     match &cli.command {
         Command::Rec(args) => match rec::run(&cli, args).await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::ExitCode::from(error.code)
+            }
+        },
+        Command::Module { action } => match module::run(&cli, module::ModuleArgs { action: action.clone() }).await {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");

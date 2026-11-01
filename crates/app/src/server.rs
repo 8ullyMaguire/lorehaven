@@ -24,6 +24,7 @@ use anyhow::{Context, Result};
 use axum::extract::Request;
 use axum::http::{header, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
+use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::Router;
 use darkhold_db::migrate::{self, MigrationReport};
@@ -320,181 +321,82 @@ pub fn build_router(state: AppState) -> Router {
 
     // Routes that are authenticated and state-changing.
     let account_routes: Router<AppState> = Router::new()
-        .merge(classified(routes::auth::router(), RouteClass::Auth, &state))
-        .merge(classified(
-            routes::pseuds::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::settings::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::works::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::collaborators::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "auth", routes::auth::router(), RouteClass::Auth))
+        .merge(module_mount(&state, "pseuds", routes::pseuds::router(), RouteClass::Write))
+        .merge(module_mount(&state, "settings", routes::settings::router(), RouteClass::Write))
+        .merge(module_mount(&state, "works", routes::works::router(), RouteClass::Write))
+        .merge(module_mount(&state, "collaborators", routes::collaborators::router(), RouteClass::Write))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::verify_csrf,
         ));
 
     let api: Router<AppState> = Router::new()
-        .merge(classified(
-            routes::meta::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "meta", routes::meta::router(), RouteClass::Default))
+        // The catalogue is core (§59.2): a page must be able to ask why it is empty.
+        .merge(classified(routes::modules::router(), RouteClass::Default, &state))
         // Reader routes are reachable with no session at all, so they carry the
         // default class rather than the writers' tighter allowance.
-        .merge(classified(
-            routes::works::read_router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "works", routes::works::read_router(), RouteClass::Default))
         // Reading progress, ratings, history, notes and typography. A visitor
         // may reach none of these without a session, so they live under the
         // writers' subtree with the Write class.
-        .merge(classified(
-            routes::reading::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(routes::reading::authed_router())
-        .merge(classified(
-            routes::dnf::router(),
-            RouteClass::Search,
-            &state,
-        ))
+        .merge(module_mount(&state, "reading", routes::reading::router(), RouteClass::Write))
+        .merge(module_mount(&state, "reading", routes::reading::authed_router(), RouteClass::Default))
+        .merge(module_mount(&state, "dnf", routes::dnf::router(), RouteClass::Search))
         // Positivity filter: the author's own defaults, per-work policy and
         // inbox. Session-scoped like the library: every route needs one and
         // most write, so the whole tree sits under the writers' class.
-        .merge(classified(
-            routes::feedback::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::search::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::discovery::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "feedback", routes::feedback::router(), RouteClass::Write))
+        .merge(module_mount(&state, "search", routes::search::router(), RouteClass::Default))
+        .merge(module_mount(&state, "discovery", routes::discovery::router(), RouteClass::Default))
         // §16.10a: the draw. Default class, like discovery: two reads and one
         // write, all gated on a session inside the handlers.
-        .merge(classified(
-            routes::draw::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "draw", routes::draw::router(), RouteClass::Default))
         // Items 14, 27 and 33 of the 100-idea audit. Default class: the router carries one
         // per-reader read (item 14, gated inside its handler by RequireSession) and two
         // reads over public rows. Classing the whole tree as Read would understate the
         // per-reader one; classing it as Write would make two public reads require a
         // session the router does not actually demand.
-        .merge(classified(
-            routes::reader_surface::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "reader_surface", routes::reader_surface::router(), RouteClass::Default))
         // Item 1 of the 100-idea audit. Its own merge, because `classified` takes ONE
         // tree: passing two routers to it was a four-argument call to a three-argument
         // function. Default class rather than Read, because the handler is gated by
         // RequireSession and the store is a single indexed lookup by account.
-        .merge(classified(
-            routes::continue_reading::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "continue_reading", routes::continue_reading::router(), RouteClass::Default))
         // Gap C step 5 — author-only pre-read reports. Write class because the router
         // carries a DELETE (provider withdrawal); §32.6's "never on the public work page"
         // is enforced inside the handlers, not by the route class.
-        .merge(classified(
-            routes::preread::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(routes::arena::router())
-        .merge(classified(
-            routes::quiz::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "preread", routes::preread::router(), RouteClass::Write))
+        .merge(module_mount(&state, "arena", routes::arena::router(), RouteClass::Default))
+        .merge(module_mount(&state, "quiz", routes::quiz::router(), RouteClass::Default))
         // The tasting menu (§49.5). `Write` rather than `Default` because
         // `POST /tasting/respond` mutates the reader's taste weights, and the
         // class is what the rate limiter reads: a calibration queue a reader can
         // be rate-limited out of is a queue they abandon, and a queue they can
         // hammer is a way to move their own profile without reading anything.
-        .merge(classified(
-            routes::tasting::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::media_resilience::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::curator::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::mirror_admin::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::author_media::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::media_health::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::vanguard::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::roadmap::read_router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "tasting", routes::tasting::router(), RouteClass::Write))
+        .merge(module_mount(&state, "media_resilience", routes::media_resilience::router(), RouteClass::Default))
+        .merge(module_mount(&state, "curator", routes::curator::router(), RouteClass::Default))
+        .merge(module_mount(&state, "mirror_admin", routes::mirror_admin::router(), RouteClass::Default))
+        .merge(module_mount(&state, "author_media", routes::author_media::router(), RouteClass::Default))
+        .merge(module_mount(&state, "media_health", routes::media_health::router(), RouteClass::Default))
+        .merge(module_mount(&state, "vanguard", routes::vanguard::router(), RouteClass::Default))
+        .merge(module_mount(&state, "roadmap", routes::roadmap::read_router(), RouteClass::Default))
         .merge(
             // TL>=1 + operator routes under /api/v1/roadmap and /api/v1/admin/roadmap.
             Router::new()
-                .nest("/api/v1", routes::roadmap::router())
                 .nest(
                     "/api/v1",
-                    classified(routes::roadmap::admin_router(), RouteClass::Write, &state),
+                    module_mount(&state, "roadmap", routes::roadmap::router(), RouteClass::Default),
+                )
+                .nest(
+                    "/api/v1",
+                    module_mount(&state, "roadmap", routes::roadmap::admin_router(), RouteClass::Write),
                 ),
         )
-        .merge(classified(
-            routes::browse::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::directory::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "browse", routes::browse::router(), RouteClass::Default))
+        .merge(module_mount(&state, "directory", routes::directory::router(), RouteClass::Default))
         // M57: the metadata exchange (spec §11.17). Classed as a writer because
         // `POST /exchange/signals` is a write and the limiter's class is per
         // router, not per route — the two GETs ride along under the stricter
@@ -503,396 +405,168 @@ pub fn build_router(state: AppState) -> Router {
         // disabled exchange must answer 404, and a route that is not mounted
         // would answer 404 for a different reason (no such path), which would
         // make the two indistinguishable to a test.
-        .merge(classified(
-            routes::exchange::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "exchange", routes::exchange::router(), RouteClass::Write))
         // The reader's library: shelves, bookmarks, private tags, reading
         // statuses, saved views, storage and the update check. Every route
         // needs a session and most of them write, so the whole tree sits under
         // the writers' class rather than being split for the two reads.
-        .merge(classified(
-            routes::library::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "library", routes::library::router(), RouteClass::Write))
         // The public catalogue: metadata-only search across every source. A read
         // class because it touches no session and no writer's row — see the
         // module docs for why that is safe while library_items stays metadata-only.
-        .merge(classified(
-            routes::catalogue::router(),
-            RouteClass::Search,
-            &state,
-        ))
+        .merge(module_mount(&state, "catalogue", routes::catalogue::router(), RouteClass::Search))
         // §58's supply surface (M45-25): keystone authors, droughts, and the
         // routing a reader opts into. Write class — every door needs a session,
         // and routing creates a row the patronage pays against.
-        .merge(classified(
-            routes::supply::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "supply", routes::supply::router(), RouteClass::Write))
         // The recommendation engines over a filtered catalogue (M63-01). The
         // search class rather than the default one: it ranks a pool of up to 500
         // rows with every enabled strategy, which is the heaviest read in the
         // application. It is not public — every strategy reads the caller's own
         // history, so it needs a session.
-        .merge(classified(
-            routes::rec_run::router(),
-            RouteClass::Search,
-            &state,
-        ))
+        .merge(module_mount(&state, "rec_run", routes::rec_run::router(), RouteClass::Search))
         // The job queue: a caller's own jobs, and the cancel action.
-        .merge(classified(
-            routes::jobs::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "jobs", routes::jobs::router(), RouteClass::Write))
         // Imports, the source catalogue, the library and source credentials.
         // A write class rather than a read class even for the reads: every one
         // of these is scoped to the caller and the preview may reach out to a
         // source, so they are not cheap shared reads.
-        .merge(classified(
-            routes::imports::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "imports", routes::imports::router(), RouteClass::Write))
         // Exports: a reader's own files, and the token-addressed download that
         // needs no session because the token is the credential.
-        .merge(classified(
-            routes::exports::authed_router(),
-            RouteClass::Export,
-            &state,
-        ))
-        .merge(classified(
-            routes::exports::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "exports", routes::exports::authed_router(), RouteClass::Export))
+        .merge(module_mount(&state, "exports", routes::exports::router(), RouteClass::Default))
         // The operator surface. Gated on configuration inside the handlers,
         // because "who is an operator" is a decision about an account and not
         // about a route tree.
-        .merge(classified(
-            routes::jobs::admin_router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::imports::admin_router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "jobs", routes::jobs::admin_router(), RouteClass::Write))
+        .merge(module_mount(&state, "imports", routes::imports::admin_router(), RouteClass::Write))
         .merge(account_routes)
         // Account permission statement (M27). Write class: session-scoped mutation.
-        .merge(classified(
-            routes::account_permissions::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::rating_integrity::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "account_permissions", routes::account_permissions::router(), RouteClass::Write))
+        .merge(module_mount(&state, "rating_integrity", routes::rating_integrity::router(), RouteClass::Default))
         // CTA marks (spec §42.2) — curators record whether a work carries its
         // own CTA. Write class: mark and retract mutate; list is read but
         // should be authenticated (who marked what).
-        .merge(classified(routes::cta::router(), RouteClass::Write, &state))
+        .merge(module_mount(&state, "cta", routes::cta::router(), RouteClass::Write))
         // Retention administration (M59 / spec §11.15). Operator-only, and the
         // gate 404s a non-operator, so it is registered as an ordinary write
         // route: the route's own extractor does the authorising and nothing
         // above it needs to know the policy exists.
-        .merge(classified(
-            routes::retention::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "retention", routes::retention::router(), RouteClass::Write))
         // The reader-facing half of §5, amendment §5. Merged rather than nested
         // under the admin retention router because these are reader routes: the
         // gate is `retention_governance.proposal_min_trust`, not an operator
         // check, and `require_operator` would be the wrong extractor for a
         // reader who has earned trust.
-        .merge(classified(
-            routes::retention_proposals::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "retention_proposals", routes::retention_proposals::router(), RouteClass::Write))
         // §11.15b's request and status. `Write` for the whole router, following
         // `retention_proposals` above: a router gets ONE class, and this pair
         // contains a POST that starts a job against a third-party site, which is
         // the class that matters. The GET rides the stricter limit, which is the
         // right way round for a reader polling a fetch they just asked for.
-        .merge(classified(
-            routes::reader_body_copies::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "reader_body_copies", routes::reader_body_copies::router(), RouteClass::Write))
         // The operator's half of the proposal lifecycle (plan E.2). Same router
         // as the reader's four, disjoint paths; the gate differs per handler,
         // so it cannot be expressed by the mount.
-        .merge(classified(
-            routes::retention_proposal_admin::operator_router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "retention_proposal_admin", routes::retention_proposal_admin::operator_router(), RouteClass::Write))
         // M45-51. Reader-scoped: both routes read the session and take no path
         // parameter, so there is no operator variant to mount (see the module docs).
-        .merge(classified(
-            routes::erasure::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "erasure", routes::erasure::router(), RouteClass::Write))
         // The operator's trigger for the settlement pass. The pass itself is
         // also a scheduled job, and both call the same function, so the button
         // and the overnight run are provably the same thing.
-        .merge(classified(
-            routes::retention_settle::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "retention_settle", routes::retention_settle::router(), RouteClass::Write))
         // Recommendation transparency (M29): "why am I seeing this" explanations.
-        .merge(classified(
-            routes::recommendation_transparency::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "recommendation_transparency", routes::recommendation_transparency::router(), RouteClass::Default))
         // Taxonomy (nodes, aliases, tags) — M10. Every route needs a session and
         // most write, so it sits under the writers' class.
-        .merge(classified(
-            routes::taxonomy::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "taxonomy", routes::taxonomy::router(), RouteClass::Write))
         // The vocabulary as a document (T2.1): public, read-only, no session — the other site has none.
-        .merge(classified(
-            routes::taxonomy_export::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "taxonomy_export", routes::taxonomy_export::router(), RouteClass::Default))
         // Audience warmth panel (spec §41.2).
-        .merge(classified(
-            routes::audience::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "audience", routes::audience::router(), RouteClass::Default))
         // Community (comments, forums, groups, messaging, blocks) — M12 groundwork.
         // Every route needs a session and most write, so writers' class.
-        .merge(classified(
-            routes::community::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "community", routes::community::router(), RouteClass::Write))
         // Work discussion modes, reaction bar, linked topics (spec 35.1, M31).
-        .merge(classified(
-            routes::work_discussion::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "work_discussion", routes::work_discussion::router(), RouteClass::Write))
         // Typed votes, budgets, meta-moderation and karma (spec 35.2, M32).
         // Writers' class: every route here needs a session, and the reads are
         // per-viewer because the transparency tier depends on who is asking.
-        .merge(classified(
-            routes::typed_votes::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "typed_votes", routes::typed_votes::router(), RouteClass::Write))
         // Spoilers, content warnings, drafts, scheduled posts, readability
         // (spec 35.4, M34).
-        .merge(classified(
-            routes::spoilers::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "spoilers", routes::spoilers::router(), RouteClass::Write))
         // Thread modes: reading groups, critique circles, wiki pins, prompts
         // (spec 35.3, M33). Same writers' class as typed votes.
-        .merge(classified(
-            routes::thread_modes::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "thread_modes", routes::thread_modes::router(), RouteClass::Write))
         // Moderation and community health (spec 35.5, M35): sanctions,
         // slow mode, federation scope, featured posts.
-        .merge(classified(
-            routes::moderation::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "moderation", routes::moderation::router(), RouteClass::Write))
         // Events (collections, challenges, requests, wishlists, events) — M13.
-        .merge(classified(
-            routes::events::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "events", routes::events::router(), RouteClass::Write))
         // Governance (reports, moderation, sanctions, appeals, trust) — M14.
-        .merge(classified(
-            routes::governance::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "governance", routes::governance::router(), RouteClass::Write))
         // Economy (credits, fair queues, bounties, billing) — M15.
-        .merge(classified(
-            routes::economy::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "economy", routes::economy::router(), RouteClass::Default))
         // Marketplace (listings, commissions, extensions, webhooks, gallery) — M16.
-        .merge(classified(
-            routes::marketplace::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "marketplace", routes::marketplace::router(), RouteClass::Default))
         // Curator-submitted source adapters (submit, queue, reviews) — M45-57, §55.
-        .merge(classified(
-            routes::source_adapters::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "source_adapters", routes::source_adapters::router(), RouteClass::Default))
         // Personal concierge (queues, sessions, WIP watches) — M45-22, §54.
-        .merge(classified(
-            routes::concierge::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "concierge", routes::concierge::router(), RouteClass::Default))
         // Translation pipeline — M17.
-        .merge(classified(
-            routes::translation::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "translation", routes::translation::router(), RouteClass::Default))
         // Public API, bots, feeds, push, AI — M18.
-        .merge(classified(
-            routes::external::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "external", routes::external::router(), RouteClass::Default))
         // The OpenAPI document, generated from the declared route table.
-        .merge(classified(
-            routes::openapi::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "openapi", routes::openapi::router(), RouteClass::Default))
         // Administration — M19.
-        .merge(classified(
-            routes::admin::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::admin_discovery::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::flows::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "admin", routes::admin::router(), RouteClass::Default))
+        .merge(module_mount(&state, "admin_discovery", routes::admin_discovery::router(), RouteClass::Default))
+        .merge(module_mount(&state, "flows", routes::flows::router(), RouteClass::Default))
         // Separate `classified` rather than a second router in the merge above: the two
         // views are both `Default`, and one `classified` call takes exactly one router.
         // Merging them would have put the metric behind the economy view's classification
         // by accident, which is the kind of wiring error that no test notices until a
         // request is rate-limited against the wrong bucket.
-        .merge(classified(
-            routes::north_star::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "north_star", routes::north_star::router(), RouteClass::Default))
         // M21 skeleton — spec revision 2026-09-14: monetization, gifts,
         // content subscriptions, saved-search alerts, ai_training assertion.
-        .merge(classified(
-            routes::monetization::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::monetization::read_router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::monetization::gifts_router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::monetization::transparency_router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::subscriptions::router(),
-            RouteClass::Write,
-            &state,
-        ))
-        .merge(classified(
-            routes::subscriptions::ai_training_router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "monetization", routes::monetization::router(), RouteClass::Write))
+        .merge(module_mount(&state, "monetization", routes::monetization::read_router(), RouteClass::Default))
+        .merge(module_mount(&state, "monetization", routes::monetization::gifts_router(), RouteClass::Write))
+        .merge(module_mount(&state, "monetization", routes::monetization::transparency_router(), RouteClass::Default))
+        .merge(module_mount(&state, "subscriptions", routes::subscriptions::router(), RouteClass::Write))
+        .merge(module_mount(&state, "subscriptions", routes::subscriptions::ai_training_router(), RouteClass::Write))
         // Generalized media — M22 (spec §32). Query doors are public reads;
         // eligibility is applied inside the bodies. Actor and collection
         // mutations are writer-class; sessions and scopes arrive with bodies.
-        .merge(classified(
-            routes::media::router(),
-            RouteClass::Default,
-            &state,
-        ))
-        .merge(classified(
-            routes::media::write_router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "media", routes::media::router(), RouteClass::Default))
+        .merge(module_mount(&state, "media", routes::media::write_router(), RouteClass::Write))
         // TTS narration (M26 / spec §32.5). Edition reads are public;
         // requesting a narration requires a session.
-        .merge(classified(
-            routes::narration::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "narration", routes::narration::router(), RouteClass::Write))
         // Creator dashboard (M24 / spec §32.3, §24.3). Session-scoped: the
         // aggregates are about the acting pseud's own works, banded so a small
         // count cannot name a reader.
-        .merge(classified(
-            routes::dashboard::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "dashboard", routes::dashboard::router(), RouteClass::Default))
         // Trust-gated analytics. Every capability is authorised by the
         // registry rather than by a per-route check, so this door and the
         // list at `/me/analytics` can never disagree.
-        .merge(classified(
-            routes::analytics::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "analytics", routes::analytics::router(), RouteClass::Default))
         // Decision service (M30 / spec §34).
-        .merge(classified(
-            routes::decision_service::router(),
-            RouteClass::Default,
-            &state,
-        ))
+        .merge(module_mount(&state, "decision_service", routes::decision_service::router(), RouteClass::Default))
         // Controlled digital lending (M25 / spec §32.4). All endpoints require
         // a session: borrower identity is needed to grant or revoke a loan.
-        .merge(classified(
-            routes::lending::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "lending", routes::lending::router(), RouteClass::Write))
         // Derivative pipeline — §32.4. Session-scoped reads plus enqueue
         // writes; actual building happens in the worker.
-        .merge(classified(
-            routes::derivative::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "derivative", routes::derivative::router(), RouteClass::Write))
         // Notifications inbox — §5.5. Session-scoped reads plus idempotent
         // mark-read writes; rows are produced by replies, sales and gifts.
-        .merge(classified(
-            routes::notifications::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(module_mount(&state, "notifications", routes::notifications::router(), RouteClass::Write))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(
@@ -900,14 +574,14 @@ pub fn build_router(state: AppState) -> Router {
             auth::load_session,
         ));
 
-    let health = classified(routes::health::router(), RouteClass::Default, &state);
+    let health = module_mount(&state, "health", routes::health::router(), RouteClass::Default);
 
     let router: Router<AppState> = Router::new()
         .merge(health)
         // Federation: instance themes, ActivityPub inbox/outbox, similarity — M36.
         // Merged at the root level (not under /api/v1) so ActivityPub endpoints
         // are reachable at /federation/inbox, /federation/actor, etc.
-        .merge(routes::federation::routes())
+        .merge(module_mount(&state, "federation", routes::federation::routes(), RouteClass::Default))
         // The reading surface: **server-rendered HTML** (spec §8.5). Also at
         // the root, because a page is not an API response -- and it must be
         // merged rather than nested, or the reader's URL would carry the
@@ -925,12 +599,18 @@ pub fn build_router(state: AppState) -> Router {
         // That is the kind of fault that looks like a working feature: the
         // page renders, the form posts, the redirect comes back, and nothing
         // was recorded.
-        .merge(
+        // The reader page belongs to the `reading` extension: an instance that
+        // switches reading off must lose the page and the API together, or the
+        // page would render a story nobody can make progress in.
+        .merge(module_mount(
+            &state,
+            "reading",
             routes::reader_page::router().layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth::load_session,
             )),
-        )
+            RouteClass::Default,
+        ))
         .nest("/api/v1", api)
         .fallback(assets::serve)
         .layer(RequestBodyLimitLayer::new(config.server.max_body_bytes))
@@ -972,6 +652,34 @@ where
                 next.run(request).await
             },
         ))
+}
+
+/// Mount one extension's routes behind the extension host (§59.5).
+///
+/// The gate is a layer on the module's whole router, added before the rate-limit
+/// classification so a disabled surface costs one match and never a limiter
+/// decision. `id` is `&'static str` because it comes from the registry and ends
+/// up in `AppError::ModuleUnavailable`, whose module field is static by design —
+/// the refusal is a fixed sentence about a fixed id, not a formatted message.
+fn module_mount<S>(state: &AppState, id: &'static str, router: Router<S>, class: RouteClass) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    // Snapshot the decision at mount: one process serves one instance, and a
+    // config change is a restart. A per-request lookup would be the same answer
+    // with an atomic load in front of it.
+    let on = state.modules().enabled(id);
+    let gated = router.layer(middleware::from_fn(
+        move |request: Request, next: Next| async move {
+            if on {
+                next.run(request).await
+            } else {
+                crate::http::ApiError(darkhold_domain::AppError::ModuleUnavailable { module: id })
+                    .into_response()
+            }
+        },
+    ));
+    classified(gated, class, state)
 }
 
 /// Record whether a reverse proxy is trusted, for rate-limit keying.

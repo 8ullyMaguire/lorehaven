@@ -10828,3 +10828,134 @@ in that file; it is the place to start, not this pointer.
 
 
 **Amendment — Ultimate Fanfiction Site (2026-10-17):** `docs/spec-amendments/ultimate-fanfiction-site.md` designates Darkhold as the base for the Ultimate Fanfiction Site (ficnexus = ingestion/search module, kindred = recommendation/taste module). See `~/secondbrain/10-Projects/ultimate-fanfiction-site-spec.md`.
+
+## 59 The module host (M65): a small core, and every surface as a switchable module
+
+**Measured before writing this (2026-11-01):** `crates/app/src/routes/` holds **82 modules**,
+`server.rs` mounts **79** of them across **90 merge sites**, `config.rs` is **6,160 lines** with
+**49 top-level sections**, and `/api/v1/extensions` **already exists** — `marketplace.rs` serves a
+third-party extension catalogue with `GET /extensions`, `GET /extensions/{slug}`, grant/revoke and
+`extension_submissions` behind it (migration 0113).
+
+That collision is why this section uses a different noun. In this product an **extension** is an
+installable third-party package (§6.3, Milestone 15: manifests, grants, reviews, webhooks). A
+**module** is a compiled-in surface of the server itself. `AppError::ModuleUnavailable` and
+`MODULE_UNAVAILABLE` already meant exactly that, and `works.rs` already answered
+`ModuleUnavailable { module: "taste" }` when a surface was off — so §59 fills a vocabulary the
+tree had and a mechanism it did not.
+
+### 59.1 Compiled in, not loaded
+
+A module is Rust code in the binary plus a row in the registry. There is no `dlopen`, no ABI, no
+second process, no untrusted code. Third-party loading stays Milestone 15's problem, and it will
+be a *producer* of these rows, not a parallel system.
+
+The reason is not conservatism. A plugin ABI in a `tokio` server costs a boundary that leaks
+panics, blocking calls and unwinding; and what an operator actually asked for — a small core, and
+every surface individually switchable per instance and per user — needs **a registry and a
+refusal**, not a loader.
+
+### 59.2 The core is what cannot be switched off
+
+The core is `meta`, `health`, `auth`, `settings`, `openapi`, the request plumbing (rate limiting,
+static assets, CORS, request ids), the database layer, and the host itself, plus the module
+catalogue (a page must be able to ask why it is empty). Everything else — including surfaces an
+instance could not usefully run without, like `works` and `search` — is a module whose compiled
+default is **on**. That asymmetry is deliberate: a surface that can be disabled is a surface whose
+absence gets tested, and the core stays small enough to audit in one sitting.
+
+Every row carries:
+
+| field | meaning |
+|---|---|
+| `id` | lower snake case, stable, what config, the API and the CLI speak |
+| `default_on` | whether a fresh instance runs it; **true for every module that exists today** |
+| `stability` | `stable`, `beta`, `experimental`, `planned` — a `planned` row has no routes |
+| `toggle` | `fixed` (never switchable: safety surfaces), `operator`, `per_user` |
+| `requires` | ids that must also be on |
+| `milestone`, `spec` | provenance, so a disabled surface explains itself |
+| `nav` | the navigation entries it contributes (§6.3 slots) |
+
+### 59.3 Resolution: instance, then user, and never widening
+
+```text
+compiled default  →  darkhold.toml [modules]  →  account override  →  resolved
+```
+
+- `[modules] disabled = ["quiz"]`, `enabled = [...]`, `allow_user_overrides = true` (default).
+- An unknown id is a **startup error naming the nearest registered id**. A `fixed` id in either
+  list is refused quoting §59.4. An id in both lists is refused, because a file that says two
+  things about one module has no reader that can obey both. A `planned` id in `enabled` is refused
+  naming its milestone. A `requires` that will not be enabled is refused naming both.
+- A user preference can **narrow** an instance decision and never widen it: enabling what the
+  instance disabled is not a state that exists, and the API reports `refused: "instance"` rather
+  than storing a preference nobody honours.
+- `allow_user_overrides = false` removes the user layer entirely and the write route refuses,
+  naming the key. A key with no reader is a comment an operator believes is a control.
+
+### 59.4 Safety surfaces are fixed, and the list is short on purpose
+
+`moderation`, `erasure`, `privacy`, `account_permissions`, `admin`, `health`, `auth`, `settings`,
+`meta`, `openapi`, `retention_settle`, `reader_body_copies`, `imports` and `jobs` are
+`toggle: fixed`. They are not features; they are the promises an instance makes. Everything else
+— including `search`, `economy`, `supply`, `draw` — is switchable, because an instance that cannot
+turn off its own slot machine is not configurable, it is decorated.
+
+### 59.5 A disabled module is absent, and says which one it is
+
+`404` with `MODULE_UNAVAILABLE` and the module's id in the message — the existing error, not a new
+code. 404 rather than 403 because the surface is not refused, it is **absent**: a client should not
+go hunting a permission it will never be granted, and a crawler should not index a page that is one
+config line from existing.
+
+The gate is a layer on the module's whole router, mounted once in `server.rs`. Two properties are
+asserted rather than assumed: the refusal is **per module** (a neighbour still answers in the same
+test) and **not unconditional** (the same route answers `401` once the module is on).
+
+### 59.6 Per-user state is a table, not a blob
+
+`module_user_state (account_id, module_id, enabled, updated_at)`, one row per account per module a
+reader has actually changed, no row meaning "inherit". Keyed on the **account**, not the pseud: a
+reader who switches `arena` off once expects it off, and a per-pseud matrix of toggles is a
+settings page nobody finishes. §46's rule applies — per-domain tables, never JSON blobs — and the
+table's `account_id` needs a snapshot-policy decision (§11.16) like every other identity column.
+
+### 59.7 The planned catalogue is registered, not implied
+
+Every surface the roadmap has thought about and not built is a row with `stability: planned`,
+`default_on: false`, no routes, and the milestone that owns it. They appear in `dh module list` and
+in `/api/v1/modules`, and enabling one is **refused by name**:
+
+```text
+$ dh module check --config darkhold.toml
+[modules] enabled names `home.hidden_gems`, which is planned (M64-12) and has no routes.
+Enabling it would be claiming a feature this build does not have; building it is M64-12's job,
+not a flag's.
+```
+
+A flag cannot compile a feature, and a catalogue that lists only what ships is how a roadmap
+silently loses items. This is the same rule §0.3 applies to explanations: the absent thing says
+what it is missing.
+
+### 59.8 What an operator gets
+
+- `dh module list [--enabled|--disabled|--planned] [--json]` — asks `/api/v1/modules`, and says so
+  when it falls back to this build's compiled registry.
+- `dh module show <id>` — one surface in full: state, toggle, dependencies, milestone, slots.
+- `dh module check --config <path>` — the startup validation, without a server.
+- `GET /api/v1/modules` — the public catalogue: id, name, summary, state, stability, toggle, nav.
+  Not the operator's reasoning.
+- `PATCH /api/v1/modules/{id}` — a reader's own override, `per_user` rows only.
+
+### 59.9 Acceptance
+
+1. `cargo test -p darkhold-app --test m65_module_host` green: a disabled module answers `404`
+   `MODULE_UNAVAILABLE` naming itself; the same route answers `401` when enabled; neighbours are
+   unaffected; the catalogue is core; an unregistered mount fails the build's own test; a `fixed`
+   id and a typo both refuse with their reasons.
+2. `cargo test -p darkhold-domain --lib modules` green (10 tests: uniqueness, defaults, resolution,
+   the four refusals, the suggestion).
+3. On a live instance, `[modules] disabled = ["quiz"]` makes `/api/v1/quiz/works` answer `404`
+   `MODULE_UNAVAILABLE` naming `quiz`, and removing the line answers `401` — the difference between
+   the two statuses is the whole proof.
+4. `dh module check` refuses `moderation` and `quizz`, and accepts a valid file, with exit 0/2/2.

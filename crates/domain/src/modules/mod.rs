@@ -1,0 +1,428 @@
+//! §59 — the module registry: which compiled surfaces exist, and what state they resolve to.
+//!
+//! Lives in `domain` because the registry is static data, and because `dh module list`
+//! must print the same rows the server enforces without linking the web stack.
+//!
+//! A small core, and every other surface as a registered module whose state
+//! resolves **compiled default → instance config → account**. Nothing here loads
+//! code: an module is a compiled module plus a row in [`registry::MODULES`],
+//! and the host's job is to *refuse* correctly (§59.1).
+//!
+//! The three decisions worth reading before changing anything:
+//!
+//! 1. **A disabled module is absent, not refused.** [`crate::server`]'s
+//!    `module_mount` answers `404 MODULE_UNAVAILABLE` naming the module. 404 rather
+//!    than 403 because the surface does not exist on this instance, and a client
+//!    should not go looking for a permission it will never be granted. The
+//!    refusal reuses the error code that already existed for exactly this
+//!    sentence (`AppError::ModuleUnavailable`) instead of inventing a second
+//!    vocabulary for "this instance does not run that".
+//! 2. **The gate is mounted once per module.** One line in `server.rs` covers
+//!    every route in a module; a per-handler check is the line the next handler
+//!    forgets.
+//! 3. **A user preference can narrow an instance's decision and never widen it.**
+//!    Enabling what the instance disabled is not a state that exists, and
+//!    `resolve` says so rather than storing a preference nobody honours.
+
+use std::collections::BTreeSet;
+
+use serde::Serialize;
+
+pub mod registry;
+
+/// How finished a surface is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stability {
+    /// Shipped and depended on.
+    Stable,
+    /// Shipped, still moving.
+    Beta,
+    /// Shipped, may change shape.
+    Experimental,
+    /// Registered, not built. Has no routes and cannot be enabled.
+    Planned,
+}
+
+impl Stability {
+    /// The wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Beta => "beta",
+            Self::Experimental => "experimental",
+            Self::Planned => "planned",
+        }
+    }
+}
+
+/// Who may switch a surface off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Toggle {
+    /// Never switchable. Safety surfaces are promises, not features (§59.4).
+    Fixed,
+    /// The instance decides; a reader cannot override it.
+    Operator,
+    /// The instance decides, and a reader may switch it off for themselves.
+    PerUser,
+}
+
+impl Toggle {
+    /// Whether a reader may hold an override for this row.
+    #[must_use]
+    pub const fn is_per_user(self) -> bool {
+        matches!(self, Self::PerUser)
+    }
+}
+
+/// One navigation entry an module contributes (§6.3 slots).
+///
+/// Declared here so a page can hide links to a surface the instance does not
+/// run, from the same payload that decides whether the surface answers at all.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct NavEntry {
+    /// The label a page renders.
+    pub label: &'static str,
+    /// Where the entry points.
+    pub href: &'static str,
+    /// The slot it belongs to: `primary`, `more`, `dashboard`, `reader_sidebar`.
+    pub slot: &'static str,
+}
+
+/// A registered surface.
+#[derive(Debug, Clone, Copy)]
+pub struct Module {
+    /// Stable lower-snake id. This is what config, the API and the CLI speak.
+    pub id: &'static str,
+    /// Human name.
+    pub name: &'static str,
+    /// One line, lifted from the module's own header.
+    pub summary: &'static str,
+    /// Whether a fresh instance runs it. True for every surface that exists.
+    pub default_on: bool,
+    /// How finished it is.
+    pub stability: Stability,
+    /// Who may switch it off.
+    pub toggle: Toggle,
+    /// Modules that must also be on, by id.
+    pub requires: &'static [&'static str],
+    /// The milestone that built it, or the one that owns it if unbuilt.
+    pub milestone: &'static str,
+    /// The spec section that specifies it.
+    pub spec: &'static str,
+    /// The navigation entries it contributes.
+    pub nav: &'static [NavEntry],
+}
+
+impl Module {
+    /// Whether this row is registered but unbuilt.
+    #[must_use]
+    pub const fn is_planned(&self) -> bool {
+        matches!(self.stability, Stability::Planned)
+    }
+}
+
+/// Every registered module.
+#[must_use]
+pub fn all() -> &'static [Module] {
+    registry::MODULES
+}
+
+/// The core surfaces of §59.2: no row, no switch.
+#[must_use]
+pub fn core() -> &'static [&'static str] {
+    registry::CORE
+}
+
+/// Look a row up by id.
+#[must_use]
+pub fn find(id: &str) -> Option<&'static Module> {
+    registry::MODULES.iter().find(|ext| ext.id == id)
+}
+
+/// Whether this id belongs to the core rather than the registry.
+#[must_use]
+pub fn is_core(id: &str) -> bool {
+    registry::CORE.contains(&id)
+}
+
+/// The resolved instance-level state.
+///
+/// Built once at startup, after [`crate::config::Config::validate`] has refused
+/// every malformed `[modules]` table. Resolution itself is therefore total:
+/// the only ids this can be asked about that it has not seen are core ids, which
+/// are always on.
+#[derive(Debug, Clone)]
+pub struct ModuleState {
+    enabled: BTreeSet<&'static str>,
+    allow_user_overrides: bool,
+}
+
+impl ModuleState {
+    /// Resolve the instance's decision from its validated config.
+    #[must_use]
+    pub fn resolve(disabled: &[String], enabled_list: &[String], allow_user_overrides: bool) -> Self {
+        let mut enabled: BTreeSet<&'static str> = registry::MODULES
+            .iter()
+            .filter(|ext| ext.default_on)
+            .map(|ext| ext.id)
+            .collect();
+        for id in disabled {
+            // `validate` has already refused an unknown id, so a miss here means
+            // the registry changed under a validated config; ignoring it is the
+            // safe direction only because validation runs first.
+            enabled.remove(id.as_str());
+        }
+        for id in enabled_list {
+            if let Some(ext) = find(id) {
+                enabled.insert(ext.id);
+            }
+        }
+        Self {
+            enabled,
+            allow_user_overrides,
+        }
+    }
+
+    /// Whether this surface runs on this instance. Core ids always do.
+    #[must_use]
+    pub fn enabled(&self, id: &str) -> bool {
+        is_core(id) || self.enabled.contains(id)
+    }
+
+    /// Whether readers may hold their own overrides at all (§59.3).
+    #[must_use]
+    pub const fn allow_user_overrides(&self) -> bool {
+        self.allow_user_overrides
+    }
+
+    /// The ids this instance runs, for the API payload.
+    #[must_use]
+    pub fn enabled_ids(&self) -> impl Iterator<Item = &&'static str> {
+        self.enabled.iter()
+    }
+}
+
+/// Validate an `[modules]` table (§59.3).
+///
+/// Refuses, by name and with a reason:
+///
+/// - an id the registry does not know, with the nearest known id as a hint;
+/// - a `fixed` row (§59.4), because a config that claims to switch off a safety
+///   surface would be a comment an operator believes is a control;
+/// - a core id, which has no row to switch;
+/// - a `planned` id in `enabled`, because a flag cannot compile a feature;
+/// - an id in both lists, because a config saying two things has no reader that
+///   can obey both;
+/// - a `requires` that would not also be enabled.
+pub fn validate(disabled: &[String], enabled_list: &[String]) -> Result<(), String> {
+    let mut problems = Vec::new();
+
+    for (field, ids) in [("disabled", disabled), ("enabled", enabled_list)] {
+        for id in ids {
+            if is_core(id) {
+                problems.push(format!(
+                    "[modules] {field} names `{id}`, which is part of the core (§59.2) and \
+                     has no switch. The core is meta, health, auth, settings, openapi."
+                ));
+                continue;
+            }
+            let Some(ext) = find(id) else {
+                let hint = match nearest(id) {
+                    Some(near) => format!("; the nearest registered id is `{near}`"),
+                    None => String::new(),
+                };
+                problems.push(format!(
+                    "[modules] {field} names `{id}`, which is not a registered module{hint}. \
+                     `dh module list` prints every id this build knows."
+                ));
+                continue;
+            };
+            if matches!(ext.toggle, Toggle::Fixed) {
+                problems.push(format!(
+                    "[modules] {field} names `{}`, which is `fixed`: §59.4 — a safety surface is \
+                     a promise the instance makes, not a feature it offers. Set the setting the \
+                     surface itself owns if you want it to behave differently.",
+                    ext.id
+                ));
+            }
+            if ext.is_planned() {
+                problems.push(format!(
+                    "[modules] {field} names `{}`, which is planned ({}) and has no routes. \
+                     Enabling it would be claiming a feature this build does not have; building it \
+                     is {}'s job, not a flag's.",
+                    ext.id, ext.milestone, ext.milestone
+                ));
+            }
+        }
+    }
+
+    for id in disabled {
+        if enabled_list.contains(id) {
+            problems.push(format!(
+                "[modules] lists `{id}` in both `enabled` and `disabled`. A configuration that \
+                 says two things about one module has no reader that can obey both; pick one."
+            ));
+        }
+    }
+
+    for id in enabled_list {
+        let Some(ext) = find(id) else { continue };
+        for dep in ext.requires {
+            if !enabled_list.iter().any(|e| e == dep)
+                && !find(dep).is_some_and(|d| d.default_on)
+            {
+                problems.push(format!(
+                    "[modules] enabling `{}` requires `{dep}`, which this table disables or \
+                     does not enable.",
+                    ext.id
+                ));
+            }
+        }
+    }
+
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// The registered id closest to `wanted`, for a typo message.
+///
+/// Deliberately simple: edit distance over ids, computed only on the error path,
+/// where a wrong suggestion costs one more `dh ext list` and a missing one costs
+/// a search through 97 rows.
+#[must_use]
+pub fn nearest(wanted: &str) -> Option<&'static str> {
+    let mut best: Option<(usize, &'static str)> = None;
+    for ext in registry::MODULES {
+        let d = distance(wanted, ext.id);
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, ext.id));
+        }
+    }
+    // Beyond a third of the length the "suggestion" is noise and worse than none.
+    best.filter(|(d, id)| *d <= wanted.len().max(4) / 3 + 1 && *id != wanted)
+        .map(|(_, id)| id)
+}
+
+/// Levenshtein distance, two rows of `usize`.
+fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return b.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(disabled: &[&str], enabled: &[&str]) -> Result<(), String> {
+        validate(
+            &disabled.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+            &enabled.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+        )
+    }
+
+    fn state_of(disabled: &[&str], enabled: &[&str]) -> ModuleState {
+        ModuleState::resolve(
+            &disabled.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+            &enabled.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+            true,
+        )
+    }
+
+    #[test]
+    fn every_registered_surface_that_exists_is_on_by_default() {
+        // §59.2: the only off-by-default rows are the ones with no code.
+        for ext in all() {
+            if ext.is_planned() {
+                assert!(!ext.default_on, "planned {} must default off", ext.id);
+            } else {
+                assert!(ext.default_on, "{} exists and must default on", ext.id);
+            }
+        }
+    }
+
+    #[test]
+    fn ids_are_unique_and_do_not_collide_with_the_core() {
+        let mut seen = BTreeSet::new();
+        for ext in all() {
+            assert!(seen.insert(ext.id), "duplicate module id: {}", ext.id);
+            assert!(!is_core(ext.id), "{} is core and must not have a row", ext.id);
+        }
+    }
+
+    #[test]
+    fn a_valid_table_resolves_and_the_default_is_everything_on() {
+        let state = state_of(&[], &[]);
+        assert!(v(&[], &[]).is_ok());
+        for ext in all().iter().filter(|e| !e.is_planned()) {
+            assert!(state.enabled(ext.id), "{} should be on", ext.id);
+        }
+        assert!(state.enabled("meta"), "core is always on");
+    }
+
+    #[test]
+    fn disabling_one_leaves_the_others_alone() {
+        let state = state_of(&["quiz"], &[]);
+        assert!(!state.enabled("quiz"));
+        assert!(state.enabled("arena"));
+        assert!(state.enabled("works"));
+    }
+
+    #[test]
+    fn a_typo_names_the_nearest_id() {
+        let err = v(&["quizz"], &[]).expect_err("must refuse");
+        assert!(err.contains("quizz"), "{err}");
+        assert!(err.contains("`quiz`"), "the suggestion must name the real id: {err}");
+    }
+
+    #[test]
+    fn a_fixed_surface_cannot_be_disabled_and_the_refusal_quotes_the_rule() {
+        let err = v(&["moderation"], &[]).expect_err("must refuse");
+        assert!(err.contains("§59.4"), "{err}");
+        assert!(err.contains("fixed"), "{err}");
+    }
+
+    #[test]
+    fn a_planned_surface_cannot_be_enabled() {
+        let err = v(&[], &["home.hidden_gems"]).expect_err("must refuse");
+        assert!(err.contains("M64-12"), "the refusal names the milestone: {err}");
+        assert!(err.contains("planned"), "{err}");
+    }
+
+    #[test]
+    fn the_core_has_no_switch() {
+        let err = v(&["auth"], &[]).expect_err("must refuse");
+        assert!(err.contains("core"), "{err}");
+    }
+
+    #[test]
+    fn naming_one_id_twice_is_refused() {
+        let err = v(&["quiz"], &["quiz"]).expect_err("must refuse");
+        assert!(err.contains("both"), "{err}");
+    }
+
+    #[test]
+    fn the_nearest_id_is_not_offered_for_a_distant_typo() {
+        assert_eq!(nearest("completely_different_thing"), None);
+        assert_eq!(nearest("quiz"), None, "an exact id needs no suggestion");
+    }
+}

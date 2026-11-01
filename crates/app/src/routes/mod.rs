@@ -31,6 +31,7 @@ pub mod erasure;
 pub mod events;
 pub mod exchange;
 pub mod exports;
+pub mod modules;
 pub mod external;
 pub mod federation;
 pub mod feedback;

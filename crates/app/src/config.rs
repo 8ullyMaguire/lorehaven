@@ -192,6 +192,8 @@ pub struct Config {
     pub consent: ConsentConfig,
     /// Guests (spec §14.1).
     pub guest: GuestConfig,
+    /// Extensions (§59.3): which registered surfaces this instance runs.
+    pub modules: ModulesConfig,
     /// Merges (spec §9.5).
     pub merge: MergeConfig,
     /// Trust (spec §14.4).
@@ -761,6 +763,50 @@ impl Default for ConsentConfig {
             reask_on_version_change: true,
         }
     }
+}
+
+/// Extensions (§59.3): the instance layer of the resolution chain.
+///
+/// `disabled` and `enabled` are lists rather than a map so the file says what it
+/// means: an extension nobody mentions keeps its compiled default, which is what
+/// makes "every surface that exists is on" survive an operator who only ever
+/// writes one line.
+#[derive(Debug, Clone)]
+pub struct ModulesConfig {
+    /// Registered extensions this instance does not run.
+    pub disabled: Vec<String>,
+    /// Registered extensions this instance runs even where the compiled default
+    /// is off. Validation refuses a `planned` id here — a flag cannot compile a
+    /// feature — and the field exists so a future off-by-default surface needs no
+    /// new syntax.
+    pub enabled: Vec<String>,
+    /// Whether readers may switch `per_user` surfaces off for themselves.
+    pub allow_user_overrides: bool,
+}
+
+impl Default for ModulesConfig {
+    fn default() -> Self {
+        Self {
+            disabled: Vec::new(),
+            enabled: Vec::new(),
+            // §59.3: the instance permits the user layer by default, because the
+            // surfaces that carry it are optional by construction. An operator who
+            // wants one posture for everybody sets this false, and the PATCH route
+            // refuses naming the key rather than silently ignoring the preference.
+            allow_user_overrides: true,
+        }
+    }
+}
+
+/// The `[extensions]` table.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModulesSection {
+    #[serde(default)]
+    disabled: Vec<String>,
+    #[serde(default)]
+    enabled: Vec<String>,
+    allow_user_overrides: Option<bool>,
 }
 
 /// Guests — real identities with a door that closes on MAU (spec §14.1).
@@ -3122,6 +3168,16 @@ impl Config {
                         .unwrap_or(base.reask_on_version_change),
                 }
             },
+            modules: {
+                let e = file.modules.unwrap_or_default();
+                ModulesConfig {
+                    disabled: e.disabled,
+                    enabled: e.enabled,
+                    allow_user_overrides: e
+                        .allow_user_overrides
+                        .unwrap_or_else(|| ModulesConfig::default().allow_user_overrides),
+                }
+            },
             guest: {
                 let g = file.guest.unwrap_or_default();
                 let base = GuestConfig::default();
@@ -3302,6 +3358,7 @@ impl Config {
             supporters: SupportersConfig::default(),
             consent: ConsentConfig::default(),
             guest: GuestConfig::default(),
+            modules: ModulesConfig::default(),
             merge: MergeConfig::default(),
             trust: TrustConfig::default(),
             governance: GovernanceConfig::default(),
@@ -3635,6 +3692,7 @@ impl Config {
     /// Environment-specific rules (a production instance must not run with
     /// development settings) live in [`crate::safety`].
     pub fn validate(&self) -> Result<()> {
+        darkhold_domain::modules::validate(&self.modules.disabled, &self.modules.enabled).map_err(|message| anyhow::anyhow!(message))?;
         if self.server.port == 0 {
             anyhow::bail!("server.port must not be 0");
         }
@@ -3867,6 +3925,8 @@ struct FileConfig {
     consent: Option<ConsentSection>,
     /// Guests (spec §14.1).
     guest: Option<GuestSection>,
+    /// Extensions (§59.3).
+    modules: Option<ModulesSection>,
     /// Merges (spec §9.5).
     merge: Option<MergeSection>,
     /// Trust (spec §14.4).

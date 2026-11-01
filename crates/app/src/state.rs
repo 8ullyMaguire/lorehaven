@@ -64,6 +64,14 @@ struct Inner {
     /// Scoping the slot to the instance makes the two tests independent, which
     /// is the property was actually missing.
     shadow_report: crate::rec_shadow::ReportSlot,
+    /// §59 — which registered surfaces this instance runs.
+    ///
+    /// Resolved once from validated configuration, so the per-request question
+    /// "is this surface on" is a set lookup and never a config parse. The
+    /// registry itself is `&'static`, so there is nothing here to invalidate:
+    /// changing what an instance runs is a restart, which is what a config file
+    /// edit already means.
+    modules: darkhold_domain::modules::ModuleState,
 }
 
 impl AppState {
@@ -90,6 +98,12 @@ impl AppState {
             base_delay: Duration::from_millis(config.administration.webhook_base_delay_ms),
             allowed_hosts: config.administration.webhook_allowed_hosts.clone(),
         };
+        // Resolved before the literal: `config` is moved into `Inner` first.
+        let modules = darkhold_domain::modules::ModuleState::resolve(
+            &config.modules.disabled,
+            &config.modules.enabled,
+            config.modules.allow_user_overrides,
+        );
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -102,6 +116,7 @@ impl AppState {
                 reqwest_client,
                 webhook_config,
                 shadow_report: crate::rec_shadow::ReportSlot::default(),
+                modules,
             }),
         }
     }
@@ -181,6 +196,12 @@ impl AppState {
     #[must_use]
     pub fn db(&self) -> &Database {
         &self.inner.db
+    }
+
+    /// The resolved module state (§59).
+    #[must_use]
+    pub fn modules(&self) -> &darkhold_domain::modules::ModuleState {
+        &self.inner.modules
     }
 
     /// The rate limiter, shared across every request in this process.
