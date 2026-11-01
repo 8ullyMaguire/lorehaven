@@ -44,10 +44,24 @@ fn config_with(dir: &Path, disabled: &[&str]) -> Config {
     config
 }
 
+fn config_enabling(dir: &Path, enabled: &[&str]) -> Config {
+    let mut config = config_with(dir, &[]);
+    config.modules.enabled = enabled.iter().map(|s| (*s).to_owned()).collect();
+    config
+}
+
 async fn state(tag: &str, disabled: &[&str]) -> (AppState, TestDb) {
     let dir = scratch_dir(tag);
     let db = TestDb::connect_with_dir(tag, &dir).await;
     let config = config_with(&dir, disabled);
+    let state = AppState::new(config, db.db().clone());
+    (state, db)
+}
+
+async fn state_enabling(tag: &str, enabled: &[&str]) -> (AppState, TestDb) {
+    let dir = scratch_dir(tag);
+    let db = TestDb::connect_with_dir(tag, &dir).await;
+    let config = config_enabling(&dir, enabled);
     let state = AppState::new(config, db.db().clone());
     (state, db)
 }
@@ -64,7 +78,7 @@ async fn get(state: &AppState, path: &str) -> (StatusCode, Value) {
         .await
         .expect("response");
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+    let bytes = axum::body::to_bytes(response.into_body(), 512 * 1024)
         .await
         .expect("body");
     let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
@@ -73,24 +87,25 @@ async fn get(state: &AppState, path: &str) -> (StatusCode, Value) {
 
 #[tokio::test]
 async fn a_disabled_surface_is_absent_and_names_itself() {
-    let (state, _db) = state("disabled", &["quiz"]).await;
+    let (state, _db) = state("disabled", &["dnf"]).await;
 
-    let (status, body) = get(&state, "/api/v1/quiz/works").await;
+    let (status, body) = get(&state, "/api/v1/me/dnf").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
     let error = &body["error"];
     assert_eq!(error["code"], "MODULE_UNAVAILABLE", "body: {body}");
     let message = error["message"].as_str().unwrap_or_default();
     assert!(
-        message.contains("quiz"),
-        "the refusal must name the extension it is about: {message}"
+        message.contains("dnf"),
+        "the refusal must name the module it is about: {message}"
     );
 }
 
 #[tokio::test]
 async fn the_same_route_is_not_a_404_when_the_surface_is_on() {
-    // The control for the test above: without this, the 404 could be a route that
-    // never existed. `401` is the honest answer — the quiz needs a session.
-    let (state, _db) = state("enabled", &[]).await;
+    // Two controls in one: the 404 above is not "a route that never existed", and
+    // `quiz` — off by default since §59.10 — comes back when the instance's
+    // `enabled` list names it. That is the whole instance layer, in one request.
+    let (state, _db) = state_enabling("enabled", &["quiz"]).await;
 
     let (status, body) = get(&state, "/api/v1/quiz/works").await;
     assert_ne!(status, StatusCode::NOT_FOUND, "body: {body}");
@@ -99,17 +114,17 @@ async fn the_same_route_is_not_a_404_when_the_surface_is_on() {
 
 #[tokio::test]
 async fn disabling_one_surface_leaves_its_neighbours_answering() {
-    let (state, _db) = state("neighbours", &["quiz"]).await;
+    let (state, _db) = state("neighbours", &["dnf"]).await;
 
-    let (arena, _) = get(&state, "/api/v1/arena/next").await;
+    let (draw, _) = get(&state, "/api/v1/discovery/draw").await;
     let (catalogue, _) = get(&state, "/api/v1/catalogue?limit=1").await;
-    assert_ne!(arena, StatusCode::NOT_FOUND, "arena must still answer");
+    assert_ne!(draw, StatusCode::NOT_FOUND, "draw must still answer");
     assert_ne!(catalogue, StatusCode::NOT_FOUND, "catalogue must still answer");
 }
 
 #[tokio::test]
 async fn the_catalogue_is_core_and_lists_every_registered_surface() {
-    let (state, _db) = state("catalogue", &["quiz"]).await;
+    let (state, _db) = state("catalogue", &["dnf"]).await;
 
     let (status, body) = get(&state, "/api/v1/modules").await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
@@ -121,12 +136,18 @@ async fn the_catalogue_is_core_and_lists_every_registered_surface() {
         extensions.len()
     );
 
+    let dnf = extensions
+        .iter()
+        .find(|row| row["id"] == "dnf")
+        .expect("dnf is registered");
+    assert_eq!(dnf["enabled"], false, "disabled in this instance's config");
+    assert_eq!(dnf["stability"], "stable");
+
     let quiz = extensions
         .iter()
         .find(|row| row["id"] == "quiz")
         .expect("quiz is registered");
-    assert_eq!(quiz["enabled"], false, "disabled in this instance's config");
-    assert_eq!(quiz["stability"], "stable");
+    assert_eq!(quiz["enabled"], false, "off by default since §59.10");
     assert_eq!(quiz["toggle"], "per_user");
 
     let works = extensions
@@ -138,6 +159,19 @@ async fn the_catalogue_is_core_and_lists_every_registered_surface() {
     // The core is named so a client can tell "no row" from "not on".
     let core = body["core"].as_array().expect("core list");
     assert!(core.iter().any(|id| id == "auth"));
+
+    // §59.7: the idea catalogue rides the same payload, because an operator asking
+    // "what else is there" should not have to know a second endpoint exists.
+    let ideas = body["ideas"].as_array().expect("ideas array");
+    assert!(
+        ideas.len() >= 150,
+        "the idea catalogue should carry the roadmap; got {}",
+        ideas.len()
+    );
+    let first = &ideas[0];
+    assert!(first["source"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(first["relevance"].as_u64().is_some_and(|r| r <= 10));
+    assert_eq!(body["counts"]["ideas"], ideas.len());
 }
 
 #[tokio::test]

@@ -13,6 +13,9 @@
 
 use super::{Module, Stability, Toggle};
 
+/// Every idea the project has had and not built, generated (§59.7).
+pub use super::ideas::IDEAS;
+
 /// Every registered module. The core is in [`CORE`] and has no row.
 pub const MODULES: &[Module] = &[
     Module {
@@ -26,6 +29,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/account_permissions.rs",
     },
     Module {
         id: "admin",
@@ -38,6 +43,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/admin.rs",
     },
     Module {
         id: "admin_discovery",
@@ -50,6 +57,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/admin_discovery.rs",
     },
     Module {
         id: "analytics",
@@ -62,18 +71,22 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/analytics.rs",
     },
     Module {
         id: "arena",
         name: "Arena",
         summary: "Taste Calibration Arena routes (spec §0.4.2a).",
-        default_on: true,
+        default_on: false,
         stability: Stability::Stable,
         toggle: Toggle::PerUser,
         requires: &[],
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 4,
+        source: "crates/app/src/routes/arena.rs (opt-in by design)",
     },
     Module {
         id: "audience",
@@ -86,6 +99,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/audience.rs",
     },
     Module {
         id: "author_media",
@@ -98,6 +113,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/author_media.rs",
     },
     Module {
         id: "browse",
@@ -110,6 +127,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/browse.rs",
     },
     Module {
         id: "catalogue",
@@ -122,6 +141,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/catalogue.rs",
     },
     Module {
         id: "collaborators",
@@ -134,6 +155,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/collaborators.rs",
     },
     Module {
         id: "community",
@@ -146,18 +169,22 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/community.rs",
     },
     Module {
         id: "concierge",
         name: "Concierge",
         summary: "M45-22 — the personal concierge's HTTP surface (spec §54.5, §54.6, §54.7).",
-        default_on: true,
+        default_on: false,
         stability: Stability::Stable,
         toggle: Toggle::PerUser,
         requires: &[],
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 4,
+        source: "crates/app/src/routes/concierge.rs (opt-in by design)",
     },
     Module {
         id: "continue_reading",
@@ -170,6 +197,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/continue_reading.rs",
     },
     Module {
         id: "cta",
@@ -182,6 +211,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/cta.rs",
     },
     Module {
         id: "curator",
@@ -194,6 +225,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/curator.rs",
     },
     Module {
         id: "dashboard",
@@ -206,6 +239,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/dashboard.rs",
     },
     Module {
         id: "decision_service",
@@ -218,6 +253,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/decision_service.rs",
     },
     Module {
         id: "derivative",
@@ -230,6 +267,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/derivative.rs",
     },
     Module {
         id: "directory",
@@ -242,6 +281,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/directory.rs",
     },
     Module {
         id: "discovery",
@@ -254,6 +295,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/discovery.rs",
     },
     Module {
         id: "dnf",
@@ -266,6 +309,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/dnf.rs",
     },
     Module {
         id: "draw",
@@ -278,6 +323,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/draw.rs",
     },
     Module {
         id: "economy",
@@ -290,6 +337,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/economy.rs",
     },
     Module {
         id: "erasure",
@@ -302,6 +351,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/erasure.rs",
     },
     Module {
         id: "events",
@@ -314,6 +365,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/events.rs",
     },
     Module {
         id: "exchange",
@@ -326,6 +379,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/exchange.rs",
     },
     Module {
         id: "exports",
@@ -338,6 +393,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/exports.rs",
     },
     Module {
         id: "external",
@@ -350,6 +407,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/external.rs",
     },
     Module {
         id: "federation",
@@ -362,6 +421,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/federation.rs",
     },
     Module {
         id: "feedback",
@@ -374,6 +435,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/feedback.rs",
     },
     Module {
         id: "flows",
@@ -386,6 +449,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/flows.rs",
     },
     Module {
         id: "governance",
@@ -398,6 +463,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/governance.rs",
     },
     Module {
         id: "imports",
@@ -410,6 +477,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/imports.rs",
     },
     Module {
         id: "jobs",
@@ -422,6 +491,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/jobs.rs",
     },
     Module {
         id: "lending",
@@ -434,6 +505,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/lending.rs",
     },
     Module {
         id: "library",
@@ -446,6 +519,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/library.rs",
     },
     Module {
         id: "marketplace",
@@ -458,6 +533,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/marketplace.rs",
     },
     Module {
         id: "media",
@@ -470,6 +547,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/media.rs",
     },
     Module {
         id: "media_health",
@@ -482,6 +561,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/media_health.rs",
     },
     Module {
         id: "media_resilience",
@@ -494,6 +575,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/media_resilience.rs",
     },
     Module {
         id: "mirror_admin",
@@ -506,6 +589,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/mirror_admin.rs",
     },
     Module {
         id: "moderation",
@@ -518,6 +603,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/moderation.rs",
     },
     Module {
         id: "monetization",
@@ -530,18 +617,22 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/monetization.rs",
     },
     Module {
         id: "narration",
         name: "Narration",
         summary: "TTS narration routes (M26 / spec §32.5).",
-        default_on: true,
+        default_on: false,
         stability: Stability::Stable,
         toggle: Toggle::PerUser,
         requires: &[],
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 4,
+        source: "crates/app/src/routes/narration.rs (opt-in by design)",
     },
     Module {
         id: "north_star",
@@ -554,6 +645,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/north_star.rs",
     },
     Module {
         id: "notifications",
@@ -566,6 +659,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/notifications.rs",
     },
     Module {
         id: "preread",
@@ -578,6 +673,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/preread.rs",
     },
     Module {
         id: "pseuds",
@@ -590,18 +687,22 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/pseuds.rs",
     },
     Module {
         id: "quiz",
         name: "Quiz",
         summary: "Onboarding taste quiz routes (spec §0.4.2).",
-        default_on: true,
+        default_on: false,
         stability: Stability::Stable,
         toggle: Toggle::PerUser,
         requires: &[],
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 4,
+        source: "crates/app/src/routes/quiz.rs (opt-in by design)",
     },
     Module {
         id: "rating_integrity",
@@ -614,6 +715,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/rating_integrity.rs",
     },
     Module {
         id: "reader_body_copies",
@@ -626,6 +729,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/reader_body_copies.rs",
     },
     Module {
         id: "reader_surface",
@@ -638,6 +743,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/reader_surface.rs",
     },
     Module {
         id: "reading",
@@ -650,6 +757,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/reading.rs",
     },
     Module {
         id: "rec_run",
@@ -662,6 +771,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/rec_run.rs",
     },
     Module {
         id: "recommendation_transparency",
@@ -674,6 +785,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/recommendation_transparency.rs",
     },
     Module {
         id: "retention",
@@ -686,6 +799,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/retention.rs",
     },
     Module {
         id: "retention_proposal_admin",
@@ -698,6 +813,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/retention_proposal_admin.rs",
     },
     Module {
         id: "retention_proposals",
@@ -710,6 +827,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/retention_proposals.rs",
     },
     Module {
         id: "retention_settle",
@@ -722,6 +841,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/retention_settle.rs",
     },
     Module {
         id: "roadmap",
@@ -734,6 +855,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/roadmap.rs",
     },
     Module {
         id: "search",
@@ -746,6 +869,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/search.rs",
     },
     Module {
         id: "source_adapters",
@@ -758,6 +883,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/source_adapters.rs",
     },
     Module {
         id: "spoilers",
@@ -770,6 +897,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/spoilers.rs",
     },
     Module {
         id: "subscriptions",
@@ -782,6 +911,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/subscriptions.rs",
     },
     Module {
         id: "supply",
@@ -794,18 +925,22 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/supply.rs",
     },
     Module {
         id: "tasting",
         name: "Tasting",
         summary: "The tasting menu (spec §49.5, M45-19).",
-        default_on: true,
+        default_on: false,
         stability: Stability::Stable,
         toggle: Toggle::PerUser,
         requires: &[],
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 4,
+        source: "crates/app/src/routes/tasting.rs (opt-in by design)",
     },
     Module {
         id: "taxonomy",
@@ -818,6 +953,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/taxonomy.rs",
     },
     Module {
         id: "taxonomy_export",
@@ -830,6 +967,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/taxonomy_export.rs",
     },
     Module {
         id: "thread_modes",
@@ -842,6 +981,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/thread_modes.rs",
     },
     Module {
         id: "translation",
@@ -854,6 +995,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/translation.rs",
     },
     Module {
         id: "typed_votes",
@@ -866,18 +1009,22 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/typed_votes.rs",
     },
     Module {
         id: "vanguard",
         name: "Vanguard",
         summary: "The `vanguard` surface.",
-        default_on: true,
+        default_on: false,
         stability: Stability::Stable,
         toggle: Toggle::Operator,
         requires: &[],
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 4,
+        source: "crates/app/src/routes/vanguard.rs (opt-in by design)",
     },
     Module {
         id: "work_discussion",
@@ -890,6 +1037,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/work_discussion.rs",
     },
     Module {
         id: "works",
@@ -902,6 +1051,8 @@ pub const MODULES: &[Module] = &[
         milestone: "pre-M65",
         spec: "§59",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/works.rs",
     },
     Module {
         id: "story.similar",
@@ -914,6 +1065,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-03",
         spec: "§16.1",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/story.similar.rs",
     },
     Module {
         id: "story.also_enjoyed",
@@ -926,6 +1079,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-04",
         spec: "§16.3",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/story.also_enjoyed.rs",
     },
     Module {
         id: "story.more_by_author",
@@ -938,6 +1093,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-05",
         spec: "§16.1",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/story.more_by_author.rs",
     },
     Module {
         id: "story.lists_containing",
@@ -950,6 +1107,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-06",
         spec: "§16.1",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/story.lists_containing.rs",
     },
     Module {
         id: "search.results",
@@ -962,6 +1121,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-08",
         spec: "§16.16",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/search.results.rs",
     },
     Module {
         id: "search.facets",
@@ -974,6 +1135,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-10",
         spec: "§16.16",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/search.facets.rs",
     },
     Module {
         id: "author.works",
@@ -986,6 +1149,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-05",
         spec: "§16.1",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/author.works.rs",
     },
     Module {
         id: "author.similar",
@@ -998,6 +1163,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-13",
         spec: "§16.3",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/author.similar.rs",
     },
     Module {
         id: "author.colists",
@@ -1010,6 +1177,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-13",
         spec: "§16.1",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/author.colists.rs",
     },
     Module {
         id: "author.fandoms",
@@ -1022,6 +1191,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-14",
         spec: "§16.1",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/author.fandoms.rs",
     },
     Module {
         id: "home.trending",
@@ -1034,6 +1205,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-11",
         spec: "§16.17",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/home.trending.rs",
     },
     Module {
         id: "home.hidden_gems",
@@ -1046,6 +1219,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-12",
         spec: "§16.17",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/home.hidden_gems.rs",
     },
     Module {
         id: "home.popular_in_fandom",
@@ -1058,6 +1233,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-12",
         spec: "§16.17",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/home.popular_in_fandom.rs",
     },
     Module {
         id: "home.recently_updated",
@@ -1070,6 +1247,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-12",
         spec: "§16.17",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/home.recently_updated.rs",
     },
     Module {
         id: "home.new_this_week",
@@ -1082,6 +1261,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-12",
         spec: "§16.17",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/home.new_this_week.rs",
     },
     Module {
         id: "home.curated",
@@ -1094,6 +1275,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-15",
         spec: "§43",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/home.curated.rs",
     },
     Module {
         id: "library.because_you_shelved",
@@ -1106,6 +1289,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-09",
         spec: "§33",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/library.because_you_shelved.rs",
     },
     Module {
         id: "library.fill_the_gap",
@@ -1118,6 +1303,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-09",
         spec: "§33",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/library.fill_the_gap.rs",
     },
     Module {
         id: "library.authors_updated",
@@ -1130,6 +1317,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-09",
         spec: "§33",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/library.authors_updated.rs",
     },
     Module {
         id: "tag.default_sort",
@@ -1142,6 +1331,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-07",
         spec: "§16.16",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/tag.default_sort.rs",
     },
     Module {
         id: "tag.adjacent",
@@ -1154,6 +1345,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-07",
         spec: "§16.16",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/tag.adjacent.rs",
     },
     Module {
         id: "tag.cross_fandom",
@@ -1166,6 +1359,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-07",
         spec: "§16.16",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/tag.cross_fandom.rs",
     },
     Module {
         id: "tag.facets",
@@ -1178,6 +1373,8 @@ pub const MODULES: &[Module] = &[
         milestone: "M64-10",
         spec: "§16.16",
         nav: &[],
+        relevance: 10,
+        source: "crates/app/src/routes/tag.facets.rs",
     },
 ];
 

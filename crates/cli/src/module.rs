@@ -39,6 +39,16 @@ pub enum ModuleAction {
     },
     /// One surface in full: its routes, its dependencies, its milestone.
     Show { id: String },
+    /// The idea catalogue (§59.7): everything the project has thought about and
+    /// not built, most relevant first.
+    Ideas {
+        /// Hide ideas below this relevance (0..10).
+        #[arg(long, default_value_t = 0)]
+        min: u8,
+        /// Only ideas that came from a requirements row — the committed queue.
+        #[arg(long)]
+        committed: bool,
+    },
     /// Validate a configuration file's `[modules]` table without starting a server.
     ///
     /// This is the check `darkhold serve` runs at startup: an unknown id, a
@@ -68,6 +78,7 @@ pub async fn run(cli: &Cli, args: ModuleArgs) -> Result<(), Failure> {
             planned,
         } => list(cli, enabled, disabled, planned).await,
         ModuleAction::Show { id } => show(cli, &id).await,
+        ModuleAction::Ideas { min, committed } => ideas(cli, min, committed).await,
         ModuleAction::Check { config } => check(&config),
     }
 }
@@ -90,6 +101,17 @@ struct ServerCatalogue {
     allow_user_overrides: bool,
     core: Vec<String>,
     modules: Vec<ServerRow>,
+    #[serde(default)]
+    ideas: Vec<ServerIdea>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServerIdea {
+    id: String,
+    name: String,
+    relevance: u8,
+    source: String,
+    milestone: String,
 }
 
 /// Fetch the catalogue, or `None` when the instance does not answer.
@@ -291,6 +313,55 @@ async fn show(cli: &Cli, id: &str) -> Result<(), Failure> {
         for nav in compiled.nav {
             println!("    [{:<14}] {:<20} {}", nav.slot, nav.label, nav.href);
         }
+    }
+    Ok(())
+}
+
+async fn ideas(cli: &Cli, min: u8, committed: bool) -> Result<(), Failure> {
+    let server = catalogue(cli).await?;
+    let catalogue = server.ok_or_else(|| {
+        environment(
+            "the idea catalogue is generated into the build, but this command reads it from the \
+             instance so it prints what that instance runs; start one or point --base-url at it",
+        )
+    })?;
+    let rows: Vec<&ServerIdea> = catalogue
+        .ideas
+        .iter()
+        .filter(|idea| idea.relevance >= min)
+        .filter(|idea| !committed || idea.source.contains("requirements.csv"))
+        .collect();
+    if cli.json {
+        let value: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|idea| {
+                serde_json::json!({
+                    "id": idea.id, "name": idea.name, "relevance": idea.relevance,
+                    "milestone": idea.milestone, "source": idea.source,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value)
+                .map_err(|error| environment(format!("rendering json: {error}")))?
+        );
+        return Ok(());
+    }
+    eprintln!(
+        "# {} ideas on {} at relevance >= {min}{}",
+        rows.len(),
+        cli.base_url,
+        if committed { ", committed only" } else { "" }
+    );
+    for idea in rows {
+        println!(
+            "{:>2}  {:<44}  {:<10}  {}",
+            idea.relevance,
+            idea.id.trim_start_matches("idea."),
+            idea.milestone,
+            idea.name
+        );
     }
     Ok(())
 }

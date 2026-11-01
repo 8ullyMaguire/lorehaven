@@ -61,6 +61,35 @@ struct Catalogue {
     /// id. A disabled row is still listed — that is the point, an operator reading
     /// the payload should find the surface they meant to switch on.
     modules: Vec<ModuleView>,
+    /// Every idea the project has had and not built (§59.7), most relevant first.
+    ///
+    /// Separate from `modules` because the two answer different questions: a
+    /// module is a surface this build can switch, an idea is work that would
+    /// create one. A client renders a module list; an operator reads the ideas to
+    /// decide what to build next, so each row carries the documents it came from
+    /// and the score that ordered it.
+    ideas: Vec<IdeaView>,
+    /// Counts a page can render without walking both arrays.
+    counts: Counts,
+}
+
+/// One unbuilt idea.
+#[derive(Debug, Serialize)]
+struct IdeaView {
+    id: &'static str,
+    name: &'static str,
+    summary: &'static str,
+    relevance: u8,
+    source: &'static str,
+    milestone: &'static str,
+}
+
+/// How many of each.
+#[derive(Debug, Serialize)]
+struct Counts {
+    modules: usize,
+    enabled: usize,
+    ideas: usize,
 }
 
 /// `GET /api/v1/modules`.
@@ -96,9 +125,28 @@ async fn list(State(state): State<AppState>) -> ApiResult<Json<Catalogue>> {
     // and the alphabetical answer buries `works` among seventy off-by-default rows.
     rows.sort_by(|a, b| b.enabled.cmp(&a.enabled).then_with(|| a.id.cmp(b.id)));
 
+    let ideas: Vec<IdeaView> = darkhold_domain::modules::ideas()
+        .iter()
+        .map(|idea| IdeaView {
+            id: idea.id,
+            name: idea.name,
+            summary: idea.summary,
+            relevance: idea.relevance,
+            source: idea.source,
+            milestone: idea.milestone,
+        })
+        .collect();
+    let counts = Counts {
+        modules: rows.len(),
+        enabled: rows.iter().filter(|row| row.enabled).count(),
+        ideas: ideas.len(),
+    };
+
     Ok(Json(Catalogue {
         allow_user_overrides: modules.allow_user_overrides(),
         core: darkhold_domain::modules::core(),
         modules: rows,
+        ideas,
+        counts,
     }))
 }

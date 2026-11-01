@@ -10947,6 +10947,65 @@ what it is missing.
   Not the operator's reasoning.
 - `PATCH /api/v1/modules/{id}` — a reader's own override, `per_user` rows only.
 
+### 59.10 Relevance decides the default, and the catalogue is generated
+
+Two questions, one rule each.
+
+**What is on for a fresh instance.** Every registry row carries `relevance` (0..10) and
+`default_on`. A row that exists is 10 and on; a row that is **opt-in by design** is 4 and off, and
+the list is short enough to name: `arena` (a calibration game), `quiz` (onboarding only), `tasting`
+(an experimental sampler), `concierge` (an assistant answering on the instance's behalf),
+`narration` (needs a speech engine on the host), `vanguard` (a role that means nothing until it is
+granted). Nothing load-bearing is near the line: `works`, `search`, `catalogue`, `library`,
+`reading` and `browse` are on, and a test asserts it — a formula that can switch off the catalogue
+is a bug in the policy, not a leaner default.
+
+**What is worth building next.** Every idea the project has had and not built is a registry row
+with `stability: planned`, `default_on: false`, no routes, and a `relevance` that orders the queue:
+
+| term | value |
+|---|---|
+| it has a `requirements.csv` row (work already agreed) | +4 |
+| a spec amendment specifies it | +3 |
+| an idea sweep or a design argues it | +2 |
+| the 100-idea reader audit lists it | +1 |
+| a vault note first typed it | +1 |
+| named by title in this spec | +2 |
+| appears in three or more sources | +1 |
+| needs a third party or an external client (bot, mobile, desktop, OPDS, browser extension) | −2 |
+| needs a model or heavy compute | −1 |
+| the source hedges (maybe / someday / later) | −1 |
+
+An idea is **never** enabled by its relevance, because a flag cannot compile a feature. Relevance
+orders work; `stability` decides whether a switch exists. Enabling a planned row is refused by name,
+quoting the documents it came from.
+
+**The catalogue is generated**, not hand-listed, because the ideas live in eight places
+(`docs/requirements.csv`, four brainstorms, three designs, thirteen spec amendments, the 100-idea
+audit, named vault notes, and a superseded derived list) and a hand-kept list is a list somebody
+stops updating the week they are busy. `scripts/ideas_catalogue.py` reads them and writes
+`crates/domain/src/modules/ideas.rs` and `docs/ideas-catalogue.json`;
+`the_idea_catalogue_matches_its_json` fails when the two disagree, so a hand edit that drops a row
+is caught without regenerating.
+
+Two extraction rules earned their place on the first run, which produced 375 rows that were mostly
+furniture — "4 Acceptance", "Config", "Storage" — and sorted "5 Acceptance" above the brainstorm it
+came from:
+
+- **A spec amendment or a design is one idea** (its title). Its internal headings are its sections.
+- **A brainstorm is a list of ideas**, so its `###` headings are the rows, and its `##` tier
+  headings are not.
+
+The script prints what it read, how many rows came from each source, and which built surfaces it
+left off, so a run is auditable without opening the generated file.
+
+### 59.11 The instance layer can re-enable an opt-in surface
+
+`[modules] enabled = ["quiz", "arena"]` turns an opt-in-by-default surface back on for one instance,
+and `the_same_route_is_not_a_404_when_the_surface_is_on` drives exactly that. This is what makes the
+opt-in list safe to apply: a fresh instance is lean, and an instance that already has readers using
+`arena` keeps it with one line, declared in the file rather than implied by a default.
+
 ### 59.9 Acceptance
 
 1. `cargo test -p darkhold-app --test m65_module_host` green: a disabled module answers `404`
