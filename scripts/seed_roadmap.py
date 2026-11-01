@@ -71,6 +71,11 @@ STATUS_TO_STAGE = {
     "partially-implemented": "in_progress",
     "planned": "idea",
     "unsupported": "rejected",
+    # A requirement that was evaluated and deliberately not built is the same
+    # card outcome as unsupported: rejected, with the reason on the card. It is
+    # not "shipped" and not "idea" -- an idea invites work that already had its
+    # verdict. M62-01 carried this status and made the seed refuse the file.
+    "evaluated-and-rejected": "rejected",
 }
 
 # Stages the seed may never move a card OUT of (operator-only, §44.6).
