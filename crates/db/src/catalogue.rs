@@ -154,6 +154,27 @@ pub struct CatalogueQuery {
     /// deliberately takes the name rather than the node id: a caller that knows
     /// only "naruto" should not have to run a second query to filter by it.
     pub fandom: Option<String>,
+    /// Restrict to one author, matched case-insensitively but exactly (M63-04).
+    ///
+    /// Exactly, not as a substring: a substring match on `Oshha` also returns
+    /// `Oshhalo`, and a reader asking for one author's works is asking for one
+    /// author, not for every pseud those letters appear in.
+    pub author: Option<String>,
+    /// Candidate preselection for a seed search: a row whose title or summary
+    /// contains none of these substrings cannot be a neighbour of the seed, so it
+    /// never reaches the ranker (M63-04).
+    ///
+    /// This is a *filter*, not the similarity: it decides which rows are looked
+    /// at, and [`crate::metrics::similar`] decides how similar they are. Empty for
+    /// every other kind of query, which is why `filters_sql` treats it as an
+    /// optional arm rather than a required one.
+    pub tokens: Vec<String>,
+    /// Exclude what one account is reading (M63-04).
+    ///
+    /// `--exclude-read` is the reader's own negative set: a recommendation for a
+    /// story they are eleven chapters into is not a recommendation. Scoped to the
+    /// account that asked, never global.
+    pub exclude_account: Option<String>,
 }
 
 /// One source key and how many catalogue rows it contributed.
@@ -563,6 +584,66 @@ pub(crate) fn filters_sql(query: &CatalogueQuery) -> FilterSql {
         sqlite.push_str(predicate);
         postgres.push_str(predicate);
         binds.push(fandom.to_lowercase());
+    }
+    // The author arm. Both sides are `lower(trim(...))` so a pseud typed with a
+    // trailing space or in another case still matches; the column stays bare on
+    // its left side so an index on `author_text` is still a candidate (it is not
+    // used today, because the filter is never the only predicate).
+    if let Some(author) = query
+        .author
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let predicate = " AND lower(trim(author_text)) = lower(trim(?))";
+        sqlite.push_str(predicate);
+        postgres.push_str(predicate);
+        binds.push(author.to_owned());
+    }
+    // The seed preselection. An OR over `LIKE` is a table scan on both engines,
+    // which is acceptable here and only here: the alternative is a trigram index
+    // (PostgreSQL-only) or an FTS table (a migration, and a second engine-specific
+    // schema). The cost is measured on the live catalogue in the M63-04 plan's
+    // live-proof step rather than guessed at here.
+    //
+    // `coalesce(summary, '')` because the column is nullable in the SQLite schema;
+    // without it a single null summary makes the whole concatenation null and the
+    // row silently un-matchable.
+    if !query.tokens.is_empty() {
+        let arms: Vec<&str> = query
+            .tokens
+            .iter()
+            .map(|_| "lower(title || ' ' || coalesce(summary, '')) LIKE '%' || ? || '%'")
+            .collect();
+        let predicate = format!(" AND ({})", arms.join(" OR "));
+        sqlite.push_str(&predicate);
+        postgres.push_str(&predicate);
+        for token in &query.tokens {
+            binds.push(token.to_lowercase());
+        }
+    }
+    // The read-history arm. `subject_type = 'work'` because `reading_progress`
+    // holds progress against a work, a unit or a revision, and only the work-level
+    // rows describe "this account is reading this story"; `library_items.work_id`
+    // is null for the 83,283 rows the estate import never linked, and `NOT EXISTS`
+    // keeps those rows rather than dropping them.
+    if let Some(account) = query.exclude_account.as_deref().filter(|s| !s.is_empty()) {
+        // `account_id` is `uuid` on PostgreSQL and `TEXT` on SQLite, so the bind has
+        // to be cast on one engine and left alone on the other; `work_id` follows
+        // the same rule.
+        let sqlite_predicate = " AND NOT EXISTS (\
+             SELECT 1 FROM reading_progress rp \
+              WHERE rp.account_id = ? \
+                AND rp.subject_type = 'work' \
+                AND rp.subject_id = library_items.work_id)";
+        let postgres_predicate = " AND NOT EXISTS (\
+             SELECT 1 FROM reading_progress rp \
+              WHERE rp.account_id = ?::uuid \
+                AND rp.subject_type = 'work' \
+                AND rp.subject_id = library_items.work_id)";
+        sqlite.push_str(sqlite_predicate);
+        postgres.push_str(postgres_predicate);
+        binds.push(account.to_owned());
     }
     FilterSql {
         sqlite,

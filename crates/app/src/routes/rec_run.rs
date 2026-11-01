@@ -81,6 +81,14 @@ pub struct RecRunParams {
     explain: Option<String>,
     #[serde(default)]
     limit: Option<i64>,
+    /// Restrict to one author: exact, case-insensitive, trimmed (M63-04).
+    author: Option<String>,
+    /// Drop rows this session is already reading (M63-04).
+    ///
+    /// Text for the same reason as `explain`: a shell types `1`, and a `bool`
+    /// would make that a `400` about deserialisation.
+    #[serde(default)]
+    exclude_read: Option<String>,
 }
 
 /// One catalogue row, with where the engine put it.
@@ -232,6 +240,20 @@ async fn run(
         refreshed: window(&params.refreshed, "refreshed")?,
         added: window(&params.added, "added")?,
         fandom: fandom.clone(),
+        author: params
+            .author
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
+        tokens: Vec::new(),
+        // This route always has a session, which is what makes the flag
+        // answerable here and not on the public catalogue without one.
+        exclude_account: matches!(
+            params.exclude_read.as_deref().map(str::trim),
+            Some("1" | "true" | "yes" | "on")
+        )
+        .then(|| user.account_id.to_string()),
     };
     // A metric sort ranks the whole filtered population, so the candidate pool is
     // the metric's own order; the pool is then cut to `MAX_CANDIDATES` for the

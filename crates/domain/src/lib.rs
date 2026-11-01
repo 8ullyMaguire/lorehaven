@@ -69,6 +69,7 @@ pub mod recommendation_transparency;
 pub mod retention;
 pub mod retention_quorum;
 pub mod settings;
+pub mod similar;
 pub mod spoilers;
 pub mod stats;
 pub mod subscriptions;

@@ -16,6 +16,7 @@
 //! only because triage wants something to choose between.
 
 use darkhold_domain::quality::{rank, Candidate, Metric, Signals};
+use darkhold_domain::similar::{self, Idf, Seed};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -47,6 +48,12 @@ pub struct CandidateRow {
     pub source_count: i64,
     /// The source's last-update date, in the canonical stored shape.
     pub source_updated_at: Option<String>,
+    /// Title, as the source shows it — the heaviest similarity signal (M63-04).
+    pub title: String,
+    /// Summary, as the source shows it.
+    pub summary: String,
+    /// The author's pseud, for the same-author bonus.
+    pub author_text: String,
 }
 
 /// One ranked row: the stored row the caller asked for, plus why it is where it
@@ -131,14 +138,18 @@ fn source_of(query: &CatalogueQuery) -> Option<String> {
 ///
 /// Returns the store's error when the query fails.
 pub async fn candidates(db: &Database, query: &CatalogueQuery) -> Result<Vec<CandidateRow>> {
+    // Title, summary and author ride along because the similarity ranker needs
+    // them; on every other metric they are a few hundred bytes of unused row.
     let columns = match db.backend() {
         Backend::Sqlite => format!(
-            "id, source_key, likes, word_count, source_updated_at, \
+            "id, source_key, likes, word_count, source_updated_at, title, \
+             coalesce(summary, '') AS summary, author_text, \
              {TOTAL_LIKES_SQLITE} AS total_likes, {SOURCE_COUNT_SQLITE} AS source_count"
         ),
         Backend::Postgres => format!(
             "id::text AS id, source_key, likes::bigint AS likes, word_count::bigint AS word_count, \
-             source_updated_at, {TOTAL_LIKES_PG}::bigint AS total_likes, \
+             source_updated_at, title, coalesce(summary, '')::text AS summary, author_text, \
+             {TOTAL_LIKES_PG}::bigint AS total_likes, \
              {SOURCE_COUNT_PG}::bigint AS source_count"
         ),
     };
@@ -416,6 +427,253 @@ pub async fn ranked(
         // makes them disagree the gate should report the population.
         ranked: engaged,
         total,
+        items,
+    })
+}
+
+/// One row of a seed search: the stored row, how similar it is, and why.
+#[derive(Debug, Clone)]
+pub struct SimilarRow {
+    /// The catalogue row itself.
+    pub row: CatalogueRow,
+    /// The source's last-update date, which the catalogue row does not carry.
+    pub updated_at: Option<String>,
+    /// 0..=1 similarity to the seed.
+    pub score: f64,
+    /// The shared tokens that carried the score, most informative first.
+    pub shared: Vec<String>,
+    /// 1-based position on the page.
+    pub rank: usize,
+}
+
+/// A page of "similar to this one", with the numbers that stop it reading as a
+/// statement about the whole catalogue.
+#[derive(Debug, Clone)]
+pub struct SimilarPage {
+    /// The row the caller seeded with.
+    pub seed_id: String,
+    /// Its title, so a report can name what was asked for.
+    pub seed_title: String,
+    /// Rows in the scanned population that share at least one token with the seed.
+    pub ranked: i64,
+    /// Rows the filters matched, across the whole catalogue.
+    pub total: i64,
+    /// Rows the ranker actually saw — the candidate cap, not the catalogue.
+    pub scanned: i64,
+    /// The page.
+    pub items: Vec<SimilarRow>,
+}
+
+/// A resolved seed row: the fields similarity needs, nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedLookup {
+    /// Library item id.
+    pub id: String,
+    /// Title as the source shows it.
+    pub title: String,
+    /// Author pseud as the source shows it.
+    pub author: String,
+    /// Summary as the source shows it.
+    pub summary: String,
+}
+
+/// What a `--seed` spec resolved to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeedMatch {
+    /// Exactly one row.
+    One(SeedLookup),
+    /// Several rows match a title substring: the caller must disambiguate rather
+    /// than be given the first, because the first is alphabetical and arbitrary.
+    Many(Vec<(String, String)>),
+    /// Nothing matches.
+    None,
+}
+
+/// How many ambiguous titles a `--seed` refusal names.
+const AMBIGUOUS_LIMIT: i64 = 10;
+
+/// One lookup, on either engine, with the id cast each engine needs.
+async fn seed_rows(
+    db: &Database,
+    where_sqlite: &str,
+    where_postgres: &str,
+    bind: &str,
+    limit: i64,
+) -> Result<Vec<SeedLookup>> {
+    let (columns_sqlite, columns_pg) = (
+        "id, title, author_text, coalesce(summary, '')",
+        "id::text AS id, title, author_text, coalesce(summary, '')::text AS summary",
+    );
+    let sqlite = format!("SELECT {columns_sqlite} FROM library_items WHERE {where_sqlite} LIMIT {limit}");
+    let postgres = format!("SELECT {columns_pg} FROM library_items WHERE {where_postgres} LIMIT {limit}");
+    let sql = crate::sql_owned(db, sqlite, postgres);
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows: Vec<(String, String, String, String)> = sqlx::query_as(&sql)
+                .bind(bind.to_owned())
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(id, title, author, summary)| SeedLookup {
+                    id,
+                    title,
+                    author,
+                    summary,
+                })
+                .collect())
+        }
+        Backend::Postgres => {
+            let rows: Vec<(String, String, String, String)> = sqlx::query_as(&sql)
+                .bind(bind.to_owned())
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(id, title, author, summary)| SeedLookup {
+                    id,
+                    title,
+                    author,
+                    summary,
+                })
+                .collect())
+        }
+    }
+}
+
+/// Resolve a `--seed` argument to the row it names.
+///
+/// Four attempts, in the order that cannot be wrong: an id (the only exact
+/// identity a caller can hold), the story's source URL (what a reader copies out
+/// of a browser), the exact title, then a substring — and a substring that matches
+/// more than one row is [`SeedMatch::Many`] rather than the first hit, because
+/// "the first alphabetically" is not what the caller meant by a title.
+///
+/// # Errors
+///
+/// Returns the store's error when a query fails.
+pub async fn resolve_seed(db: &Database, spec: &str) -> Result<SeedMatch> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return Ok(SeedMatch::None);
+    }
+    // `id` is `uuid` on PostgreSQL and `TEXT` on SQLite: the cast has to be on the
+    // column, or PostgreSQL compares a uuid to a text bind and answers a type
+    // error that surfaces as a 500 with no SQL in it.
+    let by_id = seed_rows(db, "id = ?", "id::text = ?", spec, 1).await?;
+    if let Some(found) = by_id.into_iter().next() {
+        return Ok(SeedMatch::One(found));
+    }
+    if spec.starts_with("https://") || spec.starts_with("http://") {
+        let by_url = seed_rows(db, "source_url = ?", "source_url = ?", spec, 1).await?;
+        if let Some(found) = by_url.into_iter().next() {
+            return Ok(SeedMatch::One(found));
+        }
+    }
+    let exact = seed_rows(
+        db,
+        "lower(trim(title)) = lower(trim(?))",
+        "lower(btrim(title)) = lower(btrim(?))",
+        spec,
+        2,
+    )
+    .await?;
+    // Two rows can share a title (a re-post, two authors, the same story on two
+    // boards) and picking either is picking at random.
+    match exact.len() {
+        0 => {}
+        1 => return Ok(SeedMatch::One(exact.into_iter().next().expect("one"))),
+        _ => {
+            return Ok(SeedMatch::Many(
+                exact.into_iter().map(|row| (row.id, row.title)).collect(),
+            ))
+        }
+    }
+    // A substring search is capped and its hits are returned with their titles: a
+    // caller told "three rows match, here they are" can ask again; a caller handed
+    // the first one silently gets the wrong story.
+    let partial = seed_rows(
+        db,
+        "lower(title) LIKE '%' || lower(?) || '%'",
+        "lower(title) LIKE '%' || lower(?::text) || '%'",
+        spec,
+        AMBIGUOUS_LIMIT,
+    )
+    .await?;
+    match partial.len() {
+        0 => Ok(SeedMatch::None),
+        1 => Ok(SeedMatch::One(partial.into_iter().next().expect("one"))),
+        _ => Ok(SeedMatch::Many(
+            partial
+                .into_iter()
+                .map(|row| (row.id, row.title))
+                .collect(),
+        )),
+    }
+}
+
+/// Rank the filtered catalogue by similarity to `seed_row` (M63-04).
+///
+/// `ranked` counts the scanned population that shares at least one token — those
+/// are the rows that are actually neighbours. `total` is what the filters matched
+/// and `scanned` is the candidate cap, so a page can never read as a statement
+/// about the whole catalogue when only 5,000 rows were looked at.
+///
+/// # Errors
+///
+/// Returns the store's error when a query fails.
+pub async fn similar(
+    db: &Database,
+    query: &CatalogueQuery,
+    seed_row: &SeedLookup,
+    limit: usize,
+    offset: usize,
+) -> Result<SimilarPage> {
+    let rows = candidates(db, query).await?;
+    let (total, _engaged) = counts(db, query).await?;
+    let scanned = rows.len() as i64;
+
+    let seed = Seed::of(
+        seed_row.id.clone(),
+        &seed_row.title,
+        &seed_row.summary,
+        &seed_row.author,
+    );
+    let population: Vec<Seed> = rows
+        .iter()
+        .map(|row| Seed::of(row.id.clone(), &row.title, &row.summary, &row.author_text))
+        .collect();
+    let idf = Idf::build(&population);
+    let hits = similar::rank(&seed, &population, &idf);
+    let ranked = hits.len() as i64;
+
+    let page: Vec<&similar::SimHit> = hits.iter().skip(offset).take(limit).collect();
+    let ids: Vec<String> = page.iter().map(|hit| hit.id.clone()).collect();
+    let stored = rows_by_ids(db, &ids).await?;
+    let by_id: std::collections::HashMap<String, (CatalogueRow, Option<String>)> = stored
+        .into_iter()
+        .map(|(row, updated)| (row.id.clone(), (row, updated)))
+        .collect();
+
+    let mut items = Vec::with_capacity(page.len());
+    for (index, hit) in page.iter().enumerate() {
+        if let Some((row, updated_at)) = by_id.get(&hit.id) {
+            items.push(SimilarRow {
+                row: row.clone(),
+                updated_at: updated_at.clone(),
+                score: hit.score,
+                shared: hit.shared.clone(),
+                rank: offset + index + 1,
+            });
+        }
+    }
+
+    Ok(SimilarPage {
+        seed_id: seed_row.id.clone(),
+        seed_title: seed_row.title.clone(),
+        ranked,
+        total,
+        scanned,
         items,
     })
 }

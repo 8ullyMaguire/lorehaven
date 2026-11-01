@@ -80,6 +80,7 @@ fn query() -> CatalogueQuery {
         refreshed: None,
         added: None,
         fandom: None,
+        ..Default::default()
     }
 }
 

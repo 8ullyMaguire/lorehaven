@@ -40,12 +40,29 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::MaybeSession;
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use darkhold_db::catalogue::{
     self, CatalogueQuery, CatalogueRow, CatalogueSort, FandomCount, SourceCount,
 };
 use darkhold_domain::AppError;
+
+/// What a shell types for a flag.
+///
+/// `1`, `true`, `yes` and `on` are all true; absent or any empty string is false.
+/// A value that is none of those is a `422` rather than a silent false, because a
+/// caller who wrote `--exclude-read=maybe` meant something.
+fn flag(raw: &str) -> ApiResult<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(false),
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        other => Err(invalid(format!(
+            "exclude_read: \"{other}\" is not a flag; use 1 or 0"
+        ))),
+    }
+}
 
 /// A query string the route cannot honour: a `422` that names the field.
 fn invalid(message: impl Into<String>) -> ApiError {
@@ -77,6 +94,18 @@ pub struct CatalogueParams {
     /// Restrict to one fandom, e.g. `naruto`. Case-insensitive; an unknown name
     /// is a `422` that names the field and suggests the nearest known fandom.
     fandom: Option<String>,
+    /// Restrict to one author: exact, case-insensitive, trimmed (M63-04).
+    author: Option<String>,
+    /// Similar to this work: an id, a source URL, or a title (M63-04).
+    seed: Option<String>,
+    /// Drop rows this session is already reading. Needs a session (M63-04).
+    ///
+    /// Text rather than a `bool` because `exclude_read=1` is what a shell types
+    /// and `serde` refuses it for a `bool`, answering `400 Failed to deserialize
+    /// query string` — which reads as a syntax error rather than as the accepted
+    /// spellings of a flag. `rec_run` learned this for `explain=1` already.
+    #[serde(default)]
+    exclude_read: Option<String>,
 }
 
 /// One row of a metric-ranked page.
@@ -154,6 +183,48 @@ pub struct CataloguePage {
     catalogue_rows: Option<i64>,
 }
 
+/// One row of a seed search: the catalogue row, how similar it is, and the tokens
+/// that carried it.
+#[derive(Debug, Serialize)]
+pub struct SimilarItem {
+    #[serde(flatten)]
+    row: CatalogueRow,
+    /// 0..=1 similarity to the seed row.
+    score: f64,
+    /// Shared tokens, most informative first — the reason a reader can argue with.
+    shared: Vec<String>,
+    /// 1-based position on this page.
+    rank: usize,
+    /// The source's last-update date, which [`CatalogueRow`] does not carry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<String>,
+}
+
+/// What the seed the caller named resolved to.
+#[derive(Debug, Serialize)]
+pub struct SeedRef {
+    id: String,
+    title: String,
+}
+
+/// A page of "similar to this one".
+///
+/// `ranked` counts the neighbours in the *scanned* population and `total` is what
+/// the filters matched, so a page cannot read as a statement about the whole
+/// catalogue when the ranker only looked at 5,000 rows.
+#[derive(Debug, Serialize)]
+pub struct SimilarPage {
+    items: Vec<SimilarItem>,
+    sort: String,
+    metric: String,
+    seed: SeedRef,
+    ranked: i64,
+    total: i64,
+    scanned: i64,
+    limit: i64,
+    offset: i64,
+}
+
 /// Mount the catalogue's read routes.
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -166,8 +237,37 @@ pub fn router() -> Router<AppState> {
 
 async fn search(
     State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
     Query(params): Query<CatalogueParams>,
 ) -> ApiResult<Response> {
+    // `seed` decides the order by itself, so it is tried before the metric
+    // vocabulary: `--seed X --sort source_pct` would otherwise be ranked by the
+    // metric and the seed would be silently ignored, which is the failure this
+    // whole item exists to prevent.
+    let seed_spec = params
+        .seed
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    if let Some(spec) = seed_spec {
+        return Ok(Json(
+            similar_page(state, params, session.map(|s| s.account_id), &spec).await?,
+        )
+        .into_response());
+    }
+    let exclude_read = match params.exclude_read.as_deref() {
+        Some(raw) => flag(raw)?,
+        None => false,
+    };
+    if exclude_read {
+        // Without a session there is no reading history to exclude, and answering
+        // 200 with nothing excluded would tell the caller the flag worked.
+        return Err(invalid(
+            "exclude_read: reading history belongs to a session, and this request has none \
+             (send a token or a session cookie)",
+        ));
+    }
     // A quality metric is not a column, so it cannot be an `ORDER BY`: it is a
     // percentile computed over the filtered population, and the store ranks it in
     // memory (M63-03). The vocabulary is tried first so a metric name is never
@@ -189,7 +289,7 @@ async fn search(
                     return Err(invalid("limit must be between 1 and 100"));
                 }
                 let offset = params.offset.unwrap_or(0).max(0);
-                let query = build_query(&state, &params).await?;
+                let query = build_query(&state, &params, None).await?;
                 let page = darkhold_db::metrics::ranked(
                     state.db(),
                     &query,
@@ -257,7 +357,7 @@ async fn search_raw(
         }
         false => (None, None, None),
     };
-    let mut query = build_query(&state, &params).await?;
+    let mut query = build_query(&state, &params, None).await?;
     query.sort = Some(sort);
     query.limit = Some(limit);
     let items = catalogue::search(state.db(), &query).await?;
@@ -283,6 +383,7 @@ async fn search_raw(
 async fn build_query(
     state: &AppState,
     params: &CatalogueParams,
+    exclude_account: Option<String>,
 ) -> ApiResult<CatalogueQuery> {
     let now = time::OffsetDateTime::now_utc();
     let window = |raw: &Option<String>, field: &str| match raw {
@@ -302,6 +403,137 @@ async fn build_query(
         refreshed: window(&params.refreshed, "refreshed")?,
         added: window(&params.added, "added")?,
         fandom: resolve_fandom(state, params.fandom.as_deref()).await?,
+        author: params
+            .author
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
+        // Filled by the seed path, which is the only caller that has a seed to
+        // preselect against.
+        tokens: Vec::new(),
+        exclude_account,
+    })
+}
+
+/// The tokens a seed search preselects its candidates with.
+///
+/// Longest first, because length is a cheap proxy for rarity and the rare tokens
+/// are what make a candidate plausible at all; capped at six so the `OR` stays a
+/// scan a reader can wait for. The summary only contributes when the title is too
+/// short to identify anything — a one-word title like "Gamer" matches most of the
+/// catalogue, and a seven-word one already narrows it to the story.
+fn preselection_tokens(seed: &darkhold_db::metrics::SeedLookup) -> Vec<String> {
+    let mut tokens = darkhold_domain::similar::tokens(&seed.title);
+    tokens.sort_by_key(|token| std::cmp::Reverse(token.len()));
+    tokens.truncate(6);
+    if tokens.len() < 2 {
+        let mut body = darkhold_domain::similar::tokens(&seed.summary);
+        body.sort_by_key(|token| std::cmp::Reverse(token.len()));
+        for token in body {
+            if tokens.contains(&token) {
+                continue;
+            }
+            tokens.push(token);
+            if tokens.len() >= 6 {
+                break;
+            }
+        }
+    }
+    tokens
+}
+
+/// Answer `/catalogue?seed=…`: the rows most similar to one row (M63-04).
+async fn similar_page(
+    state: AppState,
+    params: CatalogueParams,
+    account: Option<darkhold_domain::ids::AccountId>,
+    spec: &str,
+) -> ApiResult<SimilarPage> {
+    // A seed decides the order. Refusing the combination is the only honest
+    // answer: accepting it and ordering by the metric would drop the seed
+    // silently, and accepting it and ordering by similarity would drop the metric.
+    if params.sort.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+        return Err(invalid(
+            "sort: a seed already decides the order; ask for the tiebreak you want instead of \
+             a second ordering",
+        ));
+    }
+    let exclude_read = match params.exclude_read.as_deref() {
+        Some(raw) => flag(raw)?,
+        None => false,
+    };
+    let exclude_account = match (exclude_read, account) {
+        (false, _) => None,
+        (true, Some(account)) => Some(account.to_string()),
+        (true, None) => {
+            return Err(invalid(
+                "exclude_read: reading history belongs to a session, and this request has none \
+                 (send a token or a session cookie)",
+            ))
+        }
+    };
+    let limit = params.limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(invalid("limit must be between 1 and 100"));
+    }
+    let offset = params.offset.unwrap_or(0).max(0);
+
+    let seed_row = match darkhold_db::metrics::resolve_seed(state.db(), spec).await? {
+        darkhold_db::metrics::SeedMatch::One(row) => row,
+        darkhold_db::metrics::SeedMatch::None => {
+            return Err(ApiError(AppError::NotFound {
+                resource: "catalogue row",
+            }))
+        }
+        darkhold_db::metrics::SeedMatch::Many(rows) => {
+            let named: Vec<String> = rows
+                .iter()
+                .take(5)
+                .map(|(_, title)| format!("\"{title}\""))
+                .collect();
+            return Err(invalid(format!(
+                "seed: {} rows match \"{spec}\" — name one of them, or use its id: {}",
+                rows.len(),
+                named.join(", ")
+            )));
+        }
+    };
+
+    let mut query = build_query(&state, &params, exclude_account).await?;
+    query.tokens = preselection_tokens(&seed_row);
+    let page = darkhold_db::metrics::similar(
+        state.db(),
+        &query,
+        &seed_row,
+        limit as usize,
+        offset as usize,
+    )
+    .await?;
+
+    Ok(SimilarPage {
+        items: page
+            .items
+            .into_iter()
+            .map(|item| SimilarItem {
+                row: item.row,
+                score: item.score,
+                shared: item.shared,
+                rank: item.rank,
+                updated_at: item.updated_at,
+            })
+            .collect(),
+        sort: "similarity".to_owned(),
+        metric: "similarity".to_owned(),
+        seed: SeedRef {
+            id: page.seed_id,
+            title: page.seed_title,
+        },
+        ranked: page.ranked,
+        total: page.total,
+        scanned: page.scanned,
+        limit,
+        offset,
     })
 }
 

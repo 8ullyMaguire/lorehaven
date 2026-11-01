@@ -217,6 +217,7 @@ async fn keys(db: &Database, updated: Option<&str>, refreshed: Option<&str>) -> 
         refreshed: refreshed.map(window),
         added: None,
         fandom: None,
+        ..Default::default()
     };
     let mut out: Vec<String> = catalogue::search(db, &query)
         .await

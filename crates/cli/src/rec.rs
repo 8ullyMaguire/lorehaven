@@ -72,6 +72,18 @@ pub struct RecArgs {
     /// How many rows to print.
     #[arg(long, value_name = "N", default_value_t = 20)]
     pub limit: i64,
+
+    /// Similar to this work: its id, its source URL, or its title.
+    #[arg(long, value_name = "WORK")]
+    pub seed: Option<String>,
+
+    /// Restrict to one author's pseud: exact, case-insensitive.
+    #[arg(long, value_name = "PSEUD")]
+    pub author: Option<String>,
+
+    /// Drop what you are already reading. Reads your history, so it needs a token.
+    #[arg(long)]
+    pub exclude_read: bool,
 }
 
 /// What a failed run must tell the shell.
@@ -129,6 +141,12 @@ pub enum Target {
 
 impl Target {
     pub fn resolve(args: &RecArgs, configured: &str) -> Self {
+        // A seed is an order of its own, and it is answered by the catalogue
+        // route: `--seed X --explain` explains the neighbours (the shared
+        // tokens), not an engine's contribution.
+        if args.seed.is_some() {
+            return Self::Catalogue;
+        }
         match (args.engine.as_deref(), args.explain) {
             (Some(engine), _) => Self::Engine(engine.to_owned()),
             (None, true) => Self::Engine(configured.to_owned()),
@@ -175,6 +193,11 @@ pub fn url(base_url: &str, target: &Target, args: &RecArgs) -> String {
     push("source", args.source.as_deref());
     push("q", args.q.as_deref());
     push("sort", args.sort.as_deref());
+    push("seed", args.seed.as_deref());
+    push("author", args.author.as_deref());
+    if args.exclude_read {
+        params.push(("exclude_read".to_owned(), "1".to_owned()));
+    }
     if let Some(min_likes) = args.min_likes {
         params.push(("min_likes".to_owned(), min_likes.to_string()));
     }
@@ -210,6 +233,9 @@ pub struct Row {
     pub score: Option<f64>,
     /// False when the metric could not measure the row (`measured: false`).
     pub measured: bool,
+    /// The tokens that carried a seed search's similarity, when the page is a
+    /// seed page. Empty for every other kind of page.
+    pub shared: Vec<String>,
 }
 
 fn text(value: &Value, key: &str) -> String {
@@ -260,6 +286,17 @@ pub fn rows(page: &Value) -> Vec<Row> {
                         .get("measured")
                         .and_then(Value::as_bool)
                         .unwrap_or(true),
+                    shared: item
+                        .get("shared")
+                        .and_then(Value::as_array)
+                        .map(|tokens| {
+                            tokens
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 })
                 .collect()
         })
@@ -313,6 +350,9 @@ pub fn table(page: &Value) -> String {
                 pad(&row.author, 18),
                 row.source,
             ));
+            if !row.shared.is_empty() {
+                out.push_str(&format!("     shared: {}\n", row.shared.join(", ")));
+            }
         } else {
             out.push_str(&format!(
                 "{:>3}  {:>6} likes  {:>9} words  {} {}  {} by {} [{}]\n",
@@ -339,6 +379,20 @@ pub fn gate(page: &Value) -> Option<String> {
     let ranked = page.get("ranked").and_then(Value::as_i64)?;
     let total = page.get("total").and_then(Value::as_i64)?;
     let metric = page.get("metric").and_then(Value::as_str).unwrap_or("metric");
+    // A seed page has three numbers, not two, and the third is the one that stops
+    // it reading as a claim about the catalogue: `scanned` is what the ranker saw.
+    if metric == "similarity" {
+        let scanned = page.get("scanned").and_then(Value::as_i64).unwrap_or(ranked);
+        let seed = page
+            .get("seed")
+            .and_then(|seed| seed.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        return Some(format!(
+            "similar to \"{seed}\": {ranked} neighbours among the {scanned} rows scanned, \
+             of {total} matching the filters"
+        ));
+    }
     let share = match total {
         0 => 0.0,
         total => ranked as f64 * 100.0 / total as f64,
@@ -484,6 +538,24 @@ pub async fn run(cli: &Cli, args: &RecArgs) -> Result<(), Failure> {
              set DARKHOLD_TOKEN",
             engine.unwrap_or_default()
         )));
+    }
+    // The two things a shell can be told before a round trip, and both are
+    // refusals the server also makes: a message that names the flag is cheaper
+    // than a 422 the user has to read twice.
+    if args.seed.is_some() && args.sort.is_some() {
+        return Err(bad_request(
+            "--seed already decides the order; --sort would be silently ignored",
+        ));
+    }
+    if args.seed.is_some() && args.engine.is_some() {
+        return Err(bad_request(
+            "--seed orders by similarity and --engine orders by your history; pick one",
+        ));
+    }
+    if args.exclude_read && cli.token.is_none() {
+        return Err(bad_request(
+            "--exclude-read needs your reading history, so it needs a session: set DARKHOLD_TOKEN",
+        ));
     }
     // `explain` without an engine means "the configured engine", and only the
     // server knows which that is; ask for rrf, which is what pluggable mode

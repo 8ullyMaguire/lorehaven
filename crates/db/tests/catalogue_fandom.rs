@@ -85,6 +85,7 @@ fn query(fandom: Option<&str>) -> CatalogueQuery {
         refreshed: None,
         added: None,
         fandom: fandom.map(str::to_owned),
+        ..Default::default()
     }
 }
 
