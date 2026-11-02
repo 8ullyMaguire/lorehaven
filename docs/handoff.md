@@ -3202,3 +3202,35 @@ not linked, so building one leaves the planned row behind).
 Live: deployed from `1f0975c2`, 130 migrations, `/api/v1/modules` = `{modules: 97, enabled: 74,
 ideas: 173}`; `arena`/`quiz` 401; `dh module show idea.ultimate-fanfiction-site` prints "planned —
 idea, relevance 5 (from docs/spec-amendments/ultimate-fanfiction-site.md)".
+
+## M65-04 — the account layer narrows, and cannot widen
+
+`module_user_state (account_id, module_id, enabled, updated_at)` (migration 0134), the store in
+`crates/db/src/module_state.rs`, `PATCH /api/v1/modules/{id}`, and the narrowing in `module_mount`'s
+gate. `dh module off|on <id>` drives the same door.
+
+Rules as built (§59.12): only a `per_user` row is the reader's (`403 MODULE_NOT_USER_TOGGLEABLE`
+naming `operator` or `instance` for the others); a planned row is `422`; `enabled: true` **deletes**
+the row so the instance's decision returns; the gate decides on the **toggle**, so a stray row on an
+operator surface silences nothing; a failed lookup fails open, because a 404 from a transient database
+error reads as "the feature was removed".
+
+Two bugs the tests caught and one the live instance caught:
+
+- `overridden` returned `clear()`'s "was there a row", so switching a surface **back on** answered
+  `overridden: true, enabled_for_caller: false` — the happy path, inverted.
+- `enabled_for_caller` read the override list without asking whether the row was `per_user`, so a
+  stray row on `catalogue` reported it gone while the gate still served it.
+- `dh module off` sent the session as a **bearer token**; `resolve_bearer` yields an `Actor` with its
+  own scopes and no browser session, so `RequireSession` answered `AUTH_REQUIRED` for a valid token.
+  The command takes `DARKHOLD_COOKIE` now.
+
+Deferred with reasons: **M65-09** (a cache so the gate skips the lookup when nobody holds an
+override) and **M65-10** (the erasure pass rekeying these rows; 0134 declares no FK because §51
+rekeys rather than deletes).
+
+Live: deployed from `82a42f3a`, 131 migrations, `/api/v1/modules` reports `enabled_for_caller` beside
+`enabled`; `quiz` 200 → PATCH false → 404 `MODULE_UNAVAILABLE` for that session only; PATCH true →
+`overridden: false` and the table back to 0 rows; `catalogue` refused with "the switch for `catalogue`
+belongs to the operator, not to a reader". A probe account `m65-04-probe@example.invalid` was created
+on the host to hold the session and remains.
