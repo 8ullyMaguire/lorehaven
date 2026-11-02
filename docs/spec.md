@@ -10832,6 +10832,10 @@ deadline.
   the work by that pseud with `created_at >= assigned_at`. Without one it answers `completed:
   false` with a reason naming the work, and nothing is written. A comment that predates the
   assignment is not evidence — the reader was asked after it existed.
+- **A deleted comment is not a conversation.** Both rules read `deleted_at IS NULL`. Found on
+  the live instance while proving the rota by hand: the probe's comment was removed through the
+  real door (`delete_comment` soft-deletes), still counted, and the work stayed excluded from the
+  rota for good — and the same reader could have closed a welcome with a comment they deleted.
 - **The doors answer, they do not refuse.** An ineligible reader gets `200` with
   `assignment: null` and a reason, the shape `supply.rs` established for a result that is not an
   error. `404` is reserved for a welcome that belongs to somebody else.

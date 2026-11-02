@@ -281,6 +281,74 @@ async fn a_work_without_a_comment_is_offered() {
     }
 }
 
+/// Soft-delete every comment on `work`, the way `delete_comment` does.
+async fn delete_comments(db: &Database, work: &str) {
+    match db.backend() {
+        darkhold_db::Backend::Postgres => {
+            // `$1`, not `?`: sqlx does not rewrite placeholders (trap 11).
+            sqlx::query("UPDATE comments SET deleted_at = $1 WHERE subject_id = $2")
+                .bind(darkhold_db::identity::now_rfc3339())
+                .bind(work)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("soft delete");
+        }
+        darkhold_db::Backend::Sqlite => {
+            sqlx::query("UPDATE comments SET deleted_at = ? WHERE subject_id = ?")
+                .bind(darkhold_db::identity::now_rfc3339())
+                .bind(work)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("soft delete");
+        }
+    }
+}
+
+/// A comment that was **deleted** is not a conversation, and it is not evidence that a
+/// welcome was kept. Both rules read `deleted_at IS NULL`; without it a work whose only
+/// comment was removed is excluded from the rota forever, and a reader can close a
+/// welcome with a comment they then delete. Found on the live instance: the probe
+/// comment was deleted through the real door, still counted, and the work stayed out.
+#[tokio::test]
+async fn a_deleted_comment_is_not_a_conversation() {
+    let db = connect("deleted").await;
+    let r = reader(&db, "deleted").await;
+    let w = uuid();
+    item(&db, &r.account, &r.pseud, "a", "author-a", "ongoing", 10, Some(&w)).await;
+
+    comment(&db, &w, &r.pseud, T0).await;
+    match welcome::claim(&db, &r.pseud).await.expect("claim") {
+        Claim::NothingToWelcome { eligible: 0 } => {}
+        other => panic!("a commented work is not offered: {other:?}"),
+    }
+
+    delete_comments(&db, &w).await;
+    match welcome::claim(&db, &r.pseud).await.expect("claim") {
+        Claim::Assigned(a) => assert_eq!(a.work_id, w),
+        other => panic!("a deleted comment leaves the work needing a welcome again: {other:?}"),
+    }
+}
+
+/// And the same reader cannot close a welcome with a comment they have deleted.
+#[tokio::test]
+async fn a_deleted_comment_does_not_close_the_rota() {
+    let db = connect("deleted-close").await;
+    let r = reader(&db, "deleted-close").await;
+    let w = uuid();
+    item(&db, &r.account, &r.pseud, "a", "author-a", "ongoing", 10, Some(&w)).await;
+    let a = match welcome::claim(&db, &r.pseud).await.expect("claim") {
+        Claim::Assigned(a) => a,
+        other => panic!("expected an assignment: {other:?}"),
+    };
+    comment(&db, &w, &r.pseud, darkhold_db::identity::now_rfc3339().as_str()).await;
+    delete_comments(&db, &w).await;
+
+    match welcome::complete(&db, &r.pseud, &a.id).await.expect("complete") {
+        Complete::NoCommentYet { .. } => {}
+        other => panic!("a deleted comment is not evidence: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn a_commented_work_is_never_offered() {
     let db = connect("commented").await;

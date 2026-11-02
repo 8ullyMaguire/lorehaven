@@ -112,7 +112,8 @@ const ELIGIBLE: &str = "li.work_id IS NOT NULL
         AND (li.likes > 0 OR li.status = 'complete')
         AND NOT EXISTS (SELECT 1 FROM comments c
                          WHERE c.subject_type = 'work'
-                           AND c.subject_id = CAST(li.work_id AS TEXT))";
+                           AND c.subject_id = CAST(li.work_id AS TEXT)
+                           AND c.deleted_at IS NULL)";
 
 /// Build an [`Assignment`] from whichever driver's row type arrived.
 ///
@@ -423,6 +424,7 @@ pub async fn complete(db: &Database, pseud_id: &str, assignment_id: &str) -> Res
     let comment_sql = "SELECT id FROM comments
             WHERE subject_type = 'work' AND subject_id = ? AND author_pseud = ?
               AND created_at >= ?
+              AND deleted_at IS NULL
             ORDER BY created_at ASC LIMIT 1";
     // `?` is SQLite's; PostgreSQL needs `$n`, and sqlx does not rewrite it here.
     // Without this the PG arm answers "syntax error at or near AND" for a correct
