@@ -510,6 +510,12 @@ pub fn build_router(state: AppState) -> Router {
         .merge(module_mount(&state, "moderation", routes::moderation::router(), RouteClass::Write))
         // Events (collections, challenges, requests, wishlists, events) — M13.
         .merge(module_mount(&state, "events", routes::events::router(), RouteClass::Write))
+        .merge(module_mount(
+            &state,
+            "exchanges",
+            routes::exchanges::router(),
+            RouteClass::Write,
+        ))
         // Governance (reports, moderation, sanctions, appeals, trust) — M14.
         .merge(module_mount(&state, "governance", routes::governance::router(), RouteClass::Write))
         // Economy (credits, fair queues, bounties, billing) — M15.

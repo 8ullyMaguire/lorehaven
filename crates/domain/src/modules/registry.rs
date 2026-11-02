@@ -369,6 +369,22 @@ pub const MODULES: &[Module] = &[
         source: "crates/app/src/routes/events.rs",
     },
     Module {
+        id: "exchanges",
+        name: "Gift Exchanges",
+        summary: "M45-27 — Yuletide-style exchanges: terms, a pairing that is maximum or refused, and a reveal.",
+        default_on: true,
+        stability: Stability::Stable,
+        toggle: Toggle::Operator,
+        requires: &[],
+        milestone: "M45-27",
+        spec: "§18.11",
+        nav: &[],
+        // 6: the routes are inert until an event exists, so leaving the surface on costs
+        // nothing; 10 would claim an exchange is part of every instance's shape.
+        relevance: 6,
+        source: "crates/app/src/routes/exchanges.rs",
+    },
+    Module {
         id: "exchange",
         name: "Exchange",
         summary: "M57 — the metadata exchange endpoint (spec §11.17, §15.17, §19.14).",

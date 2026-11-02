@@ -68,19 +68,6 @@
    "built": false
   },
   {
-   "why_summary": "-- Gaps review C3. Yuletide-style gift exchanges; anonymous prompt/fill boards; social, not transactional.",
-   "id": "M45-27",
-   "title": "Exchanges, prompt memes, big bangs with matching engine",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
    "why_summary": "docs/spec.md 56; docs/plans/m45-28-wip-adoption.md Specced and planned 2026-10-04. Prerequisite already in schema: works.completion carries abandoned/hiatus (0003_works.sql:48), ch",
    "id": "M45-28",
    "title": "WIP adoption and closure notes with lineage",
@@ -370,6 +357,19 @@
    "why_summary": "crates/db/src/welcome.rs (complete); migrations/0132 Found while making the PostgreSQL arm pass: the fixture wrote $4::timestamptz, PostgreSQL stored '2026-11-02 02:13:48+00', and ",
    "id": "M45-61",
    "title": "`comments.created_at` is not constrained to the canonical shape, so the welcome rota's 72-hour window compares text against text and a non-canonical writer would silently match nothing",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "crates/app/src/routes/events.rs (post_event, join_event); migrations/postgres/0014_events.sql Found while wiring M45-27. post_event binds pseud_id into events.created_by and join_e",
+   "id": "M45-62",
+   "title": "`event_participation.account` and `events.created_by` hold pseud ids although the columns are named for accounts, so every \u00a718 query and the exchange matcher pair pseuds through an account-named column",
    "sources": [
     "docs/requirements.csv"
    ],

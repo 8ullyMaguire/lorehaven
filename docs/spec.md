@@ -3535,6 +3535,51 @@ A work may be gifted to a reader or dedicated to one or more pseuds.
 |---|---|
 | `work_gifts` | work_id, recipient_pseud_id, gift_note, challenge_fulfillment_id, created_at, declined_at |
 
+## 18.11 Gift exchanges and big bangs: the pairing
+
+An exchange is an `events` row (§18: name, document, creator) whose participants declare terms and
+are then **paired**: one giver per recipient, nobody for themselves, and the pairing secret until
+the organiser reveals it. §18.5 already serves the anonymous prompt/fill board (`requests` +
+`claims` + `anonym_until`); this section is only the pairing, because a second prompt board would
+be a second opinion about the same act.
+
+**Participants are pseuds.** `events.created_by` and `event_participation.account` are both written
+with the caller's **pseud id** by the §18 routes, despite the column's name; the matcher pairs what
+is in them, and `exchanges` names its kinds accordingly (`excludes_pseud`).
+
+- **Terms are whole, not appended.** `PUT` replaces the set. A preference is not a log: "remove a
+  fandom" is the same verb with a shorter list.
+- **Values are normalised once, on the way in** (trimmed, lowercased, inner whitespace collapsed,
+  deduplicated), because the matcher compares strings and `Dragon  Age` is `dragon age`.
+- **A self-exclusion is refused, not dropped.** Dropping it hides a misunderstanding of the field.
+- **Terms from somebody who never joined are refused**, naming the field: a stored row the matcher
+  never reads is a person who believes they are in an exchange they are not in.
+- **Maximum cardinality first, weight second.** The matcher computes a maximum matching over the
+  allowed edges (no self, no exclusion in either direction), so "most people paired" is never
+  reported as success, then improves total weight by deterministic 2-opt swaps. Weight is integer
+  (`3 × shared fandoms` in both directions, `+1` for any overlap) and ties resolve by account id, so
+  two runs over shuffled input produce the same pairing.
+- **An impossible pairing is a refusal naming the accounts, and it writes nothing** — not even the
+  pairs it could have made. Half an exchange promises gifts that cannot be kept, and the people
+  left out would only find out at reveal.
+- **The pairing is the record.** A second match is refused, naming when the first was taken.
+  `exchange_assignments` has a unique index on the recipient, so a matcher bug cannot ship a double
+  gift; the CHECK forbids self-pairing; `matched_by` records which algorithm produced the row.
+- **Before reveal, `mine` answers rather than refuses.** A paired participant gets
+  `{recipient: null, revealed: false, reason}` — the honest answer to "whom am I writing for",
+  which is *you have not been told yet*. A `403` would say they did something wrong.
+- **Counts are public, pairings are not.** `GET /exchanges/{event}` reports participants, matched
+  and revealed; it never lists who is paired with whom, even after reveal, because a public page
+  that lists every pairing turns a gift exchange into a list.
+
+| Table | Important fields |
+|---|---|
+| `exchange_terms` | event_id, account (a pseud id), kind (`offers_fandom`/`wants_fandom`/`excludes_pseud`), value, created_at |
+| `exchange_assignments` | event_id, giver, recipient, assigned_at, revealed_at, matched_by — PK (event_id, giver), UNIQUE (event_id, recipient) |
+
+No foreign keys, for the §58.3 reason: erasure rekeys an account rather than deleting it, so a
+cascade would never fire and a key would turn an erasure into a failed statement.
+
 ## Acceptance
 
 - Challenge identities remain hidden until reveal.
@@ -3543,6 +3588,12 @@ A work may be gifted to a reader or dedicated to one or more pseuds.
 - Withdrawals preserve required audit and attribution history.
 - Generated events do not fabricate human sponsorship.
 - Wishlist admin markers do not confer ranking advantage.
+- An exchange whose maximum matching leaves anybody out answers `422` naming the unmatched, and
+  `exchange_assignments` holds no rows afterwards.
+- Two runs of the matcher over the same participants in different input order produce the same
+  pairing, and a second match is refused with the timestamp of the first.
+- A participant reading `mine` before reveal gets `recipient: null` with the reason; the public
+  summary never lists a pairing even after reveal.
 - Curator picks are attributed.
 - Reading challenges grant no gamification rewards.
 

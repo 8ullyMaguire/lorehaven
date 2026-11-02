@@ -1341,6 +1341,26 @@
       "treatment": "keep",
       "why": "Lowercased library_items.author_text, which the catalogue already publishes on every work page; it names no account and reveals nothing the work row does not.",
       "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "exchange_terms.account": {
+      "treatment": "rekey_pseud",
+      "why": "Holds a pseud id: \u00a718 writes events.created_by and event_participation.account with the caller's pseud, so the matcher pairs pseuds. Rekeyed with the pseud set (11.16.3); the fandom values name no person.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "exchange_terms.value": {
+      "treatment": "keep",
+      "why": "A fandom name for offers_fandom/wants_fandom, or a pseud id for excludes_pseud. The fandom half is public vocabulary; the pseud half is a public handle, and the pair table is dropped with exchange_terms if a snapshot ever takes it.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "exchange_assignments.giver": {
+      "treatment": "rekey_pseud",
+      "why": "A pseud id. Who writes for whom is the exchange's secret before reveal, so a snapshot must rekey it even though the instance has already revealed it in public.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "exchange_assignments.recipient": {
+      "treatment": "rekey_pseud",
+      "why": "A pseud id, rekeyed with the same set as the giver.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
     }
   }
 }

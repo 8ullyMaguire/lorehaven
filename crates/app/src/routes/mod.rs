@@ -29,6 +29,7 @@ pub mod dnf;
 pub mod economy;
 pub mod erasure;
 pub mod events;
+pub mod exchanges;
 pub mod exchange;
 pub mod exports;
 pub mod modules;

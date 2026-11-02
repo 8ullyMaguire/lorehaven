@@ -42,6 +42,7 @@ pub mod entity_closure;
 pub mod entity_floor;
 pub mod erasure;
 pub mod events;
+pub mod exchanges;
 pub mod exchange;
 pub mod exports;
 pub mod external;

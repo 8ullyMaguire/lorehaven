@@ -30,6 +30,7 @@ pub mod economy;
 pub mod error;
 pub mod events;
 pub mod exchange;
+pub mod exchanges;
 pub mod exports;
 pub mod extension;
 pub mod fairqueue;
