@@ -108,6 +108,8 @@ pub mod taste_leakage;
 pub mod taste_vectors;
 /// The works ladder: the arena's Glicko-2 ratings, stored (spec §12.4a).
 pub mod work_ratings;
+// M45-26 (§58.6): the welcome rota — one work, one reader, seventy-two hours.
+pub mod welcome;
 pub mod tasting;
 pub mod taxonomy;
 pub mod taxonomy_export;

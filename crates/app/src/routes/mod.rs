@@ -77,6 +77,8 @@ pub mod spoilers;
 pub mod subscriptions;
 // M45-25 (§58): keystone authors, droughts, and the routing record.
 pub mod supply;
+// M45-26 (§58.6): the welcome rota — one work, one reader, seventy-two hours.
+pub mod welcome;
 pub mod tasting;
 pub mod taxonomy;
 pub mod taxonomy_export;

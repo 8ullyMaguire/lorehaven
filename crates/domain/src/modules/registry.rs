@@ -11,7 +11,7 @@
 //! modules, 2026-11-01) and are maintained by hand from here: `toggle`, `nav`
 //! and `requires` are judgements, not extractions.
 
-use super::{Module, Stability, Toggle};
+use super::{Module, NavEntry, Stability, Toggle};
 
 /// Every idea the project has had and not built, generated (§59.7).
 pub use super::ideas::IDEAS;
@@ -927,6 +927,24 @@ pub const MODULES: &[Module] = &[
         nav: &[],
         relevance: 10,
         source: "crates/app/src/routes/supply.rs",
+    },
+    Module {
+        id: "welcome",
+        name: "Welcome Rota",
+        summary: "M45-26 — one finished, uncommented work handed to a reader, with 72 hours to be its first commenter.",
+        default_on: true,
+        stability: Stability::Stable,
+        toggle: Toggle::PerUser,
+        requires: &[],
+        milestone: "M45-26",
+        spec: "§58.6",
+        nav: &[NavEntry {
+            label: "Welcomes",
+            href: "/welcome",
+            slot: "reader_sidebar",
+        }],
+        relevance: 8,
+        source: "crates/app/src/routes/welcome.rs",
     },
     Module {
         id: "tasting",

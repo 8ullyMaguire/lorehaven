@@ -1331,6 +1331,16 @@
       "treatment": "keep",
       "why": "A boolean state, no personal data beyond what the module choice already carries.",
       "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "welcome_rota.pseud_id": {
+      "treatment": "rekey_pseud",
+      "why": "A pseudonym, not an account identifier: the welcome is owed to the pseud because a comment carries comments.author_pseud. Rekeyed with the pseud set (11.16.3) so a snapshot keeps the obligation without the reader.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "welcome_rota.author_key": {
+      "treatment": "keep",
+      "why": "Lowercased library_items.author_text, which the catalogue already publishes on every work page; it names no account and reveals nothing the work row does not.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
     }
   }
 }

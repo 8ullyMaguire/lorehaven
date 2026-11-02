@@ -419,6 +419,10 @@ pub fn build_router(state: AppState) -> Router {
         // routing a reader opts into. Write class — every door needs a session,
         // and routing creates a row the patronage pays against.
         .merge(module_mount(&state, "supply", routes::supply::router(), RouteClass::Write))
+        // §58.6's welcome rota (M45-26): a reader takes one work and owes it a first
+        // comment in 72 hours. Write class — taking one creates a row, and closing one
+        // reads the comment that evidences it.
+        .merge(module_mount(&state, "welcome", routes::welcome::router(), RouteClass::Write))
         // The recommendation engines over a filtered catalogue (M63-01). The
         // search class rather than the default one: it ranks a pool of up to 500
         // rows with every enabled strategy, which is the heaviest read in the

@@ -68,19 +68,6 @@
    "built": false
   },
   {
-   "why_summary": "-- Gaps review C2. Route readers to strong-completion/few-comment works; small comment bonus.",
-   "id": "M45-26",
-   "title": "Feedback-drought intervention",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
    "why_summary": "-- Gaps review C3. Yuletide-style gift exchanges; anonymous prompt/fill boards; social, not transactional.",
    "id": "M45-27",
    "title": "Exchanges, prompt memes, big bangs with matching engine",
@@ -370,6 +357,19 @@
    "why_summary": "docs/plans/m45-25-supply-keystones.md Found while building M45-25. \u00a758.3 says a routing row is never deleted because an abandoned routing is evidence the reader was asked; \u00a751's ca",
    "id": "M45-58",
    "title": "erasure reaches the supply routing record",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "crates/db/src/welcome.rs (complete); migrations/0132 Found while making the PostgreSQL arm pass: the fixture wrote $4::timestamptz, PostgreSQL stored '2026-11-02 02:13:48+00', and ",
+   "id": "M45-61",
+   "title": "`comments.created_at` is not constrained to the canonical shape, so the welcome rota's 72-hour window compares text against text and a non-canonical writer would silently match nothing",
    "sources": [
     "docs/requirements.csv"
    ],

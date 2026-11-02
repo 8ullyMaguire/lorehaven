@@ -10806,6 +10806,40 @@ Completion grants `PATRONAGE_BP` (500 basis points, i.e. 5.00 credits) to the re
   placement, no priority and no visibility, and §12.6's separation of payment from reach
   applies.
 
+### 58.6 The welcome rota: a first comment is a promise with a deadline
+
+**Measured on the live instance, 2026-11-02:** `comments` holds **0** rows; **397** works carry
+`status = 'complete'`, **1,247** carry likes, and the two sets have an overlap of **0**. A rule of
+"finished *and* endorsed" would therefore route nothing for as long as the instance is starved of
+conversation — which is exactly the condition the rota exists to end. The candidate rule is
+`(likes > 0 OR status = 'complete') AND work_id IS NOT NULL`: endorsed **or** finished.
+
+The rota is the supply surface's answer to drought (§58.2) that acts instead of reporting. It
+gives one reader one work that has never been commented on, and asks for one comment within a
+deadline.
+
+- **The promise is made to a pseud, not an account.** A comment carries
+  `comments.author_pseud`, so a welcome owed to an account could be closed by nobody. A session
+  with no active pseud is refused on the field `pseud`.
+- **One open welcome per reader, one per author, one per work.** Taking a welcome twice returns
+  the first with `taken: "already-open"` rather than banking a second. A named author is never
+  asked for twice; a work with no author text is exempt from that rule, so the clause that a work
+  is only ever promised once cannot be masked by it.
+- **Seventy-two hours, stored not computed.** `due_at` is written at assignment for the same
+  reason §58.3 writes `completed_at`: a deadline recomputed from a constant at read time is a
+  deadline that changes when the constant does.
+- **The rota closes on the comment, not on the button.** Completion looks for a `comments` row on
+  the work by that pseud with `created_at >= assigned_at`. Without one it answers `completed:
+  false` with a reason naming the work, and nothing is written. A comment that predates the
+  assignment is not evidence — the reader was asked after it existed.
+- **The doors answer, they do not refuse.** An ineligible reader gets `200` with
+  `assignment: null` and a reason, the shape `supply.rs` established for a result that is not an
+  error. `404` is reserved for a welcome that belongs to somebody else.
+- **The report is operator-only** and is the same refusal shape as §58.2: when the corpus cannot
+  measure a drought it says so in words instead of listing every engaged work.
+- **No second faucet.** §58.4 already pays `PATRONAGE_BP` for feedback; a welcome-specific bonus
+  would pay the same act twice.
+
 ### 58.5 Acceptance
 
 - A keystone list computed on a fixture with a 4-row source and a 400-row source ranks by the
@@ -10819,6 +10853,15 @@ Completion grants `PATRONAGE_BP` (500 basis points, i.e. 5.00 credits) to the re
 - A reader asking twice receives two different works, and the second routing row names the
   first as the reason it moved on.
 - Completing a routing twice leaves one `credit_entries` row for it.
+- A work carrying a comment is never offered, and the test names the work it excluded.
+- Two readers never hold the same work; one author is never asked for twice; a reader holds one
+  open welcome at a time and a second claim returns the first rather than taking a second.
+- Completion without a comment answers `completed: false` with a reason naming the work, and a
+  comment older than the assignment does not close it.
+- The due date is 72 hours after the assignment, asserted **literally** — comparing it against the
+  constant that produces it is a tautology, and the mutation to 48 hours passed that form.
+- The reader doors answer `401` anonymously, the report answers `404` to a non-operator, and the
+  module carries the sidebar entry that makes the surface reachable.
 
 ## Guest access, trust levels and self-governance (adopted 2026-10-16)
 
