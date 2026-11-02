@@ -46,6 +46,15 @@ pub struct Cli {
     #[arg(long, global = true, env = "DARKHOLD_TOKEN", value_name = "TOKEN")]
     pub token: Option<String>,
 
+    /// A session cookie, for the doors that act for an account.
+    ///
+    /// A bearer token is a different principal (`resolve_bearer`): it carries its
+    /// own scopes and no browser session, so a route that decides per account —
+    /// a module override is one — cannot be driven by it. Copy the
+    /// `darkhold_session=…` pair from a signed-in browser, or from a `curl -c` jar.
+    #[arg(long, global = true, env = "DARKHOLD_COOKIE", value_name = "COOKIE")]
+    pub cookie: Option<String>,
+
     /// Print the server's JSON verbatim instead of a table.
     #[arg(long, global = true)]
     pub json: bool,

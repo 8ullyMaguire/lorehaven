@@ -52,7 +52,7 @@ pub enum ModuleAction {
     /// Switch a `per_user` surface off for your own account (§59.6).
     ///
     /// The instance's decision is unchanged; only your row is written, and only
-    /// you stop seeing it. Needs a session: set DARKHOLD_TOKEN.
+    /// you stop seeing it. Needs a session cookie: set DARKHOLD_COOKIE.
     Off {
         /// The module id, as `dh module list` prints it.
         id: String,
@@ -403,10 +403,15 @@ async fn ideas(cli: &Cli, min: u8, committed: bool) -> Result<(), Failure> {
 /// token: there is no second write path, so a bug in the CLI cannot produce a state
 /// the web cannot.
 async fn override_one(cli: &Cli, id: &str, enabled: bool) -> Result<(), Failure> {
-    let token = cli
-        .token
+    // A session cookie, not a bearer token. `resolve_bearer` yields an `Actor` with
+    // its own scopes and no browser session, so `RequireSession` refuses it — the
+    // first version of this command sent a bearer and the live instance answered
+    // `AUTH_REQUIRED` for a token that was perfectly valid, which is the kind of
+    // 401 that sends you looking at the wrong layer.
+    let cookie = cli
+        .cookie
         .as_deref()
-        .ok_or_else(|| bad_request("changing a surface is per-account: set DARKHOLD_TOKEN"))?;
+        .ok_or_else(|| bad_request("changing a surface is per-account: set DARKHOLD_COOKIE"))?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -414,7 +419,7 @@ async fn override_one(cli: &Cli, id: &str, enabled: bool) -> Result<(), Failure>
     let url = format!("{}/api/v1/modules/{id}", cli.base_url);
     let response = client
         .patch(&url)
-        .bearer_auth(token)
+        .header(reqwest::header::COOKIE, cookie)
         .json(&serde_json::json!({ "enabled": enabled }))
         .send()
         .await
