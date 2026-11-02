@@ -603,16 +603,36 @@ def main() -> int:
     #    what happened, so their `###` headings are narration — "State at handoff",
     #    "Three decisions I made", "Lesson worth keeping" — and reading them put a
     #    changelog into a backlog. Two of the four named sources were that mistake.
+    # A source that is not there is the loudest silence there is: measured on the
+    # deploy host 2026-11-02, running the generator there produced a 120-row
+    # catalogue from a 178-row repository, because the vault does not hold these
+    # two notes and the script warned instead of refusing. It then rewrote both
+    # committed artefacts. The artefact is machine-dependent by construction —
+    # these two notes are inputs — so the generator must run where every source
+    # is, and say so when it is not rather than emit a smaller catalogue that
+    # looks green.
+    missing: list[str] = []
     for name in [
         "2026-09-20T183349+0200-darkhold-growth-ideas.md",
         "2026-09-30-cross-project-feature-suggestions.md",
     ]:
         path = VAULT / name
         if not path.exists():
-            print(f"warning: missing source {path}", file=sys.stderr)
+            missing.append(str(path))
             continue
         for title in headings(path, levels=(3,)):
             add(title, f"vault:{name}")
+    if missing:
+        print("refusing to generate: source(s) absent from this machine:", file=sys.stderr)
+        for m in missing:
+            print(f"  - {m}", file=sys.stderr)
+        print(
+            "The catalogue is generated from these files; without them it would be\n"
+            "smaller and still green (§59.7). Run the generator on the machine that\n"
+            "holds the vault, and commit the artefacts from there.",
+            file=sys.stderr,
+        )
+        return 2
 
     host = host_rows()
     host_ids = {h["id"] for h in host}

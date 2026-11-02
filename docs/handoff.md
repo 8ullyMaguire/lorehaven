@@ -3194,14 +3194,70 @@ Four rules were paid for by reading the deployed payload rather than counting it
 one idea (its title, not its headings), a session note is not an idea list, a requirements row keeps
 its own id (`M45-26`) instead of a slug of its sentence, and a heading needs two words to count.
 
-Open: M65-07 (the generator reads a named list, so `docs/known-gaps.md` and
-`docs/ROADMAP-guest-trust-governance.md` are idea documents it ignores, and a new brainstorm is
-found only because the directory is globbed) and M65-08 (an idea and the module that realises it are
-not linked, so building one leaves the planned row behind).
+Open: M65-08 (an idea and the module that realises it are not linked, so building one leaves the
+planned row behind), M65-09, and M65-06 (the frontend nav does not read `/api/v1/modules`).
 
 Live: deployed from `1f0975c2`, 130 migrations, `/api/v1/modules` = `{modules: 97, enabled: 74,
 ideas: 173}`; `arena`/`quiz` 401; `dh module show idea.ultimate-fanfiction-site` prints "planned —
 idea, relevance 5 (from docs/spec-amendments/ultimate-fanfiction-site.md)".
+
+## M65-07 — the gate fires, and what it found was mostly the gate's own mistake
+
+`coverage_gate()` reads content, not mtimes: every candidate document on this host is older than
+`docs/ideas-catalogue.json`, so an mtime gate would have passed three unread documents silently.
+It enumerates every tracked markdown document whose parent is `ideas/` or whose name says
+`brainstorm|ideas|roadmap`, extracts titles by the document's **kind** — a sweep enumerates its
+`###` headings, a named document IS one idea (its title), narration contributes nothing, a roadmap
+contributes its adopted labels — and fails naming every title with no home in catalogue ∪ retired ∪
+registry. A red gate writes no artefacts, which is what makes a stale JSON positive evidence that no
+regeneration has happened since the gate landed.
+
+It fired on 29 titles, and 24 of them were the gate's own fault. The `100-ideas-*` files under
+`docs/plans/` inherit "ideas" in their name but are records **about** the 100-idea list: an audit of
+it, a progress log for it (`DONE — item 11`, `Next, in this order`, `2a. Progress log`), and a
+scoping decision on it. The list itself is `docs/audit-100-reader-ideas-2026-10-04.md`, which the
+catalogue already reads through `audit_absent()`. Reading those plans as sweeps turned status lines
+into homeless ideas and made a green gate impossible on correct behaviour — the failure mode the
+gate exists to prevent, inverted. They are narration by kind now, with the rule written down.
+
+The five real ones were GS-1…GS-5, the guest-trust roadmap's adopted items — work adopted estate-wide
+and ticketed nowhere. Registered as planned rows with the roadmap's own words as their leading clause,
+because the catalogue takes `requirement.split(":")[0]` as the title and a slug mismatch would leave
+them homeless again.
+
+`roadmap_items()` no longer knows only `GS-1…GS-5`. It parses the *adopts* section for labelled items,
+expands ranges (`GS-1 … GS-5`) and single labels, and looks each up in `ROADMAP_ITEM_TITLES`. A label
+nobody has named becomes `"<LABEL>: adopted item with no registered title"`, which is homeless by
+construction — so a new roadmap cannot be adopted without someone writing down what it adopted. That
+was the difference between a catalogue that reads a new roadmap and one that only reads the roadmap it
+was written for.
+
+Seven gaps the audit ranked as **open** are built and were tracked by nothing at all — the audit's
+complaint, which it made only about the payout formula. Verified by their test files and registered as
+`implemented-fully-tested`: Blind Date (13 tests), hidden classics (12), series-aware (17),
+bookmark-to-hit (13), AI pre-read (10 + 18), the payout formula (14, wired at `worker.rs:626`), and the
+hit rate (10 — with **no route**, so `M66-09` is the door). Also registered: `M66-08`, P2P LAN/direct
+sharing, which the scope document adopts and no ticket held.
+
+Four mutations caught: a deleted GS row, an unregistered adopted label in a new roadmap, the plan-file
+rule reverted (24 false positives return), and a dropped table entry. One probe was **not** a valid
+mutation: a new untracked brainstorm passed because the candidate set is `git ls-files` and the sweep
+pass legitimately adds its headings — the gate was right and the probe was wrong.
+
+Catalogue: 172 → 178 ideas, gate green, 0 homeless.
+
+**The artefact is machine-dependent, and that is now loud.** Running the generator on the deploy host
+produced a **120-row** catalogue from a 178-row repository: two vault notes (`2026-09-20T183349+0200-
+darkhold-growth-ideas.md`, `2026-09-30-cross-project-feature-suggestions.md`) are inputs, the host's
+vault does not hold them, and the script warned and carried on — then rewrote both committed
+artefacts. That is 58 ideas disappearing with a green gate, the failure §59.7 exists to prevent. A
+missing source is now a refusal (`exit 2`, naming each absent path, writing nothing), because a
+smaller catalogue that looks green is worse than no catalogue. Restored the host tree with
+`git checkout -- crates/domain/src/modules/ideas.rs docs/ideas-catalogue.json`.
+
+Live: deployed from `965a9d54` (131 migrations, `/api/v1/modules` = `{modules: 97, enabled: 74,
+ideas: 178}`, `GS-1`…`GS-5` and `M66-08`/`M66-09` in the payload; `dh module show GS-1` prints
+"planned — idea, relevance 4 … docs/ROADMAP-guest-trust-governance.md").
 
 ## M65-04 — the account layer narrows, and cannot widen
 
