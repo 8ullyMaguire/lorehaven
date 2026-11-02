@@ -310,9 +310,21 @@ def score(idea: dict, spec: str, committed: bool, sources: int) -> tuple[int, li
 # The gate reads content, not mtimes: every candidate on this host is older than
 # the JSON, so an mtime gate would pass three unread documents silently.
 
-# Documents the gate must not read, each with the rule that makes its ideas
-# already counted. The rule names WHERE the ideas live, never "trust me".
+# A roadmap names its adopted items by label. The label is a pointer; this is what
+# the label means, in the roadmap's own words. A label absent from this table is
+# not silently dropped — it becomes a homeless title the gate fails on, so a new
+# roadmap cannot be adopted without someone naming what it adopted.
+ROADMAP_ITEM_TITLES = {
+    "GS-1": "guest access with consent",
+    "GS-2": "the guest fold moves reading progress and bookmarks with the guest",
+    "GS-3": "guest identity as a first-class pseudonym",
+    "GS-4": "elastic trust from karma, not a parallel score",
+    "GS-5": "a jury drawn from the eligible pool",
+}
+
 GATE_IGNORE = {
+    # Documents the gate must not read, each with the rule that makes its ideas
+    # already counted. The rule names WHERE the ideas live, never "trust me".
     # A summary OF the spec: every heading restates a section the spec already
     # declares, and the spec is not an idea source (its amendments are).
     "docs/spec-summary-brainstorm.md": "titles restate spec sections; spec amendments are the idea source",
@@ -348,26 +360,47 @@ def candidate_documents() -> list[Path]:
 def roadmap_items(path: Path) -> list[str]:
     """A roadmap's adopted items, as idea titles.
 
-    The guest-trust roadmap names its items "GS-1 … GS-5" inside its "What this
-    site adopts" section. A bare "GS-3" is a label, so each item is expanded
-    with the roadmap's own words for it — the section that defines it. The
-    expansion is written here rather than scraped, because scraping prose for
-    "the item GS-3 is about" is how a catalogue invents ideas nobody proposed.
+    Every roadmap has a section saying what the site adopts, and the items in it
+    carry a label ("GS-1", "AR-3"). A bare label is a pointer, not a proposal, so
+    each is expanded: the labels this repository has already named are expanded
+    with their roadmap's own words from `ROADMAP_ITEM_TITLES`, and a label
+    nobody has expanded yet becomes `"<LABEL>: adopted with no registered
+    title"` — which is homeless by construction, so the gate fails on it and
+    names it. That is the difference between a catalogue that reads a new
+    roadmap and one that only reads the roadmap it was written for.
+
+    The expansion table is written here rather than scraped: guessing "what GS-3
+    is about" from prose is how a catalogue invents ideas nobody proposed.
     """
     text = path.read_text(encoding="utf-8", errors="replace")
+    # The adopts section: from a heading mentioning "adopt" to the next heading of
+    # the same or higher level. A roadmap that adopts nothing contributes nothing,
+    # and its title still names the document.
+    body = ""
+    for m in re.finditer(r"^(#{1,6})\s*(.+)$", text, re.M):
+        if "adopt" in m.group(2).lower():
+            start = m.end()
+            rest = text[start:]
+            stop = re.search(r"^#{1,%d}\s" % len(m.group(1)), rest, re.M)
+            body = rest[: stop.start()] if stop else rest
+            break
+    if not body:
+        return []
+    labels: list[str] = []
+    for line in body.splitlines():
+        # "- GS-1 … GS-5, all of them" — expand the range, then any loose label.
+        for rng in re.finditer(r"\b([A-Z]{2,4})-(\d+)\s*(?:…|\.\.\.|-{1,2})\s*([A-Z]{2,4})-(\d+)\b", line):
+            if rng.group(1) != rng.group(3):
+                continue
+            for n in range(int(rng.group(2)), int(rng.group(4)) + 1):
+                labels.append(f"{rng.group(1)}-{n}")
+        for lab in re.findall(r"\b([A-Z]{2,4}-\d+)\b", line):
+            labels.append(lab)
     out: list[str] = []
-    for m in re.finditer(r"\bGS-([1-5])\b", text):
-        n = m.group(1)
-        titles = {
-            "1": "guest access with consent",
-            "2": "the guest fold: reading progress and bookmarks move with the guest",
-            "3": "guest identity as a first-class pseudonym",
-            "4": "elastic trust from karma, not a parallel score",
-            "5": "a jury drawn from the eligible pool",
-        }
-        t = titles.get(n)
-        if t and t not in out:
-            out.append(t)
+    for lab in dict.fromkeys(labels):  # ordered, deduped
+        title = ROADMAP_ITEM_TITLES.get(lab, f"{lab}: adopted item with no registered title")
+        if title not in out:
+            out.append(title)
     return out
 
 
@@ -384,10 +417,11 @@ def document_titles(path: Path) -> list[str] | None:
       sections, which is the 375-row mistake;
     - **narration** (a handoff, a plan that records what happened, a session
       note) contributes nothing BY RULE — its headings are narration, and a gate
-      that demanded rows from it would fail forever on correct behaviour. The
-      exception is a plan whose name says it is an idea list (`100-ideas-*`):
-      those are sweeps filed under the wrong directory, and the gate reads their
-      headings.
+      that demanded rows from it would fail forever on correct behaviour. A plan
+      whose name says "ideas" is still narration here: the `100-ideas-*` files are
+      an audit OF the 100-idea list, a progress log for it and a scoping decision
+      on it, and the list itself is `docs/audit-100-reader-ideas-2026-10-04.md`,
+      which the catalogue reads through `audit_absent()`.
     """
     name = path.name.lower()
     parent = path.parent.name
@@ -398,8 +432,14 @@ def document_titles(path: Path) -> list[str] | None:
     if parent == "plans" and not any(w in name for w in ("ideas", "brainstorm")):
         return None
     if parent == "plans" and any(w in name for w in ("ideas", "brainstorm")):
-        # An idea list filed under plans/: read its item headings, like a sweep.
-        return headings(path, levels=(2, 3))
+        # A plan under plans/ whose name says "ideas" — but every such file here is a
+        # RECORD ABOUT the 100-idea list (an audit of it, a progress log for it, a
+        # scoping decision on it), never the list itself. The list is
+        # `docs/audit-100-reader-ideas-2026-10-04.md`, which the catalogue reads through
+        # `audit_absent()`. Reading these as sweeps turned 24 status lines — "DONE — item
+        # 11", "Suggested order", "Mutation gates" — into "homeless ideas" and made a
+        # green gate impossible on correct behaviour. Measured 2026-11-02.
+        return None
     if parent == "adr":
         return None  # a decision record argues ONE decision; it is not a backlog
     # Sweeps read their headings.

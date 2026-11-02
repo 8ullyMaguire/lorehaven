@@ -1,6 +1,6 @@
 {
  "generated_by": "scripts/ideas_catalogue.py",
- "count": 172,
+ "count": 178,
  "ideas": [
   {
    "why_summary": "",
@@ -12,6 +12,58 @@
    "milestone": "unassigned",
    "relevance": 5,
    "because": "specified by an amendment (+3); named in the spec (+2)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/ROADMAP-guest-trust-governance.md Adopted from the estate standard (secondbrain 2026-10-16-guest-access-trust-and-self-governance.md). Config delta for this site: guest.mau_li",
+   "id": "GS-1",
+   "title": "guest access with consent",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/ROADMAP-guest-trust-governance.md Measured 2026-11-02: consent appears only in crates/app/tests/milestone_16.rs; no guest identity and no fold exist in this tree. The standard",
+   "id": "GS-3",
+   "title": "guest identity as a first-class pseudonym",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/ROADMAP-guest-trust-governance.md An upgrade of machinery that exists rather than new machinery: karma (99 references) and trust_level (52) are already here. Two trust numbers",
+   "id": "GS-4",
+   "title": "elastic trust from karma, not a parallel score",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/ROADMAP-guest-trust-governance.md The other item nothing in this repo has. Same caution as GS-4: the numbers belong in the roadmap file when they are real.",
+   "id": "GS-5",
+   "title": "a jury drawn from the eligible pool",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
    "default_on": false,
    "built": false
   },
@@ -874,19 +926,6 @@
    "built": false
   },
   {
-   "why_summary": "scripts/ideas_catalogue.py The generator reads a named list: four vault notes, docs/ideas/*, docs/design/*, docs/spec-amendments/*, the audit and requirements.csv. `docs/spec-summa",
-   "id": "M65-07",
-   "title": "the idea catalogue reads every brainstorm, including the ones written after it",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M65",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
    "why_summary": "docs/spec.md \u00a759.7 Today an idea is `idea.<slug>` and a built surface is `<module id>`; nothing links the two, so building an idea leaves a stale planned row beside the new module.",
    "id": "M65-08",
    "title": "an idea row becomes a module when it is built, without a second backlog",
@@ -922,6 +961,32 @@
    "milestone": "M65",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "crates/db/src/hit_rate.rs Found while registering M66-01. The store is built and tested (10 tests) and nothing serves it: `grep -rn hit_rate crates/app` returns no route. This is t",
+   "id": "M66-09",
+   "title": "Hit rate has an HTTP door, so the named measure is readable by the operator",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/ROADMAP-guest-trust-governance.md Firewall specific to this site: reader-visible data is the guest's most valuable and most private artifact, and nothing may be published abou",
+   "id": "GS-2",
+   "title": "the guest fold moves reading progress and bookmarks with the guest",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 3,
+   "because": "a requirements row exists (+4); the source hedges (-1)",
    "default_on": false,
    "built": false
   },
@@ -2144,6 +2209,19 @@
    "milestone": "unassigned",
    "relevance": 1,
    "because": "in a vault note (+1)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/plans/100-ideas-scope.md The first milestone is deliberately smaller and shippable: serve local files to another person on the LAN or by a direct link, with no relay, no DHT, ",
+   "id": "M66-08",
+   "title": "P2P local file sharing over the LAN and by direct link, with a seeding network later",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M66",
+   "relevance": 0,
+   "because": "a requirements row exists (+4); needs a third party or an external client (-2); needs a model or heavy compute (-1); the source hedges (-1)",
    "default_on": false,
    "built": false
   },

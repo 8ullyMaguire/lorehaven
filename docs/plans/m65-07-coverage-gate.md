@@ -58,3 +58,43 @@ and contributes no rows. So silence is never mistaken for coverage.
 
 - M65-06 (frontend nav from the payload) and M65-08 (idea→module join) are separate tickets and
   separate turns. This one ends the "silence reads as coverage" failure mode.
+
+## Divergences found against the tree (measured 2026-11-02, after the gate was written)
+
+The gate was committed and **fires**, but the run that was reported as green is not what the
+tree holds: `python3 scripts/ideas_catalogue.py` exits 1 with **29 homeless titles**, and
+neither the `GS-` rows nor a 184-row catalogue exists here (`docs/ideas-catalogue.json` holds
+172). So the ticket is finished by classification, not by assuming the report was right.
+
+The 29 fall into four documents, and each was checked against the code before being judged:
+
+| document | titles | what they are | disposition |
+|---|---|---|---|
+| `docs/ROADMAP-guest-trust-governance.md` | 5 (`GS-1`…`GS-5`) | genuine adopted work nothing has registered | **register** as requirements rows `GS-1`…`GS-5`, planned |
+| `docs/plans/100-ideas-audit.md` | 11 | a **report on** the 100-idea list: six gaps (A–G), four of them `— CLOSED`, plus narration (`Suggested order`, `Closing note`, `Mutation gates`) | record, not an idea list → `GATE_IGNORE` |
+| `docs/plans/100-ideas-remaining.md` | 11 | a **progress log**: `DONE — item 11`, `Next, in this order`, `2a. Progress log` | record → `GATE_IGNORE` |
+| `docs/plans/100-ideas-scope.md` | 2 | a scoping decision (`P2P: LAN and direct sharing first`) and `One process note` | record → `GATE_IGNORE`; the P2P milestone **is** registered as `M66-08` |
+
+What the code says about the six gaps the audit ranked, each checked by its own test file:
+
+| gap | evidence in tree | status |
+|---|---|---|
+| B Blind Date | `crates/db/src/discovery.rs::blind_date_work`, `crates/app/tests/blind_date.rs` (13) | built |
+| F hidden classics | `crates/db/src/rec_strategy.rs` (`hidden_classics`), `crates/app/tests/hidden_classics.rs` (12) | built |
+| D series-aware | `crates/db/src/series_recs.rs`, `crates/app/tests/series_recs.rs` (17) | built |
+| E bookmark-to-hit | `crates/domain/src/earned_bookmark.rs`, `crates/domain/tests/earned_bookmark.rs` (13) | built |
+| A hit rate | `crates/db/src/hit_rate.rs`, `crates/db/tests/hit_rate.rs` (10) | built, **no route** — the audit's "nothing computes it" is now false |
+| C AI pre-read | `crates/app/src/ai/`, `crates/app/src/routes/preread.rs`, `crates/app/tests/preread_route.rs` (10) + `ai_openai.rs` (18) | built |
+| G payout formula | `crates/app/src/payout_recalc.rs` wired at `crates/app/src/worker.rs:626` | built |
+
+So all seven are built and none was in `requirements.csv` — the audit's own complaint was that
+the payout formula was "untracked", and that is true of all seven. They are registered as
+`implemented-fully-tested` rows with the evidence above, which is the same record the milestone
+pass would have written had they been ticketed.
+
+The rule the exception previously carried — "an idea list filed under `plans/` reads its item
+headings" — was the mistake: all three `100-ideas-*` files are *reports about* the 100-idea list,
+and the list itself is `docs/audit-100-reader-ideas-2026-10-04.md`, which the catalogue already
+reads through `audit_absent()`. Reading the reports as sweeps produced 24 status headings as
+"ideas". They are declared ignored with the rule that names where their ideas live — the same
+mechanism the two existing entries use — rather than being silently skipped.
