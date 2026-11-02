@@ -3343,3 +3343,57 @@ with a reason naming the work; after a comment through `POST /works/{id}/comment
 were measured against that work — **1** with `deleted_at IS NULL`, **0** without it. Probe rows
 removed (`comments` 0, `welcome_rota` 0); a probe account `m45-26-probe@example.invalid` holds a
 pseud on the host, as `m65-04-probe` does.
+
+## M45-27 (§18.11) — gift exchanges: the pairing, and the two things that were already built
+
+**In the tree, migration `0136`, 2026-11-02.** The milestone row asks for "exchanges, prompt memes,
+big bangs with matching engine — Yuletide-style gift exchanges; anonymous prompt/fill boards;
+social, not transactional." Measured before planning, two of those three clauses already existed:
+`requests` (`anonym_until`) + `claims` + `domain::events::request_is_anonymous` **is** the anonymous
+prompt/fill board, and `events` + `event_participation` is the place to hold one. The live instance
+has `events` 0, `event_participation` 0, `requests` 0, `claims` 0 — the whole §18 area is built and
+unused, so every claim here rests on tests and a hand-run, not on traffic.
+
+What was missing was the **pairing**, so that is the ticket: `exchange_terms` (one kind-tagged
+table, not three near-identical ones) and `exchange_assignments` (UNIQUE recipient, CHECK against
+self-pairing, `matched_by`), the pure matcher in `domain::exchanges`, the store, six doors, and
+§18.11 in the spec.
+
+**The matcher is maximum first and pretty second.** Kuhn's augmenting paths over the allowed edges
+(no self, no exclusion in either direction), then deterministic 2-opt swaps on an integer weight.
+When the maximum leaves anybody out the answer is `Impossible { unmatched }` and the store writes
+**nothing** — not even the pairs it could have made. Half an exchange promises gifts that cannot be
+kept, and the people left out only find out at reveal.
+
+**Measured, not assumed: the participants are pseuds.** `post_event` binds `pseud_id` into
+`events.created_by` and `join_event` binds it into `event_participation.account`, so a column named
+`account` holds pseud ids. The matcher pairs what is in the columns, and the term kind is
+`excludes_pseud` rather than a name that would describe the schema instead of the data. Filed as
+**M45-62**: either rename the columns (and add pseud treatment to §51's erasure list) or accept the
+name in writing — not this ticket's limit to spend.
+
+Three tests that were wrong before they were right, which is the point of the mutations:
+
+- **A weight mutation survived** because removing one of six weight terms still ranked the shared
+  fandom first. Re-cut as a constant weight, it fails immediately.
+- **A method label survived** because nothing asserted `matched_by`. There is now a test that a
+  two-person exchange is `forced` and a four-stranger exchange is `augmented`.
+- **The reveal idempotence mutation survived** because `now_rfc3339` is second-granular and the
+  re-stamped timestamp was byte-identical. The test now sleeps a second between the two calls —
+  the only thing that makes "the first timestamp" distinguishable from "a fresh one".
+
+Verification: 9 matcher tests, 11 store tests on **both** engines, 9 route tests, **18 mutations
+caught**. Clippy adds no warning (the 3 remaining are `work_ratings.rs`, M63-35).
+
+Live: `0.1.0+4af23611`, **133 migrations**, `/api/v1/modules` = `{modules: 99, enabled: 76, ideas:
+178}`, `exchanges` enabled with toggle `operator` and no nav entry. The whole flow, by hand, with
+two probe pseuds: `404` for an unknown event; both joins `new: true`; terms `200` (the guest's
+`Dragon  Age` stored as one normalised value); a **guest's** `match` `403`; the organiser's `match`
+`{matched: 2, method: "forced"}` with the two giver/recipient pairs; `mine` before reveal
+`{recipient: null, revealed: false, reason: "the pairing is secret…"}`; a second `match`
+`VALIDATION_FAILED` naming `2026-11-02T03:47:18Z`; `reveal` `{revealed: true, revealed_at:
+2026-11-02T03:47:18Z}`; `mine` after reveal naming the recipient; and the public summary
+`{participants: 2, matched: 2, revealed: true}` with no pairing in it. Probe rows deleted afterwards
+(`events` 0, `exchange_terms` 0, `exchange_assignments` 0, `event_participation` 0); the two probe
+accounts `m45-27-host@example.invalid` and `m45-27-guest@example.invalid` remain, as the earlier
+probes do.
