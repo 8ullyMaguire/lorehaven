@@ -3290,3 +3290,56 @@ Live: deployed from `82a42f3a`, 131 migrations, `/api/v1/modules` reports `enabl
 `overridden: false` and the table back to 0 rows; `catalogue` refused with "the switch for `catalogue`
 belongs to the operator, not to a reader". A probe account `m65-04-probe@example.invalid` was created
 on the host to hold the session and remains.
+
+## M45-26 (§58.6) — the welcome rota, and the rule the milestone row got wrong
+
+**In the tree and live, migration `0135`, 2026-11-02.** §58.2 reports drought and routes nothing.
+`welcome_rota` is the surface that acts: one reader, one work that has never been commented on,
+one comment inside 72 hours. Table in both engines, store in `crates/db/src/welcome.rs`, four doors
+in `crates/app/src/routes/welcome.rs`, the `welcome` module row, and §58.6 in the spec.
+
+**The premise had to be measured, because the milestone row's rule routes nothing.** The row says
+"route readers to strong-completion/few-comment works", which reads as *finished and endorsed*. On
+the live instance: `comments` **0**, `status = 'complete'` **397**, `likes > 0` **1,247**, and the
+overlap is **0**. A rule of `complete AND endorsed` would return nothing today and would keep
+returning nothing while the instance is starved of conversation — the exact condition it exists to
+end. The candidate rule is `(likes > 0 OR status = 'complete') AND work_id IS NOT NULL`.
+
+Five properties, each with a mutation that breaks it: a commented work is never offered; one open
+welcome per work, per author, per reader (a second claim returns the first as `already-open`); the
+due date is 72 hours and is **stored**, not recomputed; completion looks for a `comments` row by
+that pseud with `created_at >= assigned_at`; the report is operator-only and refuses in words.
+
+**Two first-cut tests were tautologies, and the mutations said so.** One compared the due date
+against `DUE_HOURS`, the constant that produces it — mutation `72 -> 48` passed it. The other put
+the work under a named author, where the author rule already blocks a re-offer, so the
+"one welcome per work" clause was masked — deleting the clause passed it too. Both were re-cut
+(literal `72`; an unknown author, the one key the author rule exempts) and both mutations now fail.
+
+**The PostgreSQL arm was red for two reasons that are the same reason.** Every parameterised
+statement was built with `?`, which sqlx leaves as `?` on PostgreSQL (trap 11); the failures read
+`syntax error at or near AND`, which names the clause after the placeholder and not the placeholder.
+And a comment fixture that wrote `$4::timestamptz` was stored by PostgreSQL as
+`2026-11-02 02:13:48+00`, so `created_at >= '2026-11-02T02:13:48Z'` compared a space against `T`
+and matched nothing — a refusal with no error. The real writer uses `now_rfc3339`, so live rows are
+canonical; that `comments.created_at` is not CHECK-constrained like `library_items` is filed as
+**M45-61**.
+
+**The bug the tests did not find, use did.** Proving closure on the live instance meant posting the
+comment through the real door, closing the welcome, then removing the comment — after which the
+work stayed excluded. `delete_comment` **soft-deletes**, and the candidate rule counted the row, so
+a work whose only comment was removed could never be welcomed again; the same reader could also
+close a welcome with a comment they had deleted. Both queries read `deleted_at IS NULL` now, with
+two tests and two mutations. Worth writing down plainly: 13 mutations did not catch this, because
+none of them modelled a deletion — the fixture never used the door that deletes.
+
+Live: `0.1.0+b05a4569`, **132 migrations**, `/api/v1/modules` = `{modules: 98, enabled: 75,
+ideas: 178}`, `welcome` enabled with toggle `per_user` and the sidebar entry
+`{"label": "Welcomes", "href": "/welcome", "slot": "reader_sidebar"}`. The doors, by hand: `401`
+anonymously; a registered probe claimed a real work (due `2026-11-05T03:01:15Z`); a second claim
+answered `already-open` with the same id; `complete` without a comment answered `completed: false`
+with a reason naming the work; after a comment through `POST /works/{id}/comments` it answered
+`true`; then the comment was deleted through `POST /comments/{id}/delete` and the two predicates
+were measured against that work — **1** with `deleted_at IS NULL`, **0** without it. Probe rows
+removed (`comments` 0, `welcome_rota` 0); a probe account `m45-26-probe@example.invalid` holds a
+pseud on the host, as `m65-04-probe` does.
