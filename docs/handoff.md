@@ -3474,3 +3474,52 @@ Live: **`0.1.0+10fbf4dd`, 134 migrations**, `/api/v1/modules` = `{modules: 100, 
 
 Probe rows deleted afterwards (`works` 0, `adoption_offers` 0, `closure_notes` 0); the two probe
 accounts remain, as the earlier probes do.
+
+## M45-29 (§60) — finisher signals: what was finished, and a cadence that admits it cannot be measured
+
+**In the tree, no migration, 2026-11-02.** Gaps review C5 asks for three things and states one rule:
+update cadence, completion history, and *"positive framing only; never label non-finishers"*, with
+pledges **off by default** because *"'update pls' pressure is considered rude."*
+
+**Measured before planning, and one premise decided the design:** `revisions` spans **2 distinct
+days** (`2026-09-20`, `2026-10-27`) across 127,474 rows. Every work's revision history is an import
+artefact, so a median gap would report the import's rhythm as the author's. That is why cadence
+**can answer "unmeasurable"** — `{"measurable": false, "reason": …}` with a 200 — instead of a
+number, the same shape §58.2 uses for a drought. Completion history, by contrast, has real supply:
+291 complete and 15,220 abandoned works (all owned by 3 pseuds).
+
+What shipped: `domain::finishers` (the counts, the median, the framing rule as `NEGATIVE_WORDS` and
+`is_positive`), `db::finishers`, two read doors, the `finishers` module **off by default**
+(`relevance: 3`, `Toggle::Operator`), and §60.
+
+**The framing rule is a property of the payload, not of a template.** `History` has `finished` and
+`concluded` and *no third field*; a top-level `abandoned` count is a label, and a label is what the
+sentence forbids. The route test asserts against the serialised JSON: none of `NEGATIVE_WORDS`, and
+no top-level key named `abandoned`/`unfinished`/`incomplete`/`failed`/`stalled`.
+
+**An author's cadence is the median of their works' medians**, not the median of pooled days —
+pooling measures the gap *between* two works as if it were an update interval. The first cut pooled
+them and its own test caught it (`samples: 3` where the answer should have been `1`); the fix added
+`cadence_across` with its own test.
+
+Two more things the tests taught:
+
+- **`#[serde(tag = "measurable")]` serialises `true`/`false` as `"true"`/`"false"` strings.** A client
+  would have to know that `"false"` is false. Replaced with a hand-written `Serialize` that emits one
+  object shape with a real boolean.
+- **The module-ships-off assertion needed the real mount.** The first version asserted a field
+  `error.module` that the error body does not have; the refusal names the module in its message.
+
+Verification: **8** domain tests, **8** store tests on SQLite **and** PostgreSQL, **6** route tests,
+**9 mutations caught**. The framing mutation that matters — adding an `abandoned` field to the
+response struct — was cut twice: my first attempt added a `let _ = …` line, which changes nothing
+and "passed"; re-cut as a real field, it is caught.
+
+**Deferred by name:** completion pledges. The review points at "existing reserve/capture escrow", and
+`credit_holds` is the nearest thing — but it is keyed by `job_id` and `capture_hold` posts **no**
+ledger entry, so a pledge built on it would look like it held credits and would not. A pledge needs a
+balance check, a ledger leg each way, and a sink for a burned promise: the economy's work, not this
+row's. Also deferred: the Finisher *badge* — a badge is a threshold and the review names no number,
+so the surface reports counts.
+
+Live: deployed and hand-run in the same turn; see below.

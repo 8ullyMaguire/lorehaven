@@ -80,6 +80,7 @@ pub mod subscriptions;
 pub mod supply;
 // M45-26 (§58.6): the welcome rota — one work, one reader, seventy-two hours.
 pub mod welcome;
+pub mod finishers;
 pub mod wip_adoption;
 pub mod tasting;
 pub mod taxonomy;

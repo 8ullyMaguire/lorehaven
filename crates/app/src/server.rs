@@ -429,6 +429,12 @@ pub fn build_router(state: AppState) -> Router {
             routes::wip_adoption::router(),
             RouteClass::Write,
         ))
+        .merge(module_mount(
+            &state,
+            "finishers",
+            routes::finishers::router(),
+            RouteClass::Default,
+        ))
         // The recommendation engines over a filtered catalogue (M63-01). The
         // search class rather than the default one: it ranks a pool of up to 500
         // rows with every enabled strategy, which is the heaviest read in the

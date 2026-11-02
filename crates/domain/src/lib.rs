@@ -84,6 +84,7 @@ pub mod vote_decay;
 pub mod vote_decay_sql;
 pub mod webhook;
 pub mod window;
+pub mod finishers;
 pub mod work_discussion;
 pub mod wip_adoption;
 
