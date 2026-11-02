@@ -3451,4 +3451,26 @@ tree awards per-chapter credit — `revisions` is populated by an import and has
 paying a note against a ledger that pays no chapters would be a number with nothing to be equal to.
 The spec's acceptance bullet is marked **unmet**, not ticked.
 
-Live: deployed and hand-run in the same turn; see the paragraph below.
+Live: **`0.1.0+10fbf4dd`, 134 migrations**, `/api/v1/modules` = `{modules: 100, enabled: 77, ideas:
+177}`, `wip_adoption` enabled (`operator`, no nav). Hand-run with two probe pseuds and one seeded
+`abandoned` work:
+
+- anonymous `POST …/adoption-offer` → **401**; the author's offer → `status: open`; a second offer →
+  *"this work already has an open offer; one question, one answer"*; listing count **1**;
+- a fresh account's `adopt` → **422** *"this instance requires 2, and this account is at 1"* — the
+  bar and the level, in the answer;
+- trust raised to 2 (the `trust_levels` row the bar reads, restored afterwards) → `adopted`, with
+  `adopted_by_pseud_id` equal to the adopter, and **`works.owner_pseud_id` byte-identical before and
+  after**;
+- the open list back to **0**, a second adopt → `404 NOT_FOUND`;
+- closure note: `404` before, revision **1**, revision **2**, latest body `"it ends there"` — an edit
+  is a new revision, not a rewrite;
+- contributors on the new work: `available: true`, count 0. On a real imported work
+  (`78eb8d57…`): `available: true`, one person, **784 revisions**, `first_revision_at
+  2026-10-27T15:05:58.248478Z`. Note the **six-digit fraction**: the house canonical shape is
+  `YYYY-MM-DDTHH:MM:SSZ` (M63-31), and this imported row is not it. Ordering is still by earliest
+  contribution, but two contributors inside the same second can order by the textual fraction rather
+  than by arrival; the pseud-id tie-break makes it deterministic, not fair. Recorded, not fixed here.
+
+Probe rows deleted afterwards (`works` 0, `adoption_offers` 0, `closure_notes` 0); the two probe
+accounts remain, as the earlier probes do.
