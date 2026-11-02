@@ -1,6 +1,6 @@
 {
  "generated_by": "scripts/ideas_catalogue.py",
- "count": 178,
+ "count": 177,
  "ideas": [
   {
    "why_summary": "",
@@ -62,19 +62,6 @@
     "docs/requirements.csv"
    ],
    "milestone": "M66",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "docs/spec.md 56; docs/plans/m45-28-wip-adoption.md Specced and planned 2026-10-04. Prerequisite already in schema: works.completion carries abandoned/hiatus (0003_works.sql:48), ch",
-   "id": "M45-28",
-   "title": "WIP adoption and closure notes with lineage",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
    "relevance": 4,
    "because": "a requirements row exists (+4)",
    "default_on": false,

@@ -10564,8 +10564,23 @@ A work marked `abandoned` (§8.2) may be offered for adoption. An adopting autho
   revisions, never as an owner.
 - The original author may withdraw an adoption offer at any time, with no notice period.
 - Adoption requires the adopting pseud to hold the trust level that publishing requires
-  (§19.4). Adoption is a publishing act and is gated identically.
-- A work already `complete` is not adoptable. There is nothing to continue.
+  (§19.4). Adoption is a publishing act and is gated identically. **This tree has no publish
+  route and no named level to borrow** — `trust_levels` is `(account, level, computed_at,
+  basis)` with no seed, and `Tier` is a *reading* tier — so the bar is configured as
+  `[adoption] min_trust_level` (default `2`, one above the level a freshly registered account
+  starts at). The comparison lives in `domain::wip_adoption::may_adopt`, the refusal reports
+  **both** the bar and the caller's level, and an operator who moves the bar sees the change in
+  the answer rather than in a silence.
+- Only `abandoned` is offerable. `in_progress` is a work still being written, `hiatus` is an
+  author who means to come back, and `complete` has nothing to continue; all three answer
+  `NOT_ABANDONED` with the field named. (Measured: the first test cut covered only `complete`,
+  and the mutation that let `in_progress` through survived it.)
+- One **open** offer per work, and a second offer may follow a withdrawn one. The mechanism is
+  the partial unique index `(work_id) WHERE status = 'open'`, not a check in the handler: a
+  plain unique index would forbid the author changing their mind twice.
+- An offer belongs to the work's owner. A reader who is not the owner gets the same `404` an
+  absent work gets, because confirming the existence of somebody else's unlisted WIP is the
+  thing a refusal must not do.
 
 ### 56.2 Closure notes are first-class and credited
 
@@ -10575,7 +10590,10 @@ may publish a **closure note**: a short statement of what happened to the story 
 - The note is **versioned with the work**, not with the author, and is revision-restorable
   like any other revision (§8.5).
 - The note is credited: its author pseudonym is shown, and a closure note earns the same
-  credit as a chapter. It is not "metadata".
+  credit as a chapter. It is not "metadata". **Deferred in this build, by name:** nothing in
+  this tree awards per-chapter credit either, so "the same credit as a chapter" would be a
+  number with nothing to be equal to. The note is stored with its author (`M45-28`), the
+  economy is the missing half, and the acceptance bullet below is unmet until it lands.
 - **A closure note is optional and never a precondition.** A work may conclude with no
   note. This is stated because the obvious failure is a publish flow that refuses to
   conclude a work until the author has written a note, which turns a courtesy into a tax.
@@ -10585,8 +10603,13 @@ may publish a **closure note**: a short statement of what happened to the story 
 
 When a work changes hands, who wrote what is a question the archive must answer exactly.
 
-- Every revision records its `author_pseud_id`. Lineage is *derived* from that column — it
-  is never hand-written, and there is no "lineage" field an author can fill in.
+- Every revision records `created_by_pseud_id`, and lineage is *derived* from it — never
+  hand-written, and there is no "lineage" field an author can fill in. The tables are `revisions`
+  joined to `units` (0122 renamed `chapter_revisions` and `chapters`; §5's vocabulary is the
+  current one, and this section's wording about "chapters" is about the act, not the table).
+- When those tables are absent from an instance's schema, the door answers
+  `{contributors: [], available: false, reason}` rather than a `500` about a missing relation.
+  A schema that cannot be read is a fact about the instance, and a reader can render it.
 - A work's reader-facing contributor list is ordered by **first contribution**, so an
   adopting author does not leapfrog the person who wrote chapter one.
 - **Lineage never affects ranking, credits, awards or trust.** §8.8 says derived activity
@@ -10612,7 +10635,13 @@ When a work changes hands, who wrote what is a question the archive must answer 
 - Adoption is refused below the publishing trust level, and the refusal names the bar.
 - A work with `completion = 'complete'` cannot be adopted.
 - A work may conclude with **no** closure note; the conclude path succeeds without one.
-- A closure note's author is shown, and it earns credit equal to a chapter.
+- A closure note's author is shown, and it earns credit equal to a chapter. **(Unmet in this
+  build: the note is credited to its author, the economy that would pay a chapter does not exist
+  yet — see 56.2. Recorded as unmet rather than ticked.)**
+- An offer on a work that is `in_progress` or `hiatus` is refused, naming `NOT_ABANDONED`.
+- A second offer after a withdrawal succeeds, and two open offers on one work cannot coexist.
+- The contributor door answers `available: false` with a reason on a schema without `revisions`,
+  and ordered-by-first-contribution on one with them.
 - Editing a closure note creates a new revision; restoring it creates another.
 - The contributor list is ordered by first contribution, so an adopter is not first for a
   work they joined after chapter one.

@@ -423,6 +423,12 @@ pub fn build_router(state: AppState) -> Router {
         // comment in 72 hours. Write class — taking one creates a row, and closing one
         // reads the comment that evidences it.
         .merge(module_mount(&state, "welcome", routes::welcome::router(), RouteClass::Write))
+        .merge(module_mount(
+            &state,
+            "wip_adoption",
+            routes::wip_adoption::router(),
+            RouteClass::Write,
+        ))
         // The recommendation engines over a filtered catalogue (M63-01). The
         // search class rather than the default one: it ranks a pool of up to 500
         // rows with every enabled strategy, which is the heaviest read in the

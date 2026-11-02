@@ -152,6 +152,8 @@ pub struct Config {
     pub exports: ExportsConfig,
     /// Work permission statements and fork guards (spec §40).
     pub works: WorksConfig,
+    /// WIP adoption bar (spec §56.1, M45-28).
+    pub adoption: AdoptionConfig,
     /// Longevity signals: half-life and interaction warmth (spec §41).
     pub community: CommunityConfig,
     /// Taste gravity settings (spec §0.4, §16.17).
@@ -349,6 +351,29 @@ impl Default for WorksConfig {
             max_fork_depth: 3,
             gated_metadata_public: false,
         }
+    }
+}
+
+/// WIP adoption settings (spec §56.1, M45-28).
+///
+/// §56.1 gates adoption at "the trust level that publishing requires". No such number exists in
+/// this tree to borrow: there is no publish route, `trust_levels` is `(account, level,
+/// computed_at, basis)` with no seed and no named capabilities, and `Tier` is a *reading* tier.
+/// So the bar is configuration with a stated default rather than a constant in the comparison —
+/// an operator can move it without a rebuild, and `docs/spec.md` §56.1 names this key.
+///
+/// The default of 2 is the level at which an account has a standing pseud and some history; the
+/// refusal reports both numbers, so setting it too high is visible in the answer rather than
+/// silent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptionConfig {
+    /// The minimum trust level required to adopt an abandoned work.
+    pub min_trust_level: i64,
+}
+
+impl Default for AdoptionConfig {
+    fn default() -> Self {
+        Self { min_trust_level: 2 }
     }
 }
 
@@ -2693,6 +2718,15 @@ impl Config {
                 .unwrap_or(false),
         };
 
+        // --- adoption (spec §56.1) ----------------------------------------
+        let adoption = AdoptionConfig {
+            min_trust_level: file
+                .adoption
+                .as_ref()
+                .and_then(|a| a.min_trust_level)
+                .unwrap_or_else(|| AdoptionConfig::default().min_trust_level),
+        };
+
         let config = Self {
             environment,
             site,
@@ -2906,6 +2940,7 @@ impl Config {
             exports,
             directory,
             works,
+            adoption,
             community: CommunityConfig::default(),
             bounties: {
                 let b = file.bounties.clone().unwrap_or_default();
@@ -3340,6 +3375,7 @@ impl Config {
             exports: ExportsConfig::default(),
             directory: DirectoryConfig::default(),
             works: WorksConfig::default(),
+            adoption: AdoptionConfig::default(),
             community: CommunityConfig::default(),
             bounties: BountiesConfig::default(),
             vanguard: VanguardConfig::default(),
@@ -3884,6 +3920,7 @@ struct FileConfig {
     exports: Option<ExportsSection>,
     directory: Option<DirectorySection>,
     works: Option<WorksSection>,
+    adoption: Option<AdoptionSection>,
     revisions: Option<RevisionsSection>,
     jobs: Option<JobsSection>,
     /// Device delivery settings (spec §13.4 / M7-03).
@@ -4431,6 +4468,14 @@ struct WorksSection {
     max_fork_depth: Option<u32>,
     /// Publish gated works' records while withholding their text (default false).
     gated_metadata_public: Option<bool>,
+}
+
+/// The `[adoption]` table (spec §56.1, M45-28).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdoptionSection {
+    /// The minimum trust level required to adopt an abandoned work (default 2).
+    min_trust_level: Option<i64>,
 }
 
 /// The `[tts]` table: which engine narrates, and how an operator configured it

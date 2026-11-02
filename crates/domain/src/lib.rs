@@ -85,6 +85,7 @@ pub mod vote_decay_sql;
 pub mod webhook;
 pub mod window;
 pub mod work_discussion;
+pub mod wip_adoption;
 
 pub use error::{AppError, ErrorCode, Result};
 pub use ids::*;

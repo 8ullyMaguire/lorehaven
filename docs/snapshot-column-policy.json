@@ -1361,6 +1361,36 @@
       "treatment": "rekey_pseud",
       "why": "A pseud id, rekeyed with the same set as the giver.",
       "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "adoption_offers.offered_by_pseud_id": {
+      "treatment": "rekey_pseud",
+      "why": "A pseudonym, not an account: the offer is made by the pseud that owns the work and is withdrawn by that pseud. Rekeyed with the pseud set (11.16.3) so a snapshot keeps the record of the offer without the person.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "adoption_offers.author_pseud_id": {
+      "treatment": "rekey_pseud",
+      "why": "Kept as evidence of who had the authority to withdraw, because an offer is a record of a past act rather than a live permission. A pseudonym, rekeyed with the pseud set (11.16.3).",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "adoption_offers.adopted_by_pseud_id": {
+      "treatment": "rekey_pseud",
+      "why": "A pseudonym. Naming who adopted an abandoned WIP is the point of the record inside the instance, and outside it the pseud is rekeyed like every other pseud reference.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "closure_notes.author_pseud_id": {
+      "treatment": "rekey_pseud",
+      "why": "\u00a756.2 credits the note to a pseud, so the credit is the pseud and the snapshot keeps the credit while rekeying the pseud (11.16.3).",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "closure_notes.body": {
+      "treatment": "keep",
+      "why": "The note's text is a public statement about the work \u2014 the same class as the work's summary, not a private message. Kept verbatim, because a reworded closure note is a different statement than the one the author made.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
+    },
+    "adoption_offers.status": {
+      "treatment": "keep",
+      "why": "A three-value vocabulary, not identity-bearing: kept so a snapshot can tell an open offer from an adopted one.",
+      "reviewed_by": "alvaro, 2026-11-02, against spec 11.16"
     }
   }
 }

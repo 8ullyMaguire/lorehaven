@@ -3397,3 +3397,58 @@ two probe pseuds: `404` for an unknown event; both joins `new: true`; terms `200
 (`events` 0, `exchange_terms` 0, `exchange_assignments` 0, `event_participation` 0); the two probe
 accounts `m45-27-host@example.invalid` and `m45-27-guest@example.invalid` remain, as the earlier
 probes do.
+
+## M45-28 (§56) — WIP adoption: the offer, the note, and the lineage that 0122 renamed
+
+**In the tree, migration `0137`, 2026-11-02.** The milestone row said "Specced and planned
+2026-10-04" and the draft plan had gone stale in two ways that measurement caught before any code
+was written:
+
+1. It proposed migration **`0116`**, which is now `0116_account_darkhold_columns.sql`.
+2. Its lineage source was `chapter_revisions`, and **`0122` renamed that to `revisions`**
+   (`chapters` → `units`, `chapter_id` → `unit_id`; §5's vocabulary). My first probe asked for the
+   old names, found nothing, and wrote down "lineage cannot be read live today (M63-33)". That was
+   **wrong**: the live instance has **127,474** revisions and **127,474** units, `created_by_pseud_id`
+   non-null in every row, three distinct authors. The plan keeps the wrong claim with its correction
+   beside it, dated, because a plan that quietly loses its wrong premise cannot be trusted about the
+   rest.
+
+**Supply is real.** Live: 58,042 works — `in_progress` 42,531, **`abandoned` 15,220**, `complete` 291.
+An adoption listing has 15,220 candidates on day one.
+
+What shipped: `0137` (`adoption_offers`, `closure_notes`), `domain::wip_adoption` (the three
+prohibitions as functions), the store, seven doors, and `[adoption] min_trust_level`.
+
+**The prohibitions are the feature.** §56.1 says ownership never moves; the way that is kept is that
+no statement in `crates/db/src/wip_adoption.rs` mentions `owner_pseud_id`, and the test reads the
+column **before and after** an adoption rather than trusting the comment. §56.2 says a closure note
+is optional; nothing makes one a precondition, and `next_revision(None)` is 1. §56.3 says lineage is
+derived; it is a join, and the ordering rule is a function (`order_contributors`) with its own test,
+so a later reader cannot "fix" it to most-recent-first by editing an `ORDER BY`.
+
+**Three facts the tests taught, none of which the plan predicted:**
+
+- **A freshly registered account is trust level 1, not 2.** The default bar of 2 therefore refuses
+  a brand-new account, and the refusal says so: *"requires 2, and this account is at 1"*. There is a
+  test for each side: one moves the bar to 1 to exercise adoption, one asserts the shipped bar's
+  refusal names both numbers.
+- **One open offer per work needs a *partial* index.** `UNIQUE (work_id) WHERE status = 'open'`
+  lets the author withdraw and think again; a plain unique index would forbid the second offer, which
+  contradicts "no notice period". The re-offer after withdrawal is its own test.
+- **No FK is possible here, and the reason is a type.** `works.id`/`pseuds.id` are UUID on
+  PostgreSQL while these ids are TEXT (the `welcome_rota` convention), so `TEXT REFERENCES` fails
+  with "foreign key constraint cannot be implemented". The comment in `0137` says so; the pseud
+  columns would get no key anyway (§51 rekeys rather than deletes).
+
+Verification: **13** store tests on SQLite **and** PostgreSQL, **9** route tests, **5** domain
+tests, **10 mutations caught**. One mutation **survived its first cut** — nothing covered
+`in_progress`, so "only `complete` is refused" passed — and it produced
+`only_abandoned_is_offerable_in_progress_and_hiatus_are_not`, which now covers `in_progress`,
+`hiatus` and `complete` against a positive control.
+
+**Deferred by name:** "a closure note earns the same credit as a chapter" (§56.2). Nothing in this
+tree awards per-chapter credit — `revisions` is populated by an import and has no credit path — so
+paying a note against a ledger that pays no chapters would be a number with nothing to be equal to.
+The spec's acceptance bullet is marked **unmet**, not ticked.
+
+Live: deployed and hand-run in the same turn; see the paragraph below.
