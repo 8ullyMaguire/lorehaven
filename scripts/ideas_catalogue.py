@@ -296,11 +296,170 @@ def score(idea: dict, spec: str, committed: bool, sources: int) -> tuple[int, li
     return max(0, min(10, value)), why
 
 
+# The coverage gate (§59.7's "must not silently lose items", made structural).
+#
+# The generator reads a NAMED list of sources. A document the list forgot
+# contributes nothing, and nothing reports the omission — silence reads as "no
+# ideas there", which is exactly how a roadmap stops being a roadmap. The gate
+# therefore enumerates every candidate document the repository itself offers
+# (tracked markdown whose name says brainstorm/ideas/roadmap, plus everything
+# under docs/ideas/), extracts its idea titles with the SAME rules the catalogue
+# uses, and requires each title to have a home: a row in the idea catalogue, a
+# row the catalogue retired because it was built, or a module in the registry.
+#
+# The gate reads content, not mtimes: every candidate on this host is older than
+# the JSON, so an mtime gate would pass three unread documents silently.
+
+# Documents the gate must not read, each with the rule that makes its ideas
+# already counted. The rule names WHERE the ideas live, never "trust me".
+GATE_IGNORE = {
+    # A summary OF the spec: every heading restates a section the spec already
+    # declares, and the spec is not an idea source (its amendments are).
+    "docs/spec-summary-brainstorm.md": "titles restate spec sections; spec amendments are the idea source",
+    # An eight-line pointer: the network plan lives in ascend's tree, and this
+    # file says so in its first sentence. Its title ("The network plan lives in
+    # Ascend") is a statement about where work is scheduled, not a proposal.
+    # The ideas it points at are scheduled in that other repo's plan file.
+    "docs/ideas/NETWORK-PLAN.md": "a pointer to ~/code-local/rust/ascend/docs/PLAN-network.md, not an idea document",
+}
+
+
+def candidate_documents() -> list[Path]:
+    """Every tracked markdown document the repository offers as an idea source."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "docs/*.md", "docs/**/*.md"],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    out: list[Path] = []
+    for name in tracked:
+        path = REPO / name
+        if not path.is_file():
+            continue
+        stem = path.stem.lower()
+        in_ideas_dir = path.parent.name == "ideas"
+        name_says = any(w in stem for w in ("brainstorm", "ideas", "roadmap"))
+        if in_ideas_dir or name_says:
+            if path.name == "README.md":
+                continue  # a directory index, not a brainstorm
+            out.append(path)
+    return sorted(set(out))
+
+
+def roadmap_items(path: Path) -> list[str]:
+    """A roadmap's adopted items, as idea titles.
+
+    The guest-trust roadmap names its items "GS-1 … GS-5" inside its "What this
+    site adopts" section. A bare "GS-3" is a label, so each item is expanded
+    with the roadmap's own words for it — the section that defines it. The
+    expansion is written here rather than scraped, because scraping prose for
+    "the item GS-3 is about" is how a catalogue invents ideas nobody proposed.
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    out: list[str] = []
+    for m in re.finditer(r"\bGS-([1-5])\b", text):
+        n = m.group(1)
+        titles = {
+            "1": "guest access with consent",
+            "2": "the guest fold: reading progress and bookmarks move with the guest",
+            "3": "guest identity as a first-class pseudonym",
+            "4": "elastic trust from karma, not a parallel score",
+            "5": "a jury drawn from the eligible pool",
+        }
+        t = titles.get(n)
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+def document_titles(path: Path) -> list[str] | None:
+    """A document's idea titles, by the kind of document it is — or None when the
+    gate must not read it at all.
+
+    The rules mirror the catalogue's own extraction, one per kind:
+
+    - a **sweep** (a brainstorm under docs/ideas/ or the vault) enumerates its
+      `###` headings — the unit of an idea in a sweep is a heading;
+    - a **named document** (an amendment, a design note, a gaps file, a roadmap)
+      IS one idea: its title. Reading its internal headings would read its
+      sections, which is the 375-row mistake;
+    - **narration** (a handoff, a plan that records what happened, a session
+      note) contributes nothing BY RULE — its headings are narration, and a gate
+      that demanded rows from it would fail forever on correct behaviour. The
+      exception is a plan whose name says it is an idea list (`100-ideas-*`):
+      those are sweeps filed under the wrong directory, and the gate reads their
+      headings.
+    """
+    name = path.name.lower()
+    parent = path.parent.name
+    # Narration, by directory kind. A handoff records what happened; a plan
+    # records what to build — except the plans that ARE idea lists.
+    if parent == "handoffs":
+        return None
+    if parent == "plans" and not any(w in name for w in ("ideas", "brainstorm")):
+        return None
+    if parent == "plans" and any(w in name for w in ("ideas", "brainstorm")):
+        # An idea list filed under plans/: read its item headings, like a sweep.
+        return headings(path, levels=(2, 3))
+    if parent == "adr":
+        return None  # a decision record argues ONE decision; it is not a backlog
+    # Sweeps read their headings.
+    if "brainstorm" in name or (parent == "ideas" and "sweep" in name):
+        return headings(path, levels=(3,))
+    # An audit's tables are its only idea-bearing part.
+    if "audit" in name:
+        return audit_absent() if name.startswith("audit-") else []
+    # A roadmap's headings are sections; its ADOPTED items are the ideas. The
+    # guest-trust roadmap names them "GS-1 … GS-5" in its adopts section, and
+    # each is work nobody has registered. A roadmap that adopted nothing would
+    # contribute its title alone, which is the named-document rule.
+    if "roadmap" in name or parent == "roadmaps":
+        titles = roadmap_items(path)
+        return titles or [path.stem.replace("-", " ").title()]
+    # Everything else is a named document: one idea, its title.
+    return [path.stem.replace("-", " ").title()]
+
+
+def coverage_gate(catalogue_slugs: set[str], retired_slugs: set[str],
+                  registry_titles: set[str]) -> list[str]:
+    """Titles with no home anywhere. Empty means the catalogue reads everything."""
+    homeless: list[str] = []
+    for path in candidate_documents():
+        rel = str(path.relative_to(REPO))
+        if rel in GATE_IGNORE:
+            continue
+        titles = document_titles(path)
+        if titles is None:
+            continue  # narration by kind; the gate does not demand rows from it
+        for title in titles:
+            if not words(title, 2):
+                continue  # a label, not a proposal; the catalogue's own rule
+            key = slug(title)
+            if not key:
+                continue
+            if key in catalogue_slugs or key in retired_slugs:
+                continue
+            if title.lower() in registry_titles:
+                continue
+            homeless.append(f"{rel}: {title}")
+    return homeless
+
+
 def main() -> int:
     spec = spec_text()
     planned = requirement_rows()
     planned_titles = {t.lower() for _, t, _ in planned}
     planned_by_id = {i: m for i, _, m in planned}
+    csv_rows = list(csv.DictReader((REPO / "docs/requirements.csv").open(encoding="utf-8")))
+    rows_by_id = {r["id"]: r for r in csv_rows}
+    planned_ids = {r["id"] for r in csv_rows if r["status"].strip() == "planned"}
+    # Every requirement row, any status, keyed by its title. A row that left
+    # `planned` was built — and an idea with the same title that another source
+    # (a brainstorm, a design note) also mentions must not stay in the idea
+    # catalogue as a planned row beside the module it became. Matching on the
+    # title, because only the requirements pass carries the id and a built row
+    # never reaches it.
+    requirement_titles = {r["requirement"].split(":")[0].strip().lower(): r["status"].strip()
+                          for r in csv_rows}
 
     sources: dict[str, set[str]] = {}
     ideas: list[dict] = []
@@ -336,16 +495,42 @@ def main() -> int:
             ideas.append(entry)
         if source not in entry["sources"]:
             entry["sources"].append(source)
-        if context:
-            entry["context"] = (entry["context"] + " " + context)[:400]
+        if context and len(context) > len(entry["context"]):
+            # Keep the longer context rather than concatenating: two documents
+            # describing one idea say the same thing in different words, and
+            # gluing them together produced summaries like "per-user module
+            # overrides: …narrowing in the gate per-user module overrides: …".
+            entry["context"] = context
+        if row_id and not entry["row_id"]:
+            # The merge must carry the row id onto a pre-existing entry: the
+            # retirement check below matches on row_id, and an idea first seen
+            # from a brainstorm keeps a stale `planned` row if its requirement row
+            # never reaches it. M65-04 retired only because the requirements pass
+            # created the entry first; the order of the sources decided it, which
+            # is not a rule.
+            entry["row_id"] = row_id
         if milestone and not entry["milestone"]:
             entry["milestone"] = milestone
 
     # 1. requirements.csv — the committed queue. Keep the row's id: re-slugging the
     #    sentence gave `idea.dh-watch-saved-query-exec-cmd-notify-ntfy-de`, which is
     #    unreadable and hides that this is M63-12 rather than a new idea.
+    #
+    # The context is the row's own evidence and notes fields — NOT the requirement
+    # text, which `add` concatenates onto the title it already received. The first
+    # version passed the requirement as context and every summary came out as the
+    # same sentence twice, truncated: "per-user module overrides: module_user_state
+    # table, PATCH /api/v1/modules/{id}, and the per-request narrowing in the gate
+    # per-user module overrides: ...". A generated catalogue whose rows are
+    # unreadable is one nobody reads.
     for rid, requirement, milestone in planned:
-        add(requirement.split(":")[0], "docs/requirements.csv", requirement, milestone, row_id=rid)
+        row = rows_by_id.get(rid, {})
+        context = " ".join(
+            part.strip()
+            for part in (row.get("evidence", ""), row.get("notes", ""))
+            if part.strip()
+        )
+        add(requirement.split(":")[0], "docs/requirements.csv", context, milestone, row_id=rid)
 
     # 2. Brainstorms enumerate their ideas as `### Something` headings.
     for path in sorted((REPO / "docs/ideas").glob("*.md")):
@@ -393,8 +578,16 @@ def main() -> int:
     host_ids = {h["id"] for h in host}
     host_titles = {h["name"].lower(): h["id"] for h in host}
 
+    # The registry is the authority on what is built: a requirements row whose
+    # milestone closed (M65-04 on this run) is a module now, and a planned row
+    # beside the module it became is the second backlog §59.8 was written to end.
+    # Such a row is dropped from the idea catalogue, and the drop is printed — a
+    # row that leaves the queue silently is the same loss as one never read.
+    built = {h["id"]: h for h in host}
+
     rows = []
     below = []
+    retired = []
     for idea in ideas:
         committed = idea["title"].lower() in planned_titles
         value, why = score(idea, spec, committed, len(idea["sources"]))
@@ -402,6 +595,21 @@ def main() -> int:
         if built_id:
             idea["built"] = True
             value, why = score(idea, spec, committed, len(idea["sources"]))
+        # A requirements row that has been built is retired from the idea
+        # catalogue: it is a module row now, and §59.8's "no second backlog" is
+        # about exactly this. Two matches: the row id (a requirement keeps its
+        # own id into the registry), and the title, because a built row never
+        # reaches the ideas list through the requirements pass — `planned` holds
+        # only `status=planned` rows — and the same idea can arrive from a
+        # brainstorm first. M65-04 retired on the title match: "per-user module
+        # overrides" is `implemented-verified-e2e`, and the idea catalogue
+        # listing it as planned was a second backlog in miniature.
+        row_status = requirement_titles.get(idea["title"].strip().lower())
+        if (idea.get("row_id") and idea["row_id"] not in planned_ids) or (
+            row_status and row_status.startswith("implemented")
+        ):
+            retired.append((idea.get("row_id") or idea["title"][:40], idea["title"]))
+            continue
         # A built surface is judged by the toggle a human gave it, not by the
         # title heuristics: the heuristics are for ideas nobody has built.
         if built_id and built_id in OPT_IN and value >= 6:
@@ -412,7 +620,7 @@ def main() -> int:
             below.append((built_id, value, why))
         rows.append(
             {
-                "why_summary": escape(idea["context"])[:180],
+                "why_summary": idea["context"][:180],
                 # A requirement already has an id, and re-slugging its sentence
                 # gave `idea.dh-watch-saved-query-exec-cmd-notify-ntfy-de`:
                 # unreadable, and it hides that this is M63-12.
@@ -429,6 +637,26 @@ def main() -> int:
 
     rows.sort(key=lambda r: (-r["relevance"], r["id"]))
     rows = [r for r in rows if not r["built"]]
+
+    # Coverage gate, before anything is written: a red gate produces no
+    # artefacts, so a stale catalogue can never look current. The gate checks
+    # that every idea title a candidate document offers has a home — a row here,
+    # a row retired because it was built, or a module in the registry.
+    cat_slugs = {slug(r["title"]) for r in rows}
+    ret_slugs = {slug(t) for _, t in retired}
+    reg_titles = {h["name"].lower() for h in host}
+    homeless = coverage_gate(cat_slugs, ret_slugs, reg_titles)
+    if homeless:
+        print(f"coverage gate: {len(homeless)} idea title(s) with no home:", file=sys.stderr)
+        for line in homeless[:40]:
+            print(f"  - {line}", file=sys.stderr)
+        if len(homeless) > 40:
+            print(f"  ... and {len(homeless) - 40} more", file=sys.stderr)
+        print("either the generator does not read that document (add its rule to "
+              "candidate_documents/document_titles), or the document names an idea "
+              "nobody has registered (add it to docs/ideas/ or requirements.csv). "
+              "Silence here is how a roadmap stops being one.", file=sys.stderr)
+        return 1
     JSON_OUT.write_text(json.dumps(
         {"generated_by": "scripts/ideas_catalogue.py", "count": len(rows), "ideas": rows},
         indent=1,
@@ -436,6 +664,10 @@ def main() -> int:
     write_rust(rows)
     print(f"wrote {JSON_OUT.relative_to(REPO)}: {len(rows)} ideas")
     print(f"  ideas:         {len(rows)}")
+    if retired:
+        # The queue shrank, and a shrinking queue said nothing is how a milestone
+        # closure quietly looks like an idea being abandoned.
+        print(f"  retired (built): {len(retired)} — " + ", ".join(rid for rid, _ in retired))
     on = [h["id"] for h in host if h["default_on"]]
     off = [h["id"] for h in host if not h["default_on"]]
     print(f"  registry rows: {len(host)} — {len(on)} on, {len(off)} off")

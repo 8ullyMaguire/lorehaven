@@ -1,6 +1,6 @@
 {
  "generated_by": "scripts/ideas_catalogue.py",
- "count": 173,
+ "count": 172,
  "ideas": [
   {
    "why_summary": "",
@@ -16,7 +16,7 @@
    "built": false
   },
   {
-   "why_summary": "Feedback-drought intervention: welcome rota guarantees first-work comment in 72h Feedback-drought intervention: welcome rota guarantees first-work comment in 72h",
+   "why_summary": "-- Gaps review C2. Route readers to strong-completion/few-comment works; small comment bonus.",
    "id": "M45-26",
    "title": "Feedback-drought intervention",
    "sources": [
@@ -29,7 +29,7 @@
    "built": false
   },
   {
-   "why_summary": "Exchanges, prompt memes, big bangs with matching engine Exchanges, prompt memes, big bangs with matching engine",
+   "why_summary": "-- Gaps review C3. Yuletide-style gift exchanges; anonymous prompt/fill boards; social, not transactional.",
    "id": "M45-27",
    "title": "Exchanges, prompt memes, big bangs with matching engine",
    "sources": [
@@ -42,7 +42,7 @@
    "built": false
   },
   {
-   "why_summary": "WIP adoption and closure notes with lineage WIP adoption and closure notes with lineage",
+   "why_summary": "docs/spec.md 56; docs/plans/m45-28-wip-adoption.md Specced and planned 2026-10-04. Prerequisite already in schema: works.completion carries abandoned/hiatus (0003_works.sql:48), ch",
    "id": "M45-28",
    "title": "WIP adoption and closure notes with lineage",
    "sources": [
@@ -55,7 +55,7 @@
    "built": false
   },
   {
-   "why_summary": "Finisher signals: update cadence and completion history, positive framing only Finisher signals: update cadence and completion history, positive framing only",
+   "why_summary": "-- Gaps review C5. Finisher badge; optional completion pledges via escrow; off by default.",
    "id": "M45-29",
    "title": "Finisher signals",
    "sources": [
@@ -68,7 +68,7 @@
    "built": false
   },
   {
-   "why_summary": "Cross-language supply: taste-score foreign works, fund translation bounties Cross-language supply: taste-score foreign works, fund translation bounties",
+   "why_summary": "-- Gaps review C6. Tags map across languages; stylometry partially transfers; author permission required.",
    "id": "M45-30",
    "title": "Cross-language supply",
    "sources": [
@@ -81,7 +81,7 @@
    "built": false
   },
   {
-   "why_summary": "Trend radar: emerging-fandom detection for event and bounty timing Trend radar: emerging-fandom detection for event and bounty timing",
+   "why_summary": "-- Gaps review C8.",
    "id": "M45-32",
    "title": "Trend radar",
    "sources": [
@@ -94,7 +94,7 @@
    "built": false
   },
   {
-   "why_summary": "Beta and specialist matchmaking: betas, Britpickers, sensitivity readers Beta and specialist matchmaking: betas, Britpickers, sensitivity readers",
+   "why_summary": "-- Gaps review C9. Credit-rewarded, opt-in, critique only where requested.",
    "id": "M45-33",
    "title": "Beta and specialist matchmaking",
    "sources": [
@@ -107,7 +107,7 @@
    "built": false
   },
   {
-   "why_summary": "Fic Finder bounties: pay for identifying half-remembered works Fic Finder bounties: pay for identifying half-remembered works",
+   "why_summary": "-- Gaps review C10. Full-text search + optional semantic search + reverse media search.",
    "id": "M45-34",
    "title": "Fic Finder bounties",
    "sources": [
@@ -120,7 +120,7 @@
    "built": false
   },
   {
-   "why_summary": "MediaReference descriptions as link-rot last fallback, curator-bountied MediaReference descriptions as link-rot last fallback, curator-bountied",
+   "why_summary": "-- Gaps review D1.",
    "id": "M45-36",
    "title": "MediaReference descriptions as link-rot last fallback, curator-bountied",
    "sources": [
@@ -133,7 +133,7 @@
    "built": false
   },
   {
-   "why_summary": "Stable identifiers for media: MusicBrainz/ISRC, tracklists, Wikidata, ISBN/TMDB Stable identifiers for media: MusicBrainz/ISRC, tracklists, Wikidata, ISBN/TMDB",
+   "why_summary": "-- Gaps review D2. Identity over location.",
    "id": "M45-37",
    "title": "Stable identifiers for media",
    "sources": [
@@ -146,7 +146,7 @@
    "built": false
   },
   {
-   "why_summary": "Author-note links through snapshot-and-monitor pipeline Author-note links through snapshot-and-monitor pipeline",
+   "why_summary": "-- Gaps review D3.",
    "id": "M45-38",
    "title": "Author-note links through snapshot-and-monitor pipeline",
    "sources": [
@@ -159,7 +159,7 @@
    "built": false
   },
   {
-   "why_summary": "Instance-death protection: mutual backup, dead-man's-switch export, redirect registry Instance-death protection: mutual backup, dead-man's-switch export, redirect registry",
+   "why_summary": "-- Gaps review D4. Persistent work IDs; ActivityPub Move for accounts.",
    "id": "M45-39",
    "title": "Instance-death protection",
    "sources": [
@@ -172,7 +172,7 @@
    "built": false
   },
   {
-   "why_summary": "Curator lenses: invited rec-bloggers publish opt-in taste-profile views Curator lenses: invited rec-bloggers publish opt-in taste-profile views",
+   "why_summary": "-- Gaps review E2. Browse archive through X's eyes; operator's own lens stays invisible.",
    "id": "M45-40",
    "title": "Curator lenses",
    "sources": [
@@ -185,7 +185,7 @@
    "built": false
   },
   {
-   "why_summary": "Rec-post attribution: share links carry sharer code, both sides earn credits Rec-post attribution: share links carry sharer code, both sides earn credits",
+   "why_summary": "-- Gaps review E3.",
    "id": "M45-41",
    "title": "Rec-post attribution",
    "sources": [
@@ -198,7 +198,7 @@
    "built": false
   },
   {
-   "why_summary": "Claim your works: invite authors whose works exist as metadata Claim your works: invite authors whose works exist as metadata",
+   "why_summary": "-- Gaps review E4. AO3-profile code verification; exclusion registry for opt-outs.",
    "id": "M45-42",
    "title": "Claim your works",
    "sources": [
@@ -211,7 +211,7 @@
    "built": false
   },
   {
-   "why_summary": "Sister instances: subscribe to public picks over ActivityPub Sister instances: subscribe to public picks over ActivityPub",
+   "why_summary": "-- Gaps review E6. Directory searchable by public topics (\u00a70.4).",
    "id": "M45-44",
    "title": "Sister instances",
    "sources": [
@@ -224,7 +224,7 @@
    "built": false
   },
   {
-   "why_summary": "Taste as versioned blendable object with governance mode Taste as versioned blendable object with governance mode",
+   "why_summary": "-- Gaps review F1. Operator/council/community-vote lens ownership; succession plan.",
    "id": "M45-45",
    "title": "Taste as versioned blendable object with governance mode",
    "sources": [
@@ -237,7 +237,7 @@
    "built": false
   },
   {
-   "why_summary": "Preview before apply: view-as persona preview of discover/search under proposed config Preview before apply: view-as persona preview of discover/search under proposed config",
+   "why_summary": "-- Gaps review F2. Config history and rollback.",
    "id": "M45-46",
    "title": "Preview before apply",
    "sources": [
@@ -250,7 +250,7 @@
    "built": false
   },
   {
-   "why_summary": "Scale-aware activation: mechanisms declare minimum activity, dormant below it Scale-aware activation: mechanisms declare minimum activity, dormant below it",
+   "why_summary": "-- Gaps review F3. Small instances get simpler behavior, features unlock as they grow.",
    "id": "M45-47",
    "title": "Scale-aware activation",
    "sources": [
@@ -263,20 +263,7 @@
    "built": false
   },
   {
-   "why_summary": "Hardware-aware presets with graceful degradation tiers Hardware-aware presets with graceful degradation tiers",
-   "id": "M45-48",
-   "title": "Hardware-aware presets with graceful degradation tiers",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M45",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Scheduled gravity: time-boxed theme configs for events and seasons Scheduled gravity: time-boxed theme configs for events and seasons",
+   "why_summary": "-- Gaps review F6.",
    "id": "M45-50",
    "title": "Scheduled gravity",
    "sources": [
@@ -289,7 +276,7 @@
    "built": false
   },
   {
-   "why_summary": "DSA notice-and-action flow and statements of reasons DSA notice-and-action flow and statements of reasons",
+   "why_summary": "-- Gaps review G2. Art. 17 covers demotion \u2014 collides with shadow sanction tier; DMCA intake kept for US claimants.",
    "id": "M45-52",
    "title": "DSA notice-and-action flow and statements of reasons",
    "sources": [
@@ -302,7 +289,7 @@
    "built": false
   },
   {
-   "why_summary": "RPF instance policy knob; Spain honor/image rights awareness RPF instance policy knob; Spain honor/image rights awareness",
+   "why_summary": "-- Gaps review G5. LO 1/1982.",
    "id": "M45-54",
    "title": "RPF instance policy knob; Spain honor/image rights awareness",
    "sources": [
@@ -315,7 +302,7 @@
    "built": false
   },
   {
-   "why_summary": "Built-in compliance tooling: notice forms, SOR templates, DSAR export Built-in compliance tooling: notice forms, SOR templates, DSAR export",
+   "why_summary": "-- Gaps review G6. Operators are legally responsible for their own instance.",
    "id": "M45-55",
    "title": "Built-in compliance tooling",
    "sources": [
@@ -328,7 +315,7 @@
    "built": false
   },
   {
-   "why_summary": "erasure reaches the supply routing record: \u00a758.3 keeps a routing row forever, and GDPR erasure must still remove the account from it erasure reaches the supply routing record: \u00a758.",
+   "why_summary": "docs/plans/m45-25-supply-keystones.md Found while building M45-25. \u00a758.3 says a routing row is never deleted because an abandoned routing is evidence the reader was asked; \u00a751's ca",
    "id": "M45-58",
    "title": "erasure reaches the supply routing record",
    "sources": [
@@ -341,7 +328,7 @@
    "built": false
   },
   {
-   "why_summary": "dh rec --sort accepts any registered metric name (wilson, kudos, kudos_per_1k_views, kudos_per_hour, completion, updater_reliability, hidden_gem, freshness_weighted_quality) dh rec",
+   "why_summary": "crates/domain/src/quality.rs (20 metric names + ranker, 22 unit tests); crates/db/src/metrics.rs (candidate population, gate counts, full-row join); /catalogue?sort= and /rec/run?s",
    "id": "M63-03",
    "title": "dh rec --sort accepts any registered metric name (wilson, kudos, kudos_per_1k_views, kudos_per_hour, completion, updater_reliability, hidden_gem, freshness_weighted_quality)",
    "sources": [
@@ -354,7 +341,7 @@
    "built": false
   },
   {
-   "why_summary": "per-source engagement is stored as the source reports it (likes, hits, replies, bookmarks) instead of one normalised `likes`, so a rate metric can be computed per archive per-sourc",
+   "why_summary": "measured 2026-11-01: library_items.views is NULL on all 141,317 rows; likes exist on 1,247 of them; the crawler sums XenForo threadmark likes into one integer, which is total engag",
    "id": "M63-04",
    "title": "per-source engagement is stored as the source reports it (likes, hits, replies, bookmarks) instead of one normalised `likes`, so a rate metric can be computed per archive",
    "sources": [
@@ -367,20 +354,7 @@
    "built": false
   },
   {
-   "why_summary": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: output shape is a contract dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url: output shape is a",
-   "id": "M63-05",
-   "title": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "Saved queries: dh rec --save <name>, shareable URL, schedulable, with --digest-diff printing only rows new since that query last ran Saved queries: dh rec --save <name>, shareable ",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P6. Builds on the saved-query shelf work already in discussion; --digest-diff is the actual recurring need behind a",
    "id": "M63-06",
    "title": "Saved queries",
    "sources": [
@@ -393,7 +367,7 @@
    "built": false
   },
   {
-   "why_summary": "dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=, updated>=-7d, words>, completion:), shared with web search dh q '<expr>' with a real grammar (tag: AND OR NOT, kudos>=,",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P7. One parser for terminal, saved queries, watch filters, feeds and the web search box, so an expression is the sa",
    "id": "M63-07",
    "title": "dh q '<expr>' with a real grammar (tag",
    "sources": [
@@ -406,7 +380,7 @@
    "built": false
   },
   {
-   "why_summary": "dh q --explain prints the query plan and index used; parse errors point at the token and exit 2 dh q --explain prints the query plan and index used; parse errors point at the token",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P8. Slow-query diagnosis without psql, and a usage error distinguishable from a runtime error by exit code.",
    "id": "M63-08",
    "title": "dh q --explain prints the query plan and index used; parse errors point at the token and exit 2",
    "sources": [
@@ -419,7 +393,7 @@
    "built": false
   },
   {
-   "why_summary": "dh q --from-file with .darkhold/queries/*.q: the user's query library is a versioned file, not browser history dh q --from-file with .darkhold/queries/*.q: the user's query library",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P9. Same shape as the instance's own config: reviewable, diffable, shareable.",
    "id": "M63-09",
    "title": "dh q --from-file with .darkhold/queries/*.q",
    "sources": [
@@ -432,7 +406,7 @@
    "built": false
   },
   {
-   "why_summary": "dh lib sync --since: incremental local sqlite mirror of the library and catalogue dh lib sync --since: incremental local sqlite mirror of the library and catalogue",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P10. Enables sub-millisecond dh q, true --offline, and dh bench; the same download machinery a mirror instance need",
    "id": "M63-10",
    "title": "dh lib sync --since",
    "sources": [
@@ -445,7 +419,7 @@
    "built": false
   },
   {
-   "why_summary": "dh lib tag --from-csv with a per-row error report and a rollback file; dh lib diff and push --dry-run before any bulk write dh lib tag --from-csv with a per-row error report and a ",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P11. Batch editorial work on 500 rows must be resumable and reversible; a partial failure that cannot be resumed is",
    "id": "M63-11",
    "title": "dh lib tag --from-csv with a per-row error report and a rollback file; dh lib diff and push --dry-run before any bulk write",
    "sources": [
@@ -458,7 +432,7 @@
    "built": false
   },
   {
-   "why_summary": "dh cron install --every 6h --jitter 10m: writes a systemd user timer for a saved query or recheck job dh cron install --every 6h --jitter 10m: writes a systemd user timer for a sav",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P13. The instance already runs timers for fic-catalogue-ingest; this hands the same mechanism to a user without a u",
    "id": "M63-13",
    "title": "dh cron install --every 6h --jitter 10m",
    "sources": [
@@ -471,7 +445,7 @@
    "built": false
   },
   {
-   "why_summary": "Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P14. The cheapest client for a power user who lives in a feed reader; conditional GET makes polling a 304 instead o",
    "id": "M63-14",
    "title": "Per-saved-query RSS/Atom and JSON Feed endpoints with ETag/If-None-Match",
    "sources": [
@@ -484,7 +458,7 @@
    "built": false
   },
   {
-   "why_summary": "dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version drift, one suggested fix per problem dh doctor: diagnoses token scope, clock skew, TLS, DNS and API version d",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P15. The first command anyone runs when something feels wrong; turns a support thread into a paste.",
    "id": "M63-15",
    "title": "dh doctor",
    "sources": [
@@ -497,7 +471,7 @@
    "built": false
   },
   {
-   "why_summary": "Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 auth, 5 rate-limited) Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 ",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P16. A contract test per code; without it every wrapper script guesses.",
    "id": "M63-16",
    "title": "Exit codes as a documented, tested API (0 ok, 1 error, 2 usage, 3 not found, 4 auth, 5 rate-limited)",
    "sources": [
@@ -510,7 +484,7 @@
    "built": false
   },
   {
-   "why_summary": "Shell completions and man pages generated from the clap definition (bash/zsh/fish) Shell completions and man pages generated from the clap definition (bash/zsh/fish)",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P17. A subcommand nobody can discover may as well not exist; generation keeps completions honest by construction, n",
    "id": "M63-17",
    "title": "Shell completions and man pages generated from the clap definition (bash/zsh/fish)",
    "sources": [
@@ -523,7 +497,7 @@
    "built": false
   },
   {
-   "why_summary": "Config profiles (--profile, DARKHOLD_PROFILE) with per-profile instance URL and token; dh config get/set with dotted keys Config profiles (--profile, DARKHOLD_PROFILE) with per-pro",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P18. One user, two instances, without exporting variables per shell; every knob settable from the tool that reads i",
    "id": "M63-18",
    "title": "Config profiles (--profile, DARKHOLD_PROFILE) with per-profile instance URL and token; dh config get/set with dotted keys",
    "sources": [
@@ -536,7 +510,7 @@
    "built": false
   },
   {
-   "why_summary": "Scoped tokens per command family, with the missing scope named on refusal Scoped tokens per command family, with the missing scope named on refusal",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P19. dh never sends a request it knows will be refused, and the refusal says 'token lacks library:write' rather tha",
    "id": "M63-19",
    "title": "Scoped tokens per command family, with the missing scope named on refusal",
    "sources": [
@@ -549,7 +523,7 @@
    "built": false
   },
   {
-   "why_summary": "Rate-limit awareness: back off with jitter on 429, print the retry window, never die silently mid-batch Rate-limit awareness: back off with jitter on 429, print the retry window, n",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P20. A batch that fails at row 400 because of a 429 is a tooling bug, not a user error.",
    "id": "M63-20",
    "title": "Rate-limit awareness",
    "sources": [
@@ -562,7 +536,7 @@
    "built": false
   },
   {
-   "why_summary": "Dry-run is the default for every bulk verb; --yes applies; dh redact strips pseudonyms and emails from JSON output Dry-run is the default for every bulk verb; --yes applies; dh red",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P21. The safe path is the short path, and the privacy rule is applied at the tool boundary rather than remembered b",
    "id": "M63-21",
    "title": "Dry-run is the default for every bulk verb; --yes applies; dh redact strips pseudonyms and emails from JSON output",
    "sources": [
@@ -575,7 +549,20 @@
    "built": false
   },
   {
-   "why_summary": "dh admin backup --to - streams a consistent dump to stdout; dh admin health emits machine-readable checks with per-check exit codes dh admin backup --to - streams a consistent dump",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P22. The operator's microscope for 'why is this ranked first' \u2014 the debugging counterpart of the shipped slot expla",
+   "id": "M63-22",
+   "title": "dh admin explain-rec <work>",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P23. `ssh host dh admin backup | zstd > backup.zst`, and monitoring is a cron job rather than a dashboard.",
    "id": "M63-23",
    "title": "dh admin backup --to - streams a consistent dump to stdout; dh admin health emits machine-readable checks with per-check exit codes",
    "sources": [
@@ -588,7 +575,7 @@
    "built": false
   },
   {
-   "why_summary": "dh bench: times the 20 canonical queries against a local or remote instance and prints a table dh bench: times the 20 canonical queries against a local or remote instance and print",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P24. A performance regression visible from a user's machine, not only in CI, and a shared language for 'the instanc",
    "id": "M63-24",
    "title": "dh bench",
    "sources": [
@@ -601,7 +588,7 @@
    "built": false
   },
   {
-   "why_summary": "dh audit --since 7d: the account owner sees every write their tokens made dh audit --since 7d: the account owner sees every write their tokens made",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P25. Automation is accountable to the person it acts for; the operation log already records the writes.",
    "id": "M63-25",
    "title": "dh audit --since 7d",
    "sources": [
@@ -614,7 +601,7 @@
    "built": false
   },
   {
-   "why_summary": "dh stats --by week --year: streaks and a shareable wrapped-style personal report for the engineering-minded reader dh stats --by week --year: streaks and a shareable wrapped-style ",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P26. Recognition for the engine: contribution score from the operation log (imports, tags applied, reports filed) s",
    "id": "M63-26",
    "title": "dh stats --by week --year",
    "sources": [
@@ -627,20 +614,7 @@
    "built": false
   },
   {
-   "why_summary": "crates/cli: the `dh` binary, a thin client of /api/v1 that may not depend on crates/app or crates/db crates/cli: the `dh` binary, a thin client of /api/v1 that may not depend on cr",
-   "id": "M63-28",
-   "title": "crates/cli",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M63",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "dh tui: a full-screen mode of the same binary behind a feature flag, not a separate project dh tui: a full-screen mode of the same binary behind a feature flag, not a separate proj",
+   "why_summary": "docs/plans/cli-placement.md Same verbs, same window grammar, same saved queries, same snapshot cache; only the output layer differs. A separate TUI project would duplicate the pars",
    "id": "M63-29",
    "title": "dh tui",
    "sources": [
@@ -653,7 +627,7 @@
    "built": false
   },
   {
-   "why_summary": "fandom tags cover the whole catalogue and can be ranked: backfill tags for the sb/sv/qq/ao3/ffnet estate and import the endorsement counts the tagged rows lack fandom tags cover th",
+   "why_summary": "measured 2026-11-01: 7,626 of 141,317 catalogue rows carry a fandom tag; all 7,626 are source_key='pawchive' and 0 have likes > 0 Found while shipping M63-01. The filter works and ",
    "id": "M63-32",
    "title": "fandom tags cover the whole catalogue and can be ranked",
    "sources": [
@@ -666,7 +640,7 @@
    "built": false
   },
   {
-   "why_summary": "reconcile the live database with the workspace migrations: 11 tables the migrations create are absent, 12 legacy-named tables are present reconcile the live database with the works",
+   "why_summary": "live information_schema vs migrations/postgres: missing chapters, bodies, chapter_revisions, import_chapters, ship_participants, taxonomy_aliases, taxonomy_closure, taxonomy_edges,",
    "id": "M63-33",
    "title": "reconcile the live database with the workspace migrations",
    "sources": [
@@ -679,7 +653,7 @@
    "built": false
   },
   {
-   "why_summary": "catalogue q= searches the summary as well as title and author, and can search title+summary in one query from the CLI catalogue q= searches the summary as well as title and author,",
+   "why_summary": "crates/db/src/catalogue.rs search(): `lower(title) LIKE ? OR lower(author_text) LIKE ?` \u2014 summary is never matched; measured 2026-11-01: 'system'-style keywords match 261 rows via ",
    "id": "M63-34",
    "title": "catalogue q= searches the summary as well as title and author, and can search title+summary in one query from the CLI",
    "sources": [
@@ -692,7 +666,7 @@
    "built": false
   },
   {
-   "why_summary": "six milestone ids are duplicated in this file (M63-03/04/05 appear twice, once per area), so a row can be closed twice for two different pieces of work six milestone ids are duplic",
+   "why_summary": "measured 2026-11-01: docs/requirements.csv holds 790 rows and 6 colliding ids, each pair differing only by area Found while closing M63-04: the catalogue sweep appended rows withou",
    "id": "M63-35",
    "title": "six milestone ids are duplicated in this file (M63-03/04/05 appear twice, once per area), so a row can be closed twice for two different pieces of work",
    "sources": [
@@ -705,7 +679,7 @@
    "built": false
   },
   {
-   "why_summary": "every recommendation surface has a canonical id and a field of two to four named algorithms chosen by config, and an algorithm whose data is empty refuses by name instead of servin",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P1 of the ranking design. Surfaces: story.similar, story.also_enjoyed, story.more_by_author, story.lists_containing, search.r",
    "id": "M64-01",
    "title": "every recommendation surface has a canonical id and a field of two to four named algorithms chosen by config, and an algorithm whose data is empty refuses by name instead of serving a page",
    "sources": [
@@ -718,20 +692,7 @@
    "built": false
   },
   {
-   "why_summary": "impressions and the events that follow them are logged append-only per (surface, algorithm, position, item), with a sticky bucket assignment per pseud or session impressions and th",
-   "id": "M64-02",
-   "title": "impressions and the events that follow them are logged append-only per (surface, algorithm, position, item), with a sticky bucket assignment per pseud or session",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M64",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "per-arm metrics and guardrails are computed as daily snapshots, so a promotion reads a snapshot and never the raw log at decision time per-arm metrics and guardrails are computed a",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P3. Primary: CTR@k and conversion per 1,000 impressions. Guardrails: negative-feedback rate, served-set diversity (distinct f",
    "id": "M64-03",
    "title": "per-arm metrics and guardrails are computed as daily snapshots, so a promotion reads a snapshot and never the raw log at decision time",
    "sources": [
@@ -744,7 +705,7 @@
    "built": false
   },
   {
-   "why_summary": "a challenger is promoted automatically only on a sequential-test win with every guardrail in bounds, at minimum sample and after seven days, and demoted automatically when a guardr",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P4. The four conditions are all required: confidence sequence valid under continuous monitoring (not a peeked fixed-horizon p",
    "id": "M64-04",
    "title": "a challenger is promoted automatically only on a sequential-test win with every guardrail in bounds, at minimum sample and after seven days, and demoted automatically when a guardrail breaches on two consecutive snapshots",
    "sources": [
@@ -757,7 +718,7 @@
    "built": false
   },
   {
-   "why_summary": "story.more_by_author and author.works are served from the author's own rows, ordered by that surface's field story.more_by_author and author.works are served from the author's own ",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P5, and the cheapest real win: the data is author_text on every row. Ordering field for author.works is quality_pct/recency/v",
    "id": "M64-05",
    "title": "story.more_by_author and author.works are served from the author's own rows, ordered by that surface's field",
    "sources": [
@@ -770,7 +731,7 @@
    "built": false
   },
   {
-   "why_summary": "tag_jaccard and tag_cooccurrence over the normalised tag taxonomy with synonym mapping, refused by name while no engaged row carries a tag tag_jaccard and tag_cooccurrence over the",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P6, blocked on M63-32. Measured 2026-11-01: work_tags joins 0 of the 1,247 rows that carry likes; all 7,626 tagged rows are p",
    "id": "M64-06",
    "title": "tag_jaccard and tag_cooccurrence over the normalised tag taxonomy with synonym mapping, refused by name while no engaged row carries a tag",
    "sources": [
@@ -783,7 +744,7 @@
    "built": false
   },
   {
-   "why_summary": "crosspost_union: one story's engagement is summed across every archive it appears on, reusing M63-04's resolution rule for which copy a name means crosspost_union: one story's enga",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P7. The catalogue already computes total_likes and source_count by normalised title+author; this row is the algorithm that ex",
    "id": "M64-07",
    "title": "crosspost_union",
    "sources": [
@@ -796,7 +757,7 @@
    "built": false
   },
   {
-   "why_summary": "fandom_graph: an operator-managed adjacency map with edge weights (Worm<->Ward, Naruto<->Boruto, MCU<->616, SB<->SV culture) used by tag.cross_fandom and author.similar fandom_grap",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P8. Static by nature and that is the point: it works before any reader exists. Managed as data (an operator file or admin sur",
    "id": "M64-08",
    "title": "fandom_graph",
    "sources": [
@@ -809,7 +770,7 @@
    "built": false
   },
   {
-   "why_summary": "taste gravity applies at every recommendation surface as a bounded influence layer after the blend, with a per-surface strength, reordering and never filtering taste gravity applie",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P9. served = (1-g)*algorithm + g*taste_match, taste_match from the operator profile (\u00a716.2) over fandom/tag/author/source. De",
    "id": "M64-09",
    "title": "taste gravity applies at every recommendation surface as a bounded influence layer after the blend, with a per-surface strength, reordering and never filtering",
    "sources": [
@@ -822,7 +783,7 @@
    "built": false
   },
   {
-   "why_summary": "length, status, rating and cadence are first-class facets on every browse and search surface, and a facet whose column is null on the filtered rows says so instead of returning an ",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P10. Depends on data more than code: word_count is null on every engaged board row and views is null on all 141,317, so a len",
    "id": "M64-10",
    "title": "length, status, rating and cadence are first-class facets on every browse and search surface, and a facet whose column is null on the filtered rows says so instead of returning an empty page",
    "sources": [
@@ -835,7 +796,7 @@
    "built": false
   },
   {
-   "why_summary": "co_shelving: reading lists are first-class (create, curate, publish, follow) and list co-occurrence feeds story.similar and library.because_you_shelved co_shelving: reading lists a",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P11, the endgame signal and the one with the longest lead time: it needs lists to exist and to be used before it has any rows",
    "id": "M64-11",
    "title": "co_shelving",
    "sources": [
@@ -848,7 +809,20 @@
    "built": false
   },
   {
-   "why_summary": "engagement_overlap at reader-cluster level with k-anonymity (a minimum number of readers per cluster) and aggregation thresholds, exposing no per-reader signal engagement_overlap a",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P12. Needs M64-02's logging. Noisy by nature; the threshold is a minimum transitions-per-item before an edge is usable.",
+   "id": "M64-12",
+   "title": "co_read",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M64",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P13. Feeds author.similar, library.fill_the_gap and story.similar. The privacy floor is the gate: below the threshold the alg",
    "id": "M64-13",
    "title": "engagement_overlap at reader-cluster level with k-anonymity (a minimum number of readers per cluster) and aggregation thresholds, exposing no per-reader signal",
    "sources": [
@@ -861,7 +835,7 @@
    "built": false
   },
   {
-   "why_summary": "the operator console lists every live experiment per surface with its numbers, allows hold, promote and preview-as-persona, and shows why each promotion happened the operator conso",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P15. Promotion is automatic (M64-04); this is the surface where the operator can disagree without editing a table. preview-as",
    "id": "M64-15",
    "title": "the operator console lists every live experiment per surface with its numbers, allows hold, promote and preview-as-persona, and shows why each promotion happened",
    "sources": [
@@ -874,7 +848,7 @@
    "built": false
   },
   {
-   "why_summary": "an offline pre-registration harness scores a challenger against recorded history on taste::eval's metrics before it takes live traffic an offline pre-registration harness scores a ",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P16. crates/taste::eval already implements ndcg_at, recall_at and overlap_at; this row is the harness that runs a challenger ",
    "id": "M64-16",
    "title": "an offline pre-registration harness scores a challenger against recorded history on taste",
    "sources": [
@@ -887,20 +861,7 @@
    "built": false
   },
   {
-   "why_summary": "per-user module overrides: module_user_state table, PATCH /api/v1/modules/{id}, and the per-request narrowing in the gate per-user module overrides: module_user_state table, PATCH ",
-   "id": "M65-04",
-   "title": "per-user module overrides",
-   "sources": [
-    "docs/requirements.csv"
-   ],
-   "milestone": "M65",
-   "relevance": 4,
-   "because": "a requirements row exists (+4)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "the frontend hides its links from /api/v1/modules instead of assuming every surface exists the frontend hides its links from /api/v1/modules instead of assuming every surface exist",
+   "why_summary": "docs/spec.md \u00a76.3 Phase 1 declares `nav` on rows (all empty so far, because no module has declared its entries yet) and serves it. The SvelteKit shell must read the payload and ren",
    "id": "M65-06",
    "title": "the frontend hides its links from /api/v1/modules instead of assuming every surface exists",
    "sources": [
@@ -913,7 +874,7 @@
    "built": false
   },
   {
-   "why_summary": "the idea catalogue reads every brainstorm, including the ones written after it the idea catalogue reads every brainstorm, including the ones written after it",
+   "why_summary": "scripts/ideas_catalogue.py The generator reads a named list: four vault notes, docs/ideas/*, docs/design/*, docs/spec-amendments/*, the audit and requirements.csv. `docs/spec-summa",
    "id": "M65-07",
    "title": "the idea catalogue reads every brainstorm, including the ones written after it",
    "sources": [
@@ -926,7 +887,7 @@
    "built": false
   },
   {
-   "why_summary": "an idea row becomes a module when it is built, without a second backlog an idea row becomes a module when it is built, without a second backlog",
+   "why_summary": "docs/spec.md \u00a759.7 Today an idea is `idea.<slug>` and a built surface is `<module id>`; nothing links the two, so building an idea leaves a stale planned row beside the new module.",
    "id": "M65-08",
    "title": "an idea row becomes a module when it is built, without a second backlog",
    "sources": [
@@ -939,9 +900,48 @@
    "built": false
   },
   {
-   "why_summary": "dh admin explain-rec <work>: full feature vector and every strategy's score for one work dh admin explain-rec <work>: full feature vector and every strategy's score for one work",
-   "id": "M63-22",
-   "title": "dh admin explain-rec <work>",
+   "why_summary": "docs/plans/m65-04-user-overrides.md Deferred from M65-04 with its reason: the gate currently does one indexed primary-key read per request to a per_user surface with a session. A p",
+   "id": "M65-09",
+   "title": "the module gate skips the per-user lookup when nobody holds an override",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M65",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/snapshot-column-policy.json (rekey_account) 0134 declares no foreign key on account_id because \u00a751 erases by rekeying the account rather than deleting it, so ON DELETE CASCADE",
+   "id": "M65-10",
+   "title": "module_user_state rows are rekeyed with their account on erasure",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M65",
+   "relevance": 4,
+   "because": "a requirements row exists (+4)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "-- Gaps review F4. SQLite weekly batches/no embeddings \u2192 Postgres+Redis incremental.",
+   "id": "M45-48",
+   "title": "Hardware-aware presets with graceful degradation tiers",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M45",
+   "relevance": 3,
+   "because": "a requirements row exists (+4); needs a model or heavy compute (-1)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "crates/domain/src/quality.rs score_of(): the four weights are constants; an operator who trusts length more than consensus has no way to say so Belongs with M63-30's taste layer, n",
+   "id": "M63-05",
+   "title": "dh rec --jsonl --fields, --table/--wide/--cols, --link md|epub|url",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -952,7 +952,7 @@
    "built": false
   },
   {
-   "why_summary": "embedding similarity for summaries first and full text last, feature-gated on a configured AI provider and degrading to disabled rather than erroring embedding similarity for summa",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P14. The spec already names embedding and matrix-factorisation strategies as provider-gated (\u00a716). Summary embeddings are the",
    "id": "M64-14",
    "title": "embedding similarity for summaries first and full text last, feature-gated on a configured AI provider and degrading to disabled rather than erroring",
    "sources": [
@@ -1122,19 +1122,6 @@
   },
   {
    "why_summary": "",
-   "id": "idea.new-in-your-fandoms",
-   "title": "New in your fandoms",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 3,
-   "because": "in the reader audit (+1); named in the spec (+2)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
    "id": "idea.periodic-deidentified-dataset",
    "title": "Periodic Deidentified Dataset",
    "sources": [
@@ -1277,7 +1264,7 @@
    "built": false
   },
   {
-   "why_summary": "Discord bot with rec commands, per-fandom feeds, account linking Discord bot with rec commands, per-fandom feeds, account linking",
+   "why_summary": "-- Gaps review E5. Extends \u00a737 companion bot.",
    "id": "M45-43",
    "title": "Discord bot with rec commands, per-fandom feeds, account linking",
    "sources": [
@@ -1290,7 +1277,7 @@
    "built": false
   },
   {
-   "why_summary": "dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook: a debounced polling daemon dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook: a debounced pol",
+   "why_summary": "docs/ideas/2026-11-01-idea-sweep-power-users.md Power-user sweep P12. The difference between a saved search and a workflow. Pluggable sinks so the notification path is not tied to ",
    "id": "M63-12",
    "title": "dh watch <saved-query> --exec '<cmd>' --notify ntfy|desktop|webhook",
    "sources": [
@@ -1303,7 +1290,20 @@
    "built": false
   },
   {
-   "why_summary": "dh lib --calibre <path>: read Calibre's metadata.db as a data source to seed a reading history, with no crate or RPC link to lorebook dh lib --calibre <path>: read Calibre's metada",
+   "why_summary": "docs/plans/cli-placement.md Placement decision recorded in docs/plans/cli-placement.md: the CLI owns no durable data beyond a cache, so it belongs beside the contract it consumes r",
+   "id": "M63-28",
+   "title": "crates/cli",
+   "sources": [
+    "docs/requirements.csv"
+   ],
+   "milestone": "M63",
+   "relevance": 2,
+   "because": "a requirements row exists (+4); needs a third party or an external client (-2)",
+   "default_on": false,
+   "built": false
+  },
+  {
+   "why_summary": "docs/plans/cli-placement.md The honest interop direction between the two products: same file format, no dependency (the Ascend file-handshake precedent applied to a database). Read",
    "id": "M63-30",
    "title": "dh lib --calibre <path>",
    "sources": [
@@ -1316,9 +1316,9 @@
    "built": false
   },
   {
-   "why_summary": "co_read: session transitions feed story.also_enjoyed, with bot and single-click traffic excluded co_read: session transitions feed story.also_enjoyed, with bot and single-click tra",
-   "id": "M64-12",
-   "title": "co_read",
+   "why_summary": "docs/design/2026-11-01-ranking-signals-and-surfaces.md P2. Events: open, read_threshold (50% of the first chapter), bookmark, kudos, negative (hide / not interested). Assignment is",
+   "id": "M64-02",
+   "title": "impressions and the events that follow them are logged append-only per (surface, algorithm, position, item), with a sticky bucket assignment per pseud or session",
    "sources": [
     "docs/requirements.csv"
    ],
@@ -1767,19 +1767,6 @@
    "milestone": "unassigned",
    "relevance": 1,
    "because": "in a vault note (+1)",
-   "default_on": false,
-   "built": false
-  },
-  {
-   "why_summary": "",
-   "id": "idea.most-bookmarked-this-week",
-   "title": "Most bookmarked this week",
-   "sources": [
-    "docs/audit-100-reader-ideas-2026-10-04.md"
-   ],
-   "milestone": "unassigned",
-   "relevance": 1,
-   "because": "in the reader audit (+1)",
    "default_on": false,
    "built": false
   },
